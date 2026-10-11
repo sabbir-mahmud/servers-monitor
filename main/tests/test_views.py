@@ -156,3 +156,21 @@ def test_banner_warns_when_relay_process_is_not_running(client, viewer, settings
     assert b"relay process isn" in client.get(reverse("fleet:dashboard")).content
     relay.mark_alive()
     assert b"relay process isn" not in client.get(reverse("fleet:dashboard")).content
+
+
+def test_sidebar_categories_and_problem_badges(client, admin_user, viewer):
+    from apps.fleet.models import Health
+    from apps.monitors.models import Monitor, MonitorStatus
+
+    server, _ = make_server("web-09")
+    Server.objects.filter(pk=server.pk).update(last_health=Health.OFFLINE)
+    Monitor.objects.create(name="shop", url="https://shop.test/", status=MonitorStatus.DOWN)
+    client.force_login(admin_user)
+    page = client.get(reverse("fleet:dashboard")).content.decode()
+    for category in ("Infrastructure", "Incidents", "Operations", "Administration"):
+        assert f"<span>{category}</span>" in page
+    assert page.count('class="nav-badge is-critical"') == 2  # 1 server offline, 1 app down
+    # Viewers don't see categories they have no pages in.
+    client.force_login(viewer)
+    page = client.get(reverse("fleet:dashboard")).content.decode()
+    assert "<span>Administration</span>" not in page and "<span>Infrastructure</span>" in page

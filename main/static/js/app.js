@@ -145,3 +145,21 @@ document.addEventListener("DOMContentLoaded", () => {
   nav.before(sentinel);
   new IntersectionObserver(([en]) => nav.classList.toggle("is-stuck", !en.isIntersecting)).observe(sentinel);
 });
+
+// Sidebar categories: remember which ones were collapsed, but never hide the current page.
+(function () {
+  const KEY = "sm-nav-collapsed";
+  const read = () => { try { return JSON.parse(localStorage.getItem(KEY) || "[]"); } catch (e) { return []; } };
+  const write = (list) => { try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) { /* private mode */ } };
+  document.addEventListener("DOMContentLoaded", () => {
+    const collapsed = new Set(read());
+    document.querySelectorAll("details[data-nav-group]").forEach((group) => {
+      if (collapsed.has(group.dataset.navGroup) && !group.hasAttribute("data-active")) group.open = false;
+      group.addEventListener("toggle", () => {
+        const now = new Set(read());
+        group.open ? now.delete(group.dataset.navGroup) : now.add(group.dataset.navGroup);
+        write([...now]);
+      });
+    });
+  });
+})();
