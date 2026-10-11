@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Install agent on {{ server }}{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'fleet:server_detail' server.pk %}">{% icon "arrow-left" 15 %} {{ server }}</a>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Install the agent on {{ server }}</h1>
+    <p class="page-sub">The agent only dials out. Nothing needs to be opened on the server's firewall.</p>
+  </div>
+</div>
+<div style="max-width: 52rem">
+{% if token %}
+<div class="alert alert-warning" role="alert">{% icon "alert" %}<div><strong>Copy this token now.</strong> It is shown once and stored only as a hash. If you lose it, rotate the token.</div></div>
+<div class="card mb-3"><div class="card-header">{% icon "key" 17 %} Agent token</div><div class="card-body">
+  <div class="token-box"><code id="token" class="fs-6 text-break">{{ token }}</code>
+    <button type="button" class="btn btn-sm btn-outline-secondary" data-copy="#token">{% icon "copy" %} <span data-copy-label>Copy</span></button></div>
+</div></div>
+<div class="card mb-3"><div class="card-body p-4"><div class="steps">
+  <div class="step"><span class="step-num"></span><div>
+    <h2>One-line install</h2>
+    <p>For Debian, Ubuntu or RHEL with systemd. Run it as root. It creates a <code>server-monitor</code> system user, installs the agent with its own virtualenv in <code>/opt/server-monitor-agent</code>, writes <code>/etc/server-monitor-agent/agent.toml</code> (mode 640) and starts the systemd unit.</p>
+    <div class="copy-block"><pre class="output" id="install">curl -fsSL {{ public_url }}/agent/files/install.sh | sudo SM_URL={{ public_url }} SM_TOKEN={{ token }} bash</pre>
+      <button type="button" class="btn btn-sm copy-btn" data-copy="#install">{% icon "copy" %} <span data-copy-label>Copy</span></button></div>
+  </div></div>
+  <div class="step"><span class="step-num"></span><div>
+    <h2>Declare what this server may do</h2>
+    <p class="mb-0">Edit <code>/etc/server-monitor-agent/agent.toml</code> on the server to list its services, log files and deploy scripts, then run <code>sudo systemctl restart server-monitor-agent</code>. The dashboard only offers, and the agent only runs, what that file allows. See the <a href="{{ public_url }}/agent/files/agent.example.toml">annotated example</a>.</p>
+  </div></div>
+</div></div></div>
+{% else %}
+<div class="alert alert-info" role="status">{% icon "key" %}<div>The token for this server has already been shown. Rotate it to get a new one. The old one stops working immediately.</div></div>
+{% if perms.fleet.change_server %}
+<form method="post" action="{% url 'fleet:server_rotate_token' server.pk %}" class="mb-3">{% csrf_token %}<button class="btn btn-warning">{% icon "key" %} Rotate token</button></form>
+{% endif %}
+{% endif %}
+<a class="btn btn-primary" href="{% url 'fleet:server_detail' server.pk %}">Go to {{ server }} {% icon "chevron" %}</a>
+</div>
+{% endblock %}

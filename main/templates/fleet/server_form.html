@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}{% if object %}Edit {{ object }}{% else %}Add server{% endif %}{% endblock %}
+{% block content %}
+<a class="back-link" href="{% if object %}{% url 'fleet:server_detail' object.pk %}{% else %}{% url 'fleet:dashboard' %}{% endif %}">{% icon "arrow-left" 15 %} {% if object %}{{ object }}{% else %}Servers{% endif %}</a>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">{% if object %}Edit {{ object }}{% else %}Add server{% endif %}</h1>
+    {% if not object %}<p class="page-sub">After you create the server you'll get a one-line install command and its agent token.</p>{% endif %}
+  </div>
+</div>
+<div class="card" style="max-width: 44rem"><div class="card-body p-4">
+  <form method="post" novalidate class="form-section">{% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger mb-0" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+    {% for field in form %}
+      <div>
+        {% if field.widget_type == "checkbox" %}
+          <div class="form-check">{{ field }} <label class="form-check-label fw-medium" for="{{ field.id_for_label }}">{{ field.label }}</label></div>
+        {% else %}
+          <label class="form-label" {% if field.widget_type != "checkboxselectmultiple" %}for="{{ field.id_for_label }}"{% endif %}>{{ field.label }}</label>
+          {% if field.widget_type == "checkboxselectmultiple" %}
+            <div class="d-flex flex-wrap gap-2">{% for cb in field %}<label class="check-tile py-2">{{ cb.tag }} <span class="check-tile-name">{{ cb.choice_label }}</span></label>{% empty %}<span class="muted small">No groups yet. Create some below.</span>{% endfor %}</div>
+          {% else %}{{ field }}{% endif %}
+        {% endif %}
+        {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+        {% for e in field.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+      </div>
+    {% endfor %}
+    <div class="d-flex gap-2 pt-2 border-top" style="border-color: var(--line) !important; padding-top: 1.25rem !important">
+      <button class="btn btn-primary">{% if object %}Save changes{% else %}Create and get install command{% endif %}</button>
+      <a class="btn btn-link" href="{% if object %}{% url 'fleet:server_detail' object.pk %}{% else %}{% url 'fleet:dashboard' %}{% endif %}">Cancel</a>
+    </div>
+  </form>
+</div></div>
+{% endblock %}

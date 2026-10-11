@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Run on servers{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Run on servers</h1>
+    <p class="page-sub">Fan one action out to many servers. Each agent runs it only if its own config allows it. Servers that can't are skipped and listed.</p>
+  </div>
+</div>
+<form method="post">{% csrf_token %}
+  {% if form.non_field_errors %}<div class="alert alert-danger" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+  <div class="row g-3 align-items-start">
+    <div class="col-12 col-lg-5 col-xxl-4"><div class="card"><div class="card-header">{% icon "play" 17 %} Action</div><div class="card-body form-section">
+      <div><label class="form-label" for="id_action">Action</label>{{ form.action }}{% for e in form.action.errors %}<div class="field-error">{{ e }}</div>{% endfor %}</div>
+      <div data-arg="name"><label class="form-label" for="id_name">{{ form.name.label }}</label>{{ form.name }}</div>
+      <div data-arg="lines"><label class="form-label" for="id_lines">Lines</label>{{ form.lines }}</div>
+      <div data-arg="command"><label class="form-label" for="id_command">Command</label>{{ form.command }}<div class="form-text">{{ form.command.help_text }}</div></div>
+      <div><label class="form-label" for="id_note">Note <span class="muted fw-normal">· optional, shown in the audit log</span></label>{{ form.note }}</div>
+      <button class="btn btn-primary w-100">{% icon "play" %} Queue job</button>
+    </div></div></div>
+    <div class="col-12 col-lg-7 col-xxl-8"><div class="card"><div class="card-header">{% icon "server" 17 %} Servers
+      <div class="card-actions">
+        <div class="segmented"><button type="button" data-select-all="1">Select all</button><button type="button" data-select-all="0">None</button></div>
+      </div>
+    </div><div class="card-body">
+      {% for e in form.servers.errors %}<div class="field-error mb-2">{{ e }}</div>{% endfor %}
+      <div class="server-check check-grid">
+      {% for server in form.fields.servers.queryset %}
+        <label class="check-tile">
+          <input class="form-check-input" type="checkbox" name="servers" value="{{ server.pk }}"
+            data-groups="{{ server.environment }}{% for g in server.groups.all %} {{ g.name }}{% endfor %}"
+            {% if server.pk|stringformat:"s" in form.servers.value %}checked{% endif %}>
+          <span><span class="check-tile-name d-block">{{ server.name }}</span>
+            <span class="check-tile-meta">{{ server.environment }}{% for g in server.groups.all %} · {{ g.name }}{% endfor %}</span></span>
+        </label>
+      {% empty %}<p class="text-body-secondary mb-0">No enabled servers.</p>{% endfor %}
+      </div>
+    </div></div></div>
+  </div>
+</form>
+{% endblock %}

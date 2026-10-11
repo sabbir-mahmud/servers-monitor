@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Jobs{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Jobs</h1>
+    <p class="page-sub">Every action that was fanned out to your servers, newest first.</p>
+  </div>
+  {% if perms.operations.add_job %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'operations:job_create' %}">{% icon "play" %} Run on servers</a></div>{% endif %}
+</div>
+<div class="card"><div class="table-responsive"><table class="table table-hover align-middle">
+  <thead><tr><th>When</th><th>Action</th><th>By</th><th class="num">Servers</th><th class="num">Running</th><th class="num">OK</th><th class="num">Failed</th></tr></thead>
+  <tbody>
+  {% for job in object_list %}
+    <tr>
+      <td class="text-nowrap"><a class="row-link" href="{% url 'operations:job_detail' job.pk %}">{{ job.created_at|date:"M j, H:i:s" }}</a><div class="row-sub">{{ job.created_at|timesince }} ago</div></td>
+      <td><span class="mono">{{ job.summary }}</span>{% if job.note %}<div class="row-sub">{{ job.note }}</div>{% endif %}</td>
+      <td class="text-body-secondary">{{ job.created_by|default:"—" }}</td>
+      <td class="num">{{ job.total }}</td>
+      <td class="num {% if job.active %}text-body-secondary{% else %}muted{% endif %}">{{ job.active }}</td>
+      <td class="num text-good">{{ job.ok }}</td>
+      <td class="num {% if job.bad %}text-critical fw-semibold{% else %}muted{% endif %}">{{ job.bad }}</td>
+    </tr>
+  {% empty %}<tr><td colspan="7" class="empty">{% icon "layers" 28 %}<div class="empty-title">No jobs yet</div><div>Run an action on one or more servers and it will show up here.</div></td></tr>{% endfor %}
+  </tbody>
+</table></div></div>
+{% include "partials/pagination.html" %}
+{% endblock %}

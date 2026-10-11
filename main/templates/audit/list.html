@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Audit log{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Audit log</h1>
+    <p class="page-sub">An append-only record of sign-ins, server changes, token rotations and every job. Click an action to filter by it.</p>
+  </div>
+  {% if request.GET.action %}<div class="page-actions"><span class="chip mono">{{ request.GET.action }}</span><a class="btn btn-sm btn-outline-secondary" href="?">Clear filter</a></div>{% endif %}
+</div>
+<div class="card"><div class="table-responsive"><table class="table table-sm table-hover align-middle">
+  <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Server</th><th>IP</th><th>Details</th></tr></thead>
+  <tbody>
+  {% for e in object_list %}
+    <tr>
+      <td class="text-nowrap text-body-secondary num text-start">{{ e.created_at|date:"Y-m-d H:i:s" }}</td>
+      <td class="fw-medium">{{ e.actor_label|default:"system" }}</td>
+      <td><a class="chip mono" href="?action={{ e.action }}">{{ e.action }}</a></td>
+      <td class="mono text-body-secondary">{{ e.target }}</td>
+      <td>{% if e.server_id %}<a href="{% url 'fleet:server_detail' e.server_id %}">{{ e.server.name }}</a>{% endif %}</td>
+      <td class="mono text-body-secondary">{{ e.ip|default:"" }}</td>
+      <td class="mono text-body-secondary text-break small">{% if e.data %}{{ e.data }}{% endif %}</td>
+    </tr>
+  {% empty %}<tr><td colspan="7" class="empty">{% icon "shield" 28 %}<div class="empty-title">Nothing recorded yet</div></td></tr>{% endfor %}
+  </tbody>
+</table></div></div>
+{% include "partials/pagination.html" %}
+{% endblock %}

@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}{{ server }}{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'fleet:dashboard' %}">{% icon "arrow-left" 15 %} Servers</a>
+
+{# ---------- Identity ---------- #}
+<header class="card hero mb-3">
+  <div class="hero-main">
+    <div id="hero-mark" class="hero-mark tone-{{ server.health|health_tone }}">{% icon "server" 26 %}</div>
+    <div class="hero-id">
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <h1 class="page-title">{{ server.name }}</h1>
+        <span id="hero-health">{% health_badge server.health %}</span>
+      </div>
+      <div class="hero-sub">
+        {% if server.hostname %}
+          <span class="mono" id="hero-host">{{ server.hostname }}</span>
+          <button type="button" class="icon-btn icon-btn-sm" data-copy="#hero-host" title="Copy hostname" aria-label="Copy hostname">{% icon "copy" 14 %}</button>
+          {% if server.remote_addr %}<span class="sep"></span><span class="mono">{{ server.remote_addr }}</span>{% endif %}
+        {% else %}<span class="muted">Waiting for the agent's first report</span>{% endif %}
+      </div>
+      {% if server.description %}<p class="hero-desc">{{ server.description }}</p>{% endif %}
+    </div>
+    {% if can_admin %}
+    <div class="hero-actions">
+      <a class="btn btn-outline-secondary btn-sm" href="{% url 'fleet:server_update' server.pk %}">{% icon "edit" %} Edit</a>
+      <div class="dropdown">
+        <button class="btn btn-outline-secondary btn-sm btn-icon" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="More actions">{% icon "more" %}</button>
+        <div class="dropdown-menu dropdown-menu-end">
+          <form method="post" action="{% url 'fleet:server_rotate_token' server.pk %}" data-confirm="Rotate the token for {{ server.name }}? The current token stops working immediately.">{% csrf_token %}
+            <button class="dropdown-item">{% icon "key" 16 %}<span><span class="d-block">Rotate token</span><small>Issue a new agent token</small></span></button>
+          </form>
+          {% if perms.fleet.delete_server %}
+          <div class="dropdown-divider"></div>
+          <a class="dropdown-item text-danger-soft" href="{% url 'fleet:server_delete' server.pk %}">{% icon "trash" 16 %}<span><span class="d-block">Delete server</span><small>Remove it and its history</small></span></a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  <dl class="spec-strip">
+    <div><dt>Environment</dt><dd><span class="chip chip-env">{{ server.get_environment_display }}</span>{% for g in server.groups.all %} <a class="chip" href="{% url 'fleet:dashboard' %}?group={{ g.name }}">{{ g.name }}</a>{% endfor %}</dd></div>
+    <div><dt>Platform</dt><dd>{{ server.platform|default:"—" }}</dd></div>
+    <div><dt>Hardware</dt><dd>{% if server.cpu_count %}{{ server.cpu_count }} cores{% else %}—{% endif %}{% if server.memory_total %} · {{ server.memory_total|filesizeformat }}{% endif %}</dd></div>
+    <div><dt>Agent</dt><dd>{% if server.agent_version %}v{{ server.agent_version }}{% else %}—{% endif %} · every {{ server.report_interval }}s</dd></div>
+    <div><dt>Token</dt><dd><code>{{ server.token_prefix }}…</code></dd></div>
+  </dl>
+</header>
+
+{# ---------- Section nav ---------- #}
+<nav class="section-nav" aria-label="On this page">
+  <a href="#overview" class="active">Overview</a>
+  <a href="#services">Services</a>
+  <a href="#charts">History</a>
+  {% if can_operate %}<a href="#operate">Actions &amp; logs</a>{% endif %}
+  <a href="#activity">Activity</a>
+</nav>
+
+{% partialdef live inline %}
+<div id="live" hx-get="{% url 'fleet:server_detail' server.pk %}?part=live" hx-trigger="every 10s" hx-swap="outerHTML">
+  {% if request.htmx %}
+    <span id="hero-health" hx-swap-oob="true">{% health_badge server.health %}</span>
+    <div id="hero-mark" hx-swap-oob="true" class="hero-mark tone-{{ server.health|health_tone }}">{% icon "server" 26 %}</div>
+  {% endif %}
+
+  {% if open_alerts %}
+  <div class="alert alert-danger mb-3" role="alert">{% icon "alert" %}
+    <div class="flex-grow-1"><strong>{{ open_alerts|length }} open alert{{ open_alerts|length|pluralize }}</strong>
+      <ul class="alert-list">{% for a in open_alerts %}<li>{{ a.message }} <span class="muted">· since {{ a.opened_at|timesince }}</span></li>{% endfor %}</ul></div>
+    <a class="btn btn-sm btn-outline-danger align-self-center" href="{% url 'alerts:list' %}">View alerts</a>
+  </div>
+  {% endif %}
+
+  <section id="overview" class="anchor overview-grid mb-3">
+    <div class="stat gauge"><div class="stat-label">{% icon "cpu" 15 %} CPU</div>{% ring server.cpu_percent "CPU" %}<div class="stat-hint">{% if server.cpu_count %}{{ server.cpu_count }} cores{% else %}&nbsp;{% endif %}</div></div>
+    <div class="stat gauge"><div class="stat-label">{% icon "memory" 15 %} Memory</div>{% ring server.memory_percent "Memory" %}<div class="stat-hint">{% if server.memory_total %}of {{ server.memory_total|filesizeformat }}{% else %}&nbsp;{% endif %}</div></div>
+    <div class="stat gauge"><div class="stat-label">{% icon "disk" 15 %} Fullest disk</div>{% ring server.disk_percent "Disk" %}<div class="stat-hint">{{ server.disks|length }} mount{{ server.disks|length|pluralize }}</div></div>
+    <div class="stat vitals">
+      <div class="vital"><span class="vital-label">{% icon "clock" 15 %} Last report</span><span class="vital-value">{{ server.last_seen_at|ago }}</span><span class="stat-hint">expected every {{ server.report_interval }}s</span></div>
+      <div class="vital"><span class="vital-label">{% icon "refresh" 15 %} Uptime</span><span class="vital-value">{{ server.uptime_seconds|duration }}</span><span class="stat-hint">since last boot</span></div>
+      <div class="vital"><span class="vital-label">{% icon "activity" 15 %} Load · 1 min</span><span class="vital-value num">{{ server.load_1|floatformat:2|default:"—" }}</span><span class="stat-hint">{% if server.cpu_count %}across {{ server.cpu_count }} cores{% else %}&nbsp;{% endif %}</span></div>
+      <div class="vital"><span class="vital-label">{% icon "network" 15 %} Network</span><span class="vital-value num">↓ {{ server.net_rx_bps|bps }}</span><span class="stat-hint">↑ {{ server.net_tx_bps|bps }} out</span></div>
+    </div>
+  </section>
+
+  <div id="services" class="anchor row g-3 mb-3">
+    <div class="col-12 col-xl-7"><div class="card h-100"><div class="card-header">{% icon "box" 17 %} Services &amp; applications
+      {% if server.services %}<div class="card-actions">
+        <span class="status status-good"><span class="status-dot"></span>{{ server.services|count_state:"up" }} up</span>
+        {% with down=server.services|count_state:"down" %}{% if down %}<span class="status status-critical"><span class="status-dot"></span>{{ down }} down</span>{% endif %}{% endwith %}
+      </div>{% endif %}</div>
+      <div class="table-responsive"><table class="table table-sm align-middle">
+        <thead><tr><th>Name</th><th>State</th><th>Version</th><th></th></tr></thead>
+        <tbody>
+        {% for svc in server.services %}
+          <tr {% if svc.state == "down" %}class="row-critical"{% endif %}>
+            <td><div class="fw-semibold text-nowrap">{{ svc.name }}</div><div class="row-sub">{{ svc.kind }}</div></td>
+            <td>{% service_badge svc.state %}{% if svc.status %}<div class="row-sub text-nowrap">{{ svc.status }}</div>{% endif %}</td>
+            <td class="mono text-body-secondary">{{ svc.version|default:"—" }}</td>
+            <td class="text-end">{% if can_operate and svc.restartable %}
+              <form hx-post="{% url 'operations:job_create' %}" hx-target="#action-output" hx-confirm="Restart {{ svc.name }} on {{ server.name }}?">
+                <input type="hidden" name="servers" value="{{ server.pk }}"><input type="hidden" name="action" value="restart_service"><input type="hidden" name="name" value="{{ svc.name }}">
+                <button class="btn btn-sm btn-outline-secondary">{% icon "refresh" %} Restart</button>
+              </form>{% endif %}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="4" class="empty-small">No services declared in the agent config.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </div></div>
+    <div class="col-12 col-xl-5"><div class="card h-100"><div class="card-header">{% icon "disk" 17 %} Disks</div>
+      <div class="disk-list">
+        {% for d in server.disks %}
+          <div class="disk">
+            <div class="disk-top"><span class="mono fw-medium">{{ d.mount }}</span><span class="disk-size">{% if d.used %}{{ d.used|filesizeformat }} of {% endif %}{{ d.total|filesizeformat }}</span></div>
+            {% meter d.percent d.mount %}
+          </div>
+        {% empty %}<div class="empty-small">No disk data yet.</div>{% endfor %}
+      </div>
+    </div></div>
+  </div>
+</div>
+{% endpartialdef %}
+
+{% partialdef charts inline %}
+<div id="charts" class="anchor card mb-3" hx-get="{% url 'fleet:server_detail' server.pk %}?part=charts&range={{ range_key }}" hx-trigger="every 30s" hx-swap="outerHTML">
+  <div class="card-header">{% icon "chart" 17 %} History
+    <div class="card-actions">
+      <div class="segmented" role="group" aria-label="Time range">
+        {% for r in ranges %}
+          <button type="button" class="{% if r == range_key %}active{% endif %}" {% if r == range_key %}aria-pressed="true"{% endif %}
+            hx-get="{% url 'fleet:server_detail' server.pk %}?part=charts&range={{ r }}" hx-target="#charts" hx-swap="outerHTML">{{ r }}</button>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  <div class="card-body pt-4"><div class="row g-4 gx-lg-5">
+    <div class="col-12 col-lg-4">{% sparkline charts.cpu charts.start charts.end "CPU" %}</div>
+    <div class="col-12 col-lg-4">{% sparkline charts.memory charts.start charts.end "Memory" %}</div>
+    <div class="col-12 col-lg-4">{% sparkline charts.disk charts.start charts.end "Fullest disk" %}</div>
+  </div></div>
+</div>
+{% endpartialdef %}
+
+{% if can_operate %}
+<div id="operate" class="anchor row g-3 mb-3">
+  <div class="col-12 col-xl-6"><div class="card h-100"><div class="card-header">{% icon "play" 17 %} Actions</div><div class="card-body">
+    {% if server.actions %}
+      <div class="action-cards">
+      {% for a in server.actions %}
+        <form class="action-card" hx-post="{% url 'operations:job_create' %}" hx-target="#action-output" hx-confirm="Run '{{ a.name }}' on {{ server.name }}?">
+          <input type="hidden" name="servers" value="{{ server.pk }}"><input type="hidden" name="action" value="{{ a.name }}">
+          <span class="action-icon">{% icon "terminal" 16 %}</span>
+          <span class="action-text">
+            <span class="action-name mono">{{ a.name }}</span>
+            <span class="action-desc">{{ a.description|default:"Custom action" }}{% if a.timeout %} · up to {{ a.timeout|duration }}{% endif %}</span>
+          </span>
+          <button class="btn btn-sm btn-outline-primary">{% icon "play" %} Run</button>
+        </form>
+      {% endfor %}
+      </div>
+    {% else %}<p class="text-body-secondary small mb-0">The agent advertises no custom actions. Add <code>[actions.deploy]</code> entries to its agent.toml.</p>{% endif %}
+    {% if can_shell and server.shell_enabled %}
+      <form class="shell-form" hx-post="{% url 'operations:job_create' %}" hx-target="#action-output">
+        <input type="hidden" name="servers" value="{{ server.pk }}"><input type="hidden" name="action" value="shell">
+        <label class="form-label" for="shell-cmd">Shell command <span class="chip ms-1">Admin</span></label>
+        <div class="d-flex gap-2"><div class="input-icon flex-grow-1">{% icon "terminal" 16 %}<input id="shell-cmd" class="form-control mono" name="command" placeholder="df -h" required autocomplete="off" spellcheck="false"></div>
+          <button class="btn btn-outline-danger">Run</button></div>
+        <div class="form-text">Runs as the agent user. Every command is audited.</div>
+      </form>
+    {% endif %}
+    <div id="action-output" class="mt-3"></div>
+  </div></div></div>
+
+  <div class="col-12 col-xl-6"><div class="card h-100"><div class="card-header">{% icon "file" 17 %} Logs</div><div class="card-body d-flex flex-column">
+    {% if server.log_names %}
+    <form class="d-flex flex-wrap gap-2" hx-post="{% url 'operations:job_create' %}" hx-target="#log-output">
+      <input type="hidden" name="servers" value="{{ server.pk }}"><input type="hidden" name="action" value="tail_log">
+      <select class="form-select flex-grow-1" style="flex-basis: 12rem; width: auto" name="name" aria-label="Log">{% for n in server.log_names %}<option>{{ n }}</option>{% endfor %}</select>
+      <div class="input-suffix"><input class="form-control" style="width: 7.5rem" type="number" name="lines" value="200" min="1" max="2000" aria-label="Lines"><span>lines</span></div>
+      <button class="btn btn-outline-primary">Tail</button>
+    </form>
+    <div id="log-output" class="mt-3 flex-grow-1">
+      <div class="terminal-empty">{% icon "file" 22 %}<span>Pick a log and tail it. Output streams here.</span></div>
+    </div>
+    {% else %}<p class="text-body-secondary small mb-0">No logs declared. Add them under <code>[logs]</code> in the agent config.</p>{% endif %}
+  </div></div></div>
+</div>
+{% endif %}
+
+<div id="activity" class="anchor card"><div class="card-header">{% icon "layers" 17 %} Recent commands
+  {% if perms.operations.view_job %}<div class="card-actions"><a class="btn btn-sm btn-link" href="{% url 'operations:job_list' %}">All jobs {% icon "chevron" %}</a></div>{% endif %}</div>
+  <div class="table-responsive"><table class="table table-sm table-hover align-middle">
+    <thead><tr><th>When</th><th>Action</th><th>Status</th><th class="num">Exit</th><th></th></tr></thead>
+    <tbody>
+    {% for c in recent_commands %}
+      <tr><td class="text-body-secondary text-nowrap">{{ c.created_at|ago }}</td><td class="mono">{{ c.job.summary }}</td><td>{% command_badge c.status %}</td>
+        <td class="num">{{ c.exit_code|default_if_none:"—" }}</td><td class="text-end"><a class="btn btn-sm btn-link" href="{% url 'operations:command_detail' c.pk %}">Output {% icon "chevron" %}</a></td></tr>
+    {% empty %}<tr><td colspan="5" class="empty">{% icon "layers" 26 %}<div class="empty-title">Nothing run yet</div><div>Actions, restarts and log tails on this server show up here.</div></td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}{{ command.action }} on {{ command.server }}{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'operations:job_detail' command.job_id %}">{% icon "arrow-left" 15 %} Job</a>
+<div class="page-head">
+  <div><h1 class="page-title" style="font-size:1.5rem"><span class="mono">{{ command.job.summary }}</span> <span class="muted fw-normal">on</span> <a href="{% url 'fleet:server_detail' command.server_id %}">{{ command.server }}</a></h1></div>
+</div>
+{% partialdef output inline %}
+<div id="cmd-{{ command.pk }}" class="card" {% if command.is_active %}hx-get="{% url 'operations:command_detail' command.pk %}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <div class="card-header flex-wrap">
+    {% command_badge command.status %}
+    <span class="mono fw-normal">{{ command.job.summary }}</span>
+    {% if command.exit_code is not None %}<span class="chip">exit {{ command.exit_code }}</span>{% endif %}
+    {% if command.finished_at and command.delivered_at %}<span class="chip">{% icon "clock" 12 %} {{ command.delivered_at|timesince:command.finished_at }}</span>{% endif %}
+    {% if command.status == "pending" %}<span class="muted small fw-normal">Waiting for the agent's next poll…</span>{% endif %}
+    {% if command.status == "expired" %}<span class="muted small fw-normal">No agent picked this up in time. Is the server online?</span>{% endif %}
+    {% if command.status == "lost" %}<span class="muted small fw-normal">Delivered, but no result arrived before the timeout.</span>{% endif %}
+    <div class="card-actions"><a href="{% url 'operations:command_detail' command.pk %}" class="btn btn-sm btn-link">Open {% icon "chevron" %}</a></div>
+  </div>
+  <div class="card-body">
+    {% if command.output_truncated %}<div class="form-text mt-0 mb-2">Output truncated. Showing the last part.</div>{% endif %}
+    <pre class="output">{{ command.output|default:"(no output yet)" }}</pre>
+  </div>
+</div>
+{% endpartialdef %}
+{% partialdef error %}<div class="alert alert-danger mb-0" role="alert">{% icon "alert" %}<div>{{ error }}</div></div>{% endpartialdef %}
+{% endblock %}

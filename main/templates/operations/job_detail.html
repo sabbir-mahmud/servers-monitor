@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Job {{ object.summary }}{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'operations:job_list' %}">{% icon "arrow-left" 15 %} Jobs</a>
+<div class="page-head">
+  <div>
+    <h1 class="page-title mono" style="font-size:1.5rem">{{ object.summary }}</h1>
+    <div class="meta-row"><span>{% icon "user" 14 %} {{ object.created_by|default:"—" }}</span><span class="sep"></span><span>{{ object.created_at|date:"M j, Y · H:i:s" }}</span>{% if object.note %}<span class="sep"></span><span>{{ object.note }}</span>{% endif %}</div>
+  </div>
+</div>
+{% partialdef commands inline %}
+<div id="commands" {% if counts.active %}hx-get="{% url 'operations:job_detail' object.pk %}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <div class="stat-grid">
+    <div class="stat"><div class="stat-label">{% icon "server" 15 %} Servers</div><div class="stat-value">{{ counts.total }}</div></div>
+    <div class="stat"><div class="stat-label"><span class="dot dot-good"></span> Succeeded</div><div class="stat-value">{{ counts.succeeded }}</div></div>
+    <div class="stat {% if counts.failed %}is-critical{% endif %}"><div class="stat-label"><span class="dot dot-critical"></span> Failed</div><div class="stat-value">{{ counts.failed }}</div></div>
+    <div class="stat"><div class="stat-label"><span class="dot"></span> Lost / expired</div><div class="stat-value">{{ counts.lost|add:counts.expired }}</div></div>
+    <div class="stat"><div class="stat-label">{% if counts.active %}<span class="live-badge"><span class="dot"></span></span>{% else %}{% icon "check" 15 %}{% endif %} In progress</div><div class="stat-value">{{ counts.active }}</div></div>
+  </div>
+  {% for c in object.commands.all %}
+    <details class="run" {% if c.status == "failed" or object.commands.all|length == 1 %}open{% endif %}>
+      <summary>
+        <span class="chev">{% icon "chevron" 16 %}</span>
+        <strong>{{ c.server.name }}</strong> {% command_badge c.status %}
+        {% if c.exit_code is not None %}<span class="muted small">exit {{ c.exit_code }}</span>{% endif %}
+        {% if c.status == "pending" and perms.operations.change_command %}
+          <form method="post" action="{% url 'operations:command_cancel' c.pk %}" class="ms-auto">{% csrf_token %}<button class="btn btn-sm btn-outline-secondary">Cancel</button></form>
+        {% endif %}
+      </summary>
+      <div class="run-body"><pre class="output">{{ c.output|default:"(no output yet)" }}</pre></div>
+    </details>
+  {% endfor %}
+</div>
+{% endpartialdef %}
+{% endblock %}

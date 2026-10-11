@@ -1,0 +1,90 @@
+# /etc/server-monitor-agent/agent.toml  (mode 640, owner root:server-monitor)
+#
+# This file is the allowlist. The dashboard can only offer — and this agent will only
+# run — the services, logs and actions declared here. Restart the agent after editing:
+#   sudo systemctl restart server-monitor-agent
+
+[main]
+url = "https://monitor.example.com"
+token = "smk_paste-the-token-from-the-dashboard"
+verify_tls = true
+# ca_file = "/etc/ssl/certs/internal-ca.pem"   # for a private CA
+# allow_insecure_http = true                   # local development ONLY: the token travels in clear text
+
+[agent]
+# Starting values; main overrides both on every heartbeat (edit them in the dashboard).
+report_interval = 30
+command_poll_interval = 5
+max_concurrent_commands = 2
+# Mounts to watch. Empty = every real (non-tmpfs/overlay) filesystem.
+disk_mounts = []
+# systemd restarts run as `sudo -n systemctl restart <unit>` when the agent isn't root.
+use_sudo_for_restart = true
+
+# ---------------------------------------------------------------- services
+# kind: systemd | docker | pm2 | process | http
+# unit: systemd unit / container name / pm2 app name / process-name substring / URL (http)
+# restartable: show a Restart button and allow the built-in restart_service action.
+
+[services.nginx]
+kind = "systemd"
+unit = "nginx"
+restartable = true
+version_command = ["nginx", "-v"]
+
+[services.api]
+kind = "systemd"
+unit = "gunicorn-api"
+restartable = true
+version_file = "/var/www/api/VERSION"
+
+# [services.worker]
+# kind = "docker"
+# unit = "api-worker-1"
+# restartable = true
+#
+# [services.frontend]
+# kind = "pm2"
+# unit = "frontend"
+# restartable = true
+#
+# [services.api-health]
+# kind = "http"
+# url = "http://127.0.0.1:8000/health/"
+
+# ---------------------------------------------------------------- logs
+# name = path. Only these files can be tailed from the dashboard. The agent user must be
+# able to read them (the installer adds it to the `adm` group for /var/log).
+
+[logs]
+nginx_error = "/var/log/nginx/error.log"
+syslog = "/var/log/syslog"
+# api = "/var/www/api/logs/app.log"
+
+# ---------------------------------------------------------------- actions
+# Named, argument-free commands — your deploy/update scripts. argv lists, no shell, so
+# nothing the dashboard sends can be spliced into them. Put real logic in a script.
+
+[actions.deploy_api]
+description = "git pull, install deps, migrate, restart"
+command = ["/opt/deploy/deploy_api.sh"]
+cwd = "/var/www/api"
+timeout = 900
+env = { DJANGO_SETTINGS_MODULE = "config.settings" }
+
+[actions.disk_report]
+description = "Show filesystem usage"
+command = ["df", "-h"]
+timeout = 30
+
+# [actions.apt_upgrade]
+# description = "Install security updates"
+# command = ["sudo", "-n", "/usr/bin/unattended-upgrade", "-v"]
+# timeout = 1800
+
+# ---------------------------------------------------------------- shell
+# Free-form commands from the dashboard (Admin role only, every one audited). Off by
+# default: with it on, anyone who controls main controls this server as the agent user.
+[shell]
+enabled = false
+timeout = 120

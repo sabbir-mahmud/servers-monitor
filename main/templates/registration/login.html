@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Sign in{% endblock %}
+{% block auth %}
+<div class="login">
+  {# Brand panel: decorative only, hidden below lg. #}
+  <section class="login-brand" aria-hidden="true">
+    <div class="brand"><span class="brand-mark">{% icon "activity" 17 %}</span><span>{{ SITE_NAME }}</span></div>
+
+    <div class="login-pitch">
+      <h2>Every server.<br>One calm view.</h2>
+      <p>Live health, services and deploys across your whole fleet, without opening a single inbound port.</p>
+    </div>
+
+    <div class="login-preview">
+      <div class="preview-head">
+        <span>Fleet</span>
+        <span class="live-badge"><span class="dot"></span>Live</span>
+      </div>
+      <div class="preview-row"><span class="preview-name">api-01</span><span class="status status-good" data-state="online"><span class="status-dot"></span>Online</span>
+        <div class="meter"><div class="meter-track"><div class="meter-fill meter-good" style="width:23%"></div></div><span class="meter-value">23%</span></div></div>
+      <div class="preview-row"><span class="preview-name">web-01</span><span class="status status-good" data-state="online"><span class="status-dot"></span>Online</span>
+        <div class="meter"><div class="meter-track"><div class="meter-fill meter-good" style="width:41%"></div></div><span class="meter-value">41%</span></div></div>
+      <div class="preview-row"><span class="preview-name">db-01</span><span class="status status-warning"><span class="status-dot"></span>Late</span>
+        <div class="meter"><div class="meter-track"><div class="meter-fill meter-warning" style="width:74%"></div></div><span class="meter-value">74%</span></div></div>
+      <svg class="preview-spark" viewBox="0 0 300 60" preserveAspectRatio="none">
+        <defs><linearGradient id="login-spark" x1="0" x2="0" y1="0" y2="1"><stop offset="0" class="spark-stop-top"/><stop offset="1" class="spark-stop-bottom"/></linearGradient></defs>
+        <path d="M0 42 L20 38 L40 40 L60 31 L80 34 L100 26 L120 30 L140 22 L160 27 L180 18 L200 24 L220 16 L240 21 L260 12 L280 17 L300 10 L300 60 L0 60 Z" fill="url(#login-spark)"/>
+        <path class="spark-line" d="M0 42 L20 38 L40 40 L60 31 L80 34 L100 26 L120 30 L140 22 L160 27 L180 18 L200 24 L220 16 L240 21 L260 12 L280 17 L300 10" vector-effect="non-scaling-stroke"/>
+      </svg>
+    </div>
+
+    <ul class="login-points">
+      <li>{% icon "network" 16 %}<div><strong>Agents dial out</strong><span>No SSH, no open ports on your servers.</span></div></li>
+      <li>{% icon "shield" 16 %}<div><strong>Allowlisted actions</strong><span>Each server decides what it may run.</span></div></li>
+      <li>{% icon "file" 16 %}<div><strong>Everything audited</strong><span>Every sign-in and job is on the record.</span></div></li>
+    </ul>
+  </section>
+
+  <section class="login-main">
+    <div class="login-top">
+      <div class="brand d-lg-none"><span class="brand-mark">{% icon "activity" 17 %}</span><span>{{ SITE_NAME }}</span></div>
+      <div class="segmented ms-auto" role="group" aria-label="Appearance">
+        <button type="button" data-theme-set="light" aria-pressed="false" title="Light">{% icon "sun" 15 %}<span class="visually-hidden">Light</span></button>
+        <button type="button" data-theme-set="system" aria-pressed="true" title="Match system">{% icon "monitor" 15 %}<span class="visually-hidden">System</span></button>
+        <button type="button" data-theme-set="dark" aria-pressed="false" title="Dark">{% icon "moon" 15 %}<span class="visually-hidden">Dark</span></button>
+      </div>
+    </div>
+
+    <div class="login-form-wrap">
+      <div class="login-heading">
+        <h1>Welcome back</h1>
+        <p>Sign in to {{ SITE_NAME }} to continue.</p>
+      </div>
+
+      <form method="post" class="form-section" data-loading-form novalidate>{% csrf_token %}
+        {% if form.non_field_errors %}<div class="alert alert-danger mb-0" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+
+        <div>
+          <label class="form-label" for="id_username">Username</label>
+          <div class="input-icon">{% icon "user" 16 %}
+            <input class="form-control form-control-lg" id="id_username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus value="{{ form.username.value|default:'' }}" placeholder="Enter your username">
+          </div>
+        </div>
+
+        <div>
+          <label class="form-label" for="id_password">Password</label>
+          <div class="input-icon has-trailing">{% icon "lock" 16 %}
+            <input class="form-control form-control-lg" type="password" id="id_password" name="password" autocomplete="current-password" required placeholder="Enter your password" aria-describedby="caps-hint">
+            <button type="button" class="input-trailing" data-toggle-password="#id_password" aria-label="Show password" aria-pressed="false">
+              <span data-when="hidden">{% icon "eye" 17 %}</span><span data-when="shown" hidden>{% icon "eye-off" 17 %}</span>
+            </button>
+          </div>
+          <div class="caps-hint" id="caps-hint" hidden>{% icon "alert" 13 %} Caps Lock is on</div>
+        </div>
+
+        <input type="hidden" name="next" value="{{ next }}">
+        <button class="btn btn-primary btn-lg w-100 login-submit">
+          <span class="spinner" aria-hidden="true"></span><span class="login-submit-label">Sign in</span>
+        </button>
+      </form>
+
+      <p class="login-note">{% icon "lock" 13 %} Attempts are rate-limited and audited.</p>
+    </div>
+
+    <p class="login-legal">{{ SITE_NAME }} · Restricted to authorised operators</p>
+  </section>
+</div>
+{% endblock %}

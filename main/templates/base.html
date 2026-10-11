@@ -1,0 +1,84 @@
+{% load static monitor %}<!doctype html>
+<html lang="en" data-bs-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  {# Indicator styles are injected inline by htmx; CSP forbids that, and app.css covers it. #}
+  <meta name="htmx-config" content='{"includeIndicatorStyles": false}'>
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f3f3f0" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111113" media="(prefers-color-scheme: dark)">
+  <title>{% block title %}{{ SITE_NAME }}{% endblock %} · {{ SITE_NAME }}</title>
+  <link rel="stylesheet" href="{% static 'vendor/bootstrap.min.css' %}">
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  <script src="{% static 'js/app.js' %}"></script>
+</head>
+<body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+{% if user.is_authenticated %}
+{% with ns=request.resolver_match.app_name url_name=request.resolver_match.url_name %}
+<div class="shell">
+  <aside class="sidebar">
+    <div class="sidebar-top">
+      <a class="brand" href="{% url 'fleet:dashboard' %}">
+        <span class="brand-mark">{% icon "activity" 17 %}</span>
+        <span>{{ SITE_NAME }}</span>
+      </a>
+      <button class="icon-btn sidebar-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#sidenav" aria-controls="sidenav" aria-expanded="false" aria-label="Menu">{% icon "menu" 20 %}</button>
+    </div>
+
+    <div class="collapse d-lg-flex sidebar-body" id="sidenav">
+      <nav class="side-nav" aria-label="Main">
+        <div class="side-label">Monitor</div>
+        <a class="side-link {% if ns == 'fleet' %}active{% endif %}" href="{% url 'fleet:dashboard' %}" {% if ns == 'fleet' %}aria-current="page"{% endif %}>{% icon "server" %} Servers</a>
+        {% if perms.alerts.view_alert %}<a class="side-link {% if ns == 'alerts' %}active{% endif %}" href="{% url 'alerts:list' %}" {% if ns == 'alerts' %}aria-current="page"{% endif %}>{% icon "bell" %} Alerts</a>{% endif %}
+
+        {% if perms.operations.view_job or perms.operations.add_job %}<div class="side-label">Operate</div>{% endif %}
+        {% if perms.operations.add_job %}<a class="side-link {% if url_name == 'job_create' %}active{% endif %}" href="{% url 'operations:job_create' %}" {% if url_name == 'job_create' %}aria-current="page"{% endif %}>{% icon "play" %} Run on servers</a>{% endif %}
+        {% if perms.operations.view_job %}<a class="side-link {% if ns == 'operations' and url_name != 'job_create' %}active{% endif %}" href="{% url 'operations:job_list' %}">{% icon "layers" %} Jobs</a>{% endif %}
+
+        {% if perms.audit.view_auditlog %}
+        <div class="side-label">Govern</div>
+        <a class="side-link {% if ns == 'audit' %}active{% endif %}" href="{% url 'audit:list' %}" {% if ns == 'audit' %}aria-current="page"{% endif %}>{% icon "shield" %} Audit log</a>
+        {% endif %}
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="segmented theme-switch" role="group" aria-label="Appearance">
+          <button type="button" data-theme-set="light" aria-pressed="false" title="Light">{% icon "sun" 15 %}<span class="visually-hidden">Light</span></button>
+          <button type="button" data-theme-set="system" aria-pressed="true" title="Match system">{% icon "monitor" 15 %}<span class="visually-hidden">System</span></button>
+          <button type="button" data-theme-set="dark" aria-pressed="false" title="Dark">{% icon "moon" 15 %}<span class="visually-hidden">Dark</span></button>
+        </div>
+        <div class="user-chip">
+          <span class="avatar" aria-hidden="true">{{ user.get_username|slice:":2" }}</span>
+          <div class="flex-grow-1 min-w-0" style="min-width:0">
+            <div class="user-name">{{ user.get_username }}</div>
+            <div class="user-role">{% if user.is_superuser %}Administrator{% else %}{{ user.groups.first.name|default:"Member" }}{% endif %}</div>
+          </div>
+          <form method="post" action="{% url 'logout' %}">{% csrf_token %}
+            <button class="icon-btn" title="Log out" aria-label="Log out">{% icon "logout" 17 %}</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main-col">
+    <main class="content">
+      {% for message in messages %}
+        <div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags }}{% endif %} alert-dismissible fade show" role="alert">
+          {% if message.tags == 'success' %}{% icon "check" %}{% elif message.tags == 'error' or message.tags == 'warning' %}{% icon "alert" %}{% else %}{% icon "bell" %}{% endif %}
+          <div>{{ message }}</div><button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+      {% endfor %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+{% endwith %}
+{% else %}
+<main class="auth">{% block auth %}{% endblock %}</main>
+{% endif %}
+<script src="{% static 'vendor/htmx.min.js' %}"></script>
+<script src="{% static 'vendor/bootstrap.bundle.min.js' %}"></script>
+</body>
+</html>

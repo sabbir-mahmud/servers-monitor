@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Alerts{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Alerts</h1>
+    <p class="page-sub">Offline servers, resource pressure and failing services. Alerts resolve automatically once the condition clears.</p>
+  </div>
+  <nav class="segmented" aria-label="Filter alerts">
+    <a class="{% if state == 'open' %}active{% endif %}" href="?state=open" {% if state == 'open' %}aria-current="page"{% endif %}>Open</a>
+    <a class="{% if state == 'resolved' %}active{% endif %}" href="?state=resolved" {% if state == 'resolved' %}aria-current="page"{% endif %}>Resolved</a>
+    <a class="{% if state == 'all' %}active{% endif %}" href="?state=all" {% if state == 'all' %}aria-current="page"{% endif %}>All</a>
+  </nav>
+</div>
+{% partialdef rows inline %}
+<div id="alerts" {% if state == "open" %}hx-get="{{ request.get_full_path }}" hx-trigger="every 15s" hx-swap="outerHTML"{% endif %}>
+<div class="card"><div class="table-responsive"><table class="table table-hover align-middle">
+  <thead><tr><th>Severity</th><th>Alert</th><th>Server</th><th>Opened</th><th>State</th><th></th></tr></thead>
+  <tbody>
+  {% for a in object_list %}
+    <tr>
+      <td><span class="status {% if a.severity == 'critical' %}status-critical{% else %}status-warning{% endif %}"><span class="status-dot" aria-hidden="true"></span>{{ a.get_severity_display }}</span></td>
+      <td class="fw-medium">{{ a.message }}</td>
+      <td><a class="row-link" href="{% url 'fleet:server_detail' a.server_id %}">{{ a.server.name }}</a></td>
+      <td class="text-nowrap">{{ a.opened_at|date:"M j, H:i" }}<div class="row-sub">{{ a.opened_at|timesince }} ago</div></td>
+      <td class="text-body-secondary small">{% if a.resolved_at %}Resolved {{ a.resolved_at|timesince }} ago{% elif a.acknowledged_at %}Acknowledged by {{ a.acknowledged_by|default:"—" }}{% else %}<span class="text-critical fw-semibold">Open</span>{% endif %}</td>
+      <td class="text-end">{% if a.is_open and not a.acknowledged_at and perms.alerts.change_alert %}
+        <form method="post" action="{% url 'alerts:acknowledge' a.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-sm btn-outline-secondary">{% icon "check" %} Acknowledge</button></form>
+      {% endif %}</td>
+    </tr>
+  {% empty %}<tr><td colspan="6" class="empty">{% if state == "open" %}<span class="text-good">{% icon "check" 30 %}</span><div class="empty-title">All clear</div><div>No open alerts right now.</div>{% else %}{% icon "bell" 28 %}<div class="empty-title">No alerts</div>{% endif %}</td></tr>{% endfor %}
+  </tbody>
+</table></div></div>
+</div>
+{% endpartialdef %}
+{% include "partials/pagination.html" %}
+{% endblock %}

@@ -1,0 +1,24 @@
+[Unit]
+Description=Server Monitor agent
+Documentation=https://github.com/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=server-monitor
+Group=server-monitor
+ExecStart=/opt/server-monitor-agent/venv/bin/python /opt/server-monitor-agent/server_monitor_agent.py -c /etc/server-monitor-agent/agent.toml
+Restart=always
+RestartSec=5
+# Let running deploys finish (or hit their own timeout) on stop/upgrade.
+TimeoutStopSec=900
+KillMode=mixed
+# Hardening that does not get in the way of deploy scripts. ProtectSystem/NoNewPrivileges
+# are deliberately NOT set: they are inherited by child processes and would break
+# `sudo -n systemctl restart …` and deploys that write outside /var/www.
+PrivateTmp=true
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgres:17
+    environment: { POSTGRES_DB: monitor, POSTGRES_USER: monitor, POSTGRES_PASSWORD: monitor }
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD", "pg_isready", "-U", "monitor"], interval: 5s, retries: 10 }
+  redis:
+    image: redis:7-alpine
+  web:
+    build: { context: ., dockerfile: main/Dockerfile }
+    env_file: main/.env
+    environment: &env
+      DATABASE_URL: postgres://monitor:monitor@db:5432/monitor
+      REDIS_URL: redis://redis:6379
+    command: sh -c "DB_STATEMENT_TIMEOUT_MS=0 python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --threads 4 --timeout 30"
+    ports: ["8000:8000"]
+    depends_on: { db: { condition: service_healthy }, redis: { condition: service_started } }
+  worker:
+    build: { context: ., dockerfile: main/Dockerfile }
+    env_file: main/.env
+    environment:
+      <<: *env
+      DB_STATEMENT_TIMEOUT_MS: "0"
+    # One beat only: running -B on several workers would duplicate every sweep.
+    command: celery -A config worker -B -l info --concurrency 2
+    depends_on: { db: { condition: service_healthy }, redis: { condition: service_started } }
+volumes:
+  pgdata:

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Servers{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Servers</h1>
+    <p class="page-sub">Live health across your fleet. <span class="live-badge ms-1"><span class="dot"></span>Updates every 10s</span></p>
+  </div>
+  <div class="page-actions">
+    {% if perms.operations.add_job %}<a class="btn btn-outline-secondary" href="{% url 'operations:job_create' %}">{% icon "play" %} Run on servers</a>{% endif %}
+    {% if perms.fleet.add_server %}<a class="btn btn-primary" href="{% url 'fleet:server_create' %}">{% icon "plus" %} Add server</a>{% endif %}
+  </div>
+</div>
+
+<form class="toolbar" method="get" role="search" hx-get="{% url 'fleet:dashboard' %}" hx-target="#fleet" hx-swap="outerHTML" hx-push-url="true" hx-trigger="change, keyup changed delay:300ms from:input[name=q]">
+  <div class="input-icon">{% icon "search" 16 %}<input class="form-control" type="search" name="q" placeholder="Search servers" value="{{ filters.q|default:'' }}" aria-label="Search"></div>
+  <select class="form-select" name="environment" aria-label="Environment">
+    <option value="">All environments</option>
+    {% for value, label in environments %}<option value="{{ value }}" {% if filters.environment == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <select class="form-select" name="group" aria-label="Group">
+    <option value="">All groups</option>
+    {% for g in groups %}<option value="{{ g.name }}" {% if filters.group == g.name %}selected{% endif %}>{{ g.name }}</option>{% endfor %}
+  </select>
+  <select class="form-select" name="health" aria-label="Health">
+    <option value="">Any health</option>
+    {% for value, label in healths %}<option value="{{ value }}" {% if filters.health == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+</form>
+
+{% partialdef fleet inline %}
+<div id="fleet" hx-get="{{ request.get_full_path }}" hx-trigger="every 10s" hx-swap="outerHTML">
+  <div class="stat-grid">
+    <div class="stat"><div class="stat-label">{% icon "server" 15 %} Total servers</div><div class="stat-value">{{ summary.total }}</div></div>
+    <div class="stat"><div class="stat-label"><span class="dot dot-good"></span> Online</div><div class="stat-value">{{ summary.online }}</div></div>
+    <div class="stat"><div class="stat-label"><span class="dot dot-warning"></span> Late</div><div class="stat-value">{{ summary.late }}</div></div>
+    <div class="stat"><div class="stat-label"><span class="dot dot-critical"></span> Offline</div><div class="stat-value">{{ summary.offline }}</div></div>
+    <a class="stat {% if open_alerts %}is-critical{% endif %}" href="{% url 'alerts:list' %}"><div class="stat-label">{% icon "bell" 15 %} Open alerts</div><div class="stat-value">{{ open_alerts }}</div></a>
+  </div>
+
+  <div class="card"><div class="table-responsive">
+    <table class="table table-hover align-middle">
+      <thead><tr>
+        <th>Server</th><th>Health</th><th>CPU</th><th>Memory</th><th>Disk</th>
+        <th class="num">Load</th><th class="num">Network</th><th class="num d-none d-xxl-table-cell">Uptime</th><th class="num">Last report</th>
+      </tr></thead>
+      <tbody>
+      {% for s in servers %}
+        <tr>
+          <td>
+            <a class="row-link" href="{% url 'fleet:server_detail' s.pk %}">{{ s.name }}</a>
+            <div class="row-sub text-nowrap">{{ s.get_environment_display }}{% for g in s.groups.all %} · {{ g.name }}{% endfor %}</div>
+          </td>
+          <td>{% health_badge s.current_health %}</td>
+          <td>{% meter s.cpu_percent "CPU" %}</td>
+          <td>{% meter s.memory_percent "Memory" %}</td>
+          <td>{% meter s.disk_percent "Disk" %}</td>
+          <td class="num">{{ s.load_1|floatformat:2|default:"—" }}</td>
+          <td class="num text-body-secondary"><div>↓ {{ s.net_rx_bps|bps }}</div><div class="row-sub mt-0">↑ {{ s.net_tx_bps|bps }}</div></td>
+          <td class="num text-body-secondary d-none d-xxl-table-cell">{{ s.uptime_seconds|duration }}</td>
+          <td class="num text-body-secondary"><span {% if s.last_seen_at %}title="{{ s.last_seen_at }}"{% endif %}>{{ s.last_seen_at|ago }}</span></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="9" class="empty">
+          {% icon "server" 28 %}
+          <div class="empty-title">No servers match</div>
+          <div>{% if perms.fleet.add_server %}Try a different filter, or <a href="{% url 'fleet:server_create' %}">add your first server</a>.{% else %}Try a different filter.{% endif %}</div>
+        </td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div></div>
+</div>
+{% endpartialdef %}
+{% endblock %}

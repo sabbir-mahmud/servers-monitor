@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Delete {{ object }}{% endblock %}
+{% block content %}
+<div class="card danger-zone" style="max-width: 36rem; margin: 3rem auto 0">
+  <div class="card-header">{% icon "trash" 17 %} Delete {{ object }}?</div>
+  <div class="card-body p-4">
+    <p class="text-body-secondary">This removes the server, its metric history, alerts and command history. The agent on
+       the machine keeps running until you uninstall it, but its token stops working.</p>
+    <p class="fw-medium mb-4">This can't be undone.</p>
+    <form method="post" class="d-flex gap-2">{% csrf_token %}
+      <button class="btn btn-danger">{% icon "trash" %} Delete server</button>
+      <a class="btn btn-outline-secondary" href="{{ request.META.HTTP_REFERER|default:'/' }}">Cancel</a>
+    </form>
+  </div>
+</div>
+{% endblock %}
