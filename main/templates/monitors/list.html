@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Applications{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Applications</h1>
+    <p class="page-sub">HTTP health checks for your apps, run on a schedule from this dashboard. <span class="live-badge ms-1"><span class="dot"></span>Updates every 15s</span></p>
+  </div>
+  {% if perms.monitors.add_monitor %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'monitors:create' %}">{% icon "plus" %} Add application</a></div>{% endif %}
+</div>
+
+{% partialdef board inline %}
+<div id="board" hx-get="{% url 'monitors:list' %}" hx-trigger="every 15s" hx-swap="outerHTML">
+  <div class="stat-grid">
+    <div class="stat"><div class="stat-label">{% icon "globe" 15 %} Applications</div><div class="stat-value">{{ summary.total }}</div></div>
+    <div class="stat"><div class="stat-label"><span class="dot dot-good"></span> Up</div><div class="stat-value">{{ summary.up }}</div></div>
+    <div class="stat {% if summary.down %}is-critical{% endif %}"><div class="stat-label"><span class="dot dot-critical"></span> Down</div><div class="stat-value">{{ summary.down }}</div></div>
+    <div class="stat"><div class="stat-label">{% icon "pause" 15 %} Paused</div><div class="stat-value">{{ summary.paused }}</div></div>
+    <div class="stat"><div class="stat-label">{% icon "check" 15 %} Uptime · 24h</div><div class="stat-value">{% if overall_uptime is not None %}{{ overall_uptime|floatformat:2 }}<small class="unit">%</small>{% else %}—{% endif %}</div></div>
+  </div>
+
+  <div class="card"><div class="table-responsive">
+    <table class="table table-hover align-middle">
+      <thead><tr>
+        <th>Application</th><th>Status</th><th class="d-none d-lg-table-cell">Last 24 hours</th>
+        <th class="num">Uptime</th><th class="num">Response</th><th class="num">Checked</th>
+      </tr></thead>
+      <tbody>
+      {% for m in monitors %}
+        <tr>
+          <td>
+            <a class="row-link" href="{% url 'monitors:detail' m.pk %}">{{ m.name }}</a>
+            <div class="row-sub text-truncate mono" style="max-width: 22rem">{{ m.url }}</div>
+          </td>
+          <td>{% monitor_badge m.display_status %}{% if m.display_status == "down" and m.last_error %}<div class="row-sub text-truncate" style="max-width: 14rem">{{ m.last_error }}</div>{% endif %}</td>
+          <td class="d-none d-lg-table-cell" style="min-width: 15rem">{% include "monitors/_bar.html" with bar=m.bar %}</td>
+          <td class="num">{% if m.uptime_24h is not None %}<span class="{% if m.uptime_24h < 99 %}text-critical fw-semibold{% endif %}">{{ m.uptime_24h|floatformat:2 }}%</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td class="num text-body-secondary">{% if m.avg_ms is not None %}{{ m.avg_ms|floatformat:0 }} ms{% else %}—{% endif %}</td>
+          <td class="num text-body-secondary">{{ m.last_checked_at|ago }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6" class="empty">
+          {% icon "globe" 28 %}
+          <div class="empty-title">No applications yet</div>
+          <div>Add a health URL like <code>https://app.example.com/health</code> and it's checked every minute.{% if perms.monitors.add_monitor %} <a href="{% url 'monitors:create' %}">Add your first application</a>.{% endif %}</div>
+        </td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div></div>
+</div>
+{% endpartialdef %}
+{% endblock %}

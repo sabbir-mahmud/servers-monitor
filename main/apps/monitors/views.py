@@ -1,0 +1,184 @@
+from django.contrib import messages
+from django.shortcuts import get_object_or_404, redirect
+from django.urls import reverse, reverse_lazy
+from django.utils import timezone
+from django.views import View
+from django.views.generic import CreateView, DeleteView, DetailView, ListView, UpdateView
+
+from apps.alerts.models import Alert
+from apps.audit.services import record
+from apps.core.mixins import HtmxTemplateMixin, StaffViewMixin
+
+from . import checker, stats
+from .forms import MonitorForm
+from .models import Monitor, MonitorStatus
+
+
+class MonitorListView(StaffViewMixin, HtmxTemplateMixin, ListView):
+    """Every application with its 24 h uptime bar. The `board` partial refreshes every 15 s."""
+
+    permission_required = "monitors.view_monitor"
+    template_name = "monitors/list.html"
+    htmx_partial = "board"
+    context_object_name = "monitors"
+
+    def get_queryset(self):
+        return Monitor.objects.select_related("server")
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        monitors = list(ctx["monitors"])
+        ids = [m.pk for m in monitors]
+        uptime = stats.uptime_by_monitor(ids, 24)
+        avg = stats.avg_response_by_monitor(ids, 24)
+        bars = stats.timelines(ids, hours=24, buckets=48)
+        for m in monitors:
+            m.uptime_24h = uptime.get(m.pk)
+            m.avg_ms = avg.get(m.pk)
+            m.bar = bars.get(m.pk, [])
+        states = [m.display_status for m in monitors]
+        ctx.update(
+            monitors=monitors,
+            summary={
+                "total": len(monitors),
+                "up": states.count(MonitorStatus.UP),
+                "down": states.count(MonitorStatus.DOWN),
+                "paused": states.count(MonitorStatus.PAUSED),
+            },
+            overall_uptime=(sum(uptime.values()) / len(uptime)) if uptime else None,
+        )
+        return ctx
+
+
+class MonitorDetailView(StaffViewMixin, DetailView):
+    permission_required = "monitors.view_monitor"
+    template_name = "monitors/detail.html"
+    model = Monitor
+    context_object_name = "monitor"
+
+    def get_template_names(self):
+        part = self.request.GET.get("part")
+        if self.request.htmx and part in ("live", "chart"):
+            return [f"{self.template_name}#{part}"]
+        return [self.template_name]
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        m = self.object
+        range_key = self.request.GET.get("range", "24h")
+        if range_key not in stats.RANGES:
+            range_key = "24h"
+        ids = [m.pk]
+        ctx.update(
+            uptime={
+                label: stats.uptime_by_monitor(ids, h).get(m.pk)
+                for label, h in (("24h", 24), ("7d", 168), ("14d", 336))
+            },  # fmt: skip
+            avg_ms=stats.avg_response_by_monitor(ids, 24).get(m.pk),
+            bar=stats.timelines(ids, hours=24, buckets=72)[m.pk],
+            range_key=range_key,
+            ranges=list(stats.RANGES),
+            series=stats.response_series(m, range_key),
+            incidents=stats.incidents(m),
+            recent=m.checks.all()[:15],
+            open_alerts=Alert.objects.filter(monitor=m, resolved_at__isnull=True),
+            can_change=self.request.user.has_perm("monitors.change_monitor"),
+        )
+        return ctx
+
+
+FORM_SECTIONS = [
+    ("Endpoint", ["name", "url", "method"]),
+    ("Schedule", ["interval_seconds", "timeout_seconds", "failure_threshold"]),
+    ("What counts as up", ["expected_status", "keyword", "verify_tls"]),
+    ("Organise", ["server", "is_enabled"]),
+]
+
+
+class MonitorCreateView(StaffViewMixin, CreateView):
+    permission_required = "monitors.add_monitor"
+    template_name = "monitors/form.html"
+    form_class = MonitorForm
+    extra_context = {"sections": FORM_SECTIONS}
+
+    def form_valid(self, form):
+        form.instance.created_by = self.request.user
+        form.instance.next_check_at = timezone.now()  # first check right away
+        response = super().form_valid(form)
+        record(self.request, "monitor.create", target=self.object.name, url=self.object.url)
+        messages.success(self.request, f"Monitoring {self.object.name}. First check runs now.")
+        return response
+
+    def get_success_url(self):
+        return reverse("monitors:detail", args=[self.object.pk])
+
+
+class MonitorUpdateView(StaffViewMixin, UpdateView):
+    permission_required = "monitors.change_monitor"
+    template_name = "monitors/form.html"
+    form_class = MonitorForm
+    model = Monitor
+    extra_context = {"sections": FORM_SECTIONS}
+
+    def form_valid(self, form):
+        if {"url", "method", "expected_status", "keyword", "verify_tls"} & set(form.changed_data):
+            form.instance.next_check_at = timezone.now()
+            form.instance.tls_checked_at = None
+        if "is_enabled" in form.changed_data and not form.instance.is_enabled:
+            checker.resolve_all(form.instance)
+        response = super().form_valid(form)
+        record(self.request, "monitor.update", target=self.object.name, fields=form.changed_data)
+        messages.success(self.request, "Monitor saved.")
+        return response
+
+    def get_success_url(self):
+        return reverse("monitors:detail", args=[self.object.pk])
+
+
+class MonitorDeleteView(StaffViewMixin, DeleteView):
+    permission_required = "monitors.delete_monitor"
+    template_name = "confirm_delete.html"
+    model = Monitor
+    success_url = reverse_lazy("monitors:list")
+    extra_context = {
+        "delete_note": "This removes the monitor, its check history and its alerts.",
+        "delete_label": "Delete monitor",
+    }
+
+    def form_valid(self, form):
+        record(self.request, "monitor.delete", target=self.object.name)
+        messages.success(self.request, f"Stopped monitoring {self.object.name}.")
+        return super().form_valid(form)
+
+
+class MonitorCheckNowView(StaffViewMixin, View):
+    permission_required = "monitors.change_monitor"
+    http_method_names = ["post"]
+
+    def post(self, request, pk):
+        monitor = checker.check(get_object_or_404(Monitor, pk=pk))
+        verdict = "up" if monitor.last_error == "" else f"failing: {monitor.last_error}"
+        (messages.success if not monitor.last_error else messages.warning)(
+            request, f"{monitor.name} is {verdict}."
+        )
+        return redirect(request.POST.get("next") or reverse("monitors:detail", args=[pk]))
+
+
+class MonitorToggleView(StaffViewMixin, View):
+    permission_required = "monitors.change_monitor"
+    http_method_names = ["post"]
+
+    def post(self, request, pk):
+        monitor = get_object_or_404(Monitor, pk=pk)
+        monitor.is_enabled = not monitor.is_enabled
+        if monitor.is_enabled:
+            monitor.next_check_at = timezone.now()
+        else:
+            checker.resolve_all(monitor)
+        monitor.save(update_fields=["is_enabled", "next_check_at"])
+        record(request, "monitor.resume" if monitor.is_enabled else "monitor.pause",
+               target=monitor.name)  # fmt: skip
+        messages.success(
+            request, f"{monitor.name} {'resumed' if monitor.is_enabled else 'paused'}."
+        )
+        return redirect(request.POST.get("next") or reverse("monitors:detail", args=[pk]))

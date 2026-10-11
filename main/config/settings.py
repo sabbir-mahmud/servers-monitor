@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "apps.fleet",
     "apps.operations",
     "apps.alerts",
+    "apps.monitors",
     "apps.agent_api",
 ]
 
@@ -203,6 +204,8 @@ MONITOR_METRIC_RETENTION_DAYS = config("MONITOR_METRIC_RETENTION_DAYS", default=
 # a deploy that runs an hour after someone clicked it is worse than one that never ran.
 MONITOR_COMMAND_DELIVERY_SECONDS = config("MONITOR_COMMAND_DELIVERY_SECONDS", default=300, cast=int)
 MONITOR_COMMAND_OUTPUT_LIMIT = config("MONITOR_COMMAND_OUTPUT_LIMIT", default=256 * 1024, cast=int)
+# Application health checks run concurrently from the relay process.
+MONITOR_CHECK_WORKERS = config("MONITOR_CHECK_WORKERS", default=8, cast=int)
 MONITOR_SWEEP_SECONDS = 15  # offline detection + command expiry, run by the relay bridge
 
 ALERT_CPU_PERCENT = config("ALERT_CPU_PERCENT", default=90, cast=float)

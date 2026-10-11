@@ -55,6 +55,7 @@
   <a href="#services">Services</a>
   <a href="#charts">History</a>
   {% if can_operate %}<a href="#operate">Actions &amp; logs</a>{% endif %}
+  {% if server.monitors.exists %}<a href="#apps">Applications</a>{% endif %}
   <a href="#activity">Activity</a>
 </nav>
 
@@ -190,6 +191,21 @@
   </div></div></div>
 </div>
 {% endif %}
+
+{% with apps=server.monitors.all %}{% if apps %}
+<div id="apps" class="anchor card mb-3"><div class="card-header">{% icon "globe" 17 %} Applications on this server
+  <div class="card-actions"><a class="btn btn-sm btn-link" href="{% url 'monitors:list' %}">All applications {% icon "chevron" %}</a></div></div>
+  <div class="table-responsive"><table class="table table-sm table-hover align-middle">
+    <thead><tr><th>Application</th><th>Status</th><th class="num">Response</th><th class="num">Checked</th></tr></thead>
+    <tbody>{% for m in apps %}
+      <tr><td><a class="row-link" href="{% url 'monitors:detail' m.pk %}">{{ m.name }}</a><div class="row-sub mono text-truncate" style="max-width: 24rem">{{ m.url }}</div></td>
+        <td>{% monitor_badge m.display_status %}</td>
+        <td class="num text-body-secondary">{% if m.last_response_ms is not None %}{{ m.last_response_ms }} ms{% else %}—{% endif %}</td>
+        <td class="num text-body-secondary">{{ m.last_checked_at|ago }}</td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+</div>
+{% endif %}{% endwith %}
 
 <div id="activity" class="anchor card"><div class="card-header">{% icon "layers" 17 %} Recent commands
   {% if perms.operations.view_job %}<div class="card-actions"><a class="btn btn-sm btn-link" href="{% url 'operations:job_list' %}">All jobs {% icon "chevron" %}</a></div>{% endif %}</div>

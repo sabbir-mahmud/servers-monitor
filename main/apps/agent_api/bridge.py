@@ -5,6 +5,7 @@
 - Scheduler thread: re-sends commands Redis couldn't take at queue time (an outbox), runs
   the offline/expiry sweep every 15 s and prunes old metrics hourly. These are DB-only and
   cost no Redis commands while nothing is queued.
+- Checker thread: application health checks (plain HTTPS from this machine, no Redis).
 
 It replaces Celery + beat. Run exactly one per dashboard.
 """
@@ -22,6 +23,7 @@ from django.db import close_old_connections
 from apps.alerts.services import sweep
 from apps.fleet.models import Server
 from apps.fleet.services import ingest_report, prune_samples
+from apps.monitors.checker import Checker, prune_checks
 from apps.operations import services as ops
 from apps.operations.models import CommandStatus
 
@@ -114,8 +116,8 @@ class Bridge:
                         logger.info("Sweep: %s", result)
                 if now - last_prune >= 3600:
                     last_prune = now
-                    if deleted := prune_samples():
-                        logger.info("Pruned %d metric samples past retention", deleted)
+                    if deleted := prune_samples() + prune_checks():
+                        logger.info("Pruned %d samples/checks past retention", deleted)
             except Exception:  # keep scheduling even if one round hits a bug
                 logger.exception("Scheduler round failed")
             relay.mark_alive()
@@ -125,6 +127,7 @@ class Bridge:
         threads = [
             threading.Thread(target=self.receive_forever, name="relay-receive", daemon=True),
             threading.Thread(target=self.schedule_forever, name="relay-schedule", daemon=True),
+            threading.Thread(target=Checker(self.stop).run_forever, name="app-checks", daemon=True),
         ]
         for t in threads:
             t.start()

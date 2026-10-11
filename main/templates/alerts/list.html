@@ -16,13 +16,13 @@
 {% partialdef rows inline %}
 <div id="alerts" {% if state == "open" %}hx-get="{{ request.get_full_path }}" hx-trigger="every 15s" hx-swap="outerHTML"{% endif %}>
 <div class="card"><div class="table-responsive"><table class="table table-hover align-middle">
-  <thead><tr><th>Severity</th><th>Alert</th><th>Server</th><th>Opened</th><th>State</th><th></th></tr></thead>
+  <thead><tr><th>Severity</th><th>Alert</th><th>Source</th><th>Opened</th><th>State</th><th></th></tr></thead>
   <tbody>
   {% for a in object_list %}
     <tr>
       <td><span class="status {% if a.severity == 'critical' %}status-critical{% else %}status-warning{% endif %}"><span class="status-dot" aria-hidden="true"></span>{{ a.get_severity_display }}</span></td>
       <td class="fw-medium">{{ a.message }}</td>
-      <td><a class="row-link" href="{% url 'fleet:server_detail' a.server_id %}">{{ a.server.name }}</a></td>
+      <td>{% if a.server_id %}<a class="row-link" href="{% url 'fleet:server_detail' a.server_id %}">{{ a.server.name }}</a>{% elif a.monitor_id %}<a class="row-link d-inline-flex align-items-center gap-1" href="{% url 'monitors:detail' a.monitor_id %}">{% icon "globe" 14 %} {{ a.monitor.name }}</a>{% endif %}</td>
       <td class="text-nowrap">{{ a.opened_at|date:"M j, H:i" }}<div class="row-sub">{{ a.opened_at|timesince }} ago</div></td>
       <td class="text-body-secondary small">{% if a.resolved_at %}Resolved {{ a.resolved_at|timesince }} ago{% elif a.acknowledged_at %}Acknowledged by {{ a.acknowledged_by|default:"—" }}{% else %}<span class="text-critical fw-semibold">Open</span>{% endif %}</td>
       <td class="text-end">{% if a.is_open and not a.acknowledged_at and perms.alerts.change_alert %}

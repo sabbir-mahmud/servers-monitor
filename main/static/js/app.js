@@ -41,7 +41,9 @@ function bindSparks(root) {
       const x = ((best[0] - start) / (end - start)) * rect.width;
       cursor.style.left = x + "px";
       tip.style.left = Math.min(Math.max(x, 50), rect.width - 50) + "px";
-      tip.textContent = new Date(best[0] * 1000).toLocaleString() + " · " + best[1].toFixed(1) + "%";
+      const unit = fig.dataset.unit || "%";
+      const value = unit === "%" ? best[1].toFixed(1) + "%" : Math.round(best[1]).toLocaleString() + " " + unit;
+      tip.textContent = new Date(best[0] * 1000).toLocaleString() + " · " + value;
       cursor.hidden = tip.hidden = false;
     });
     plot.addEventListener("mouseleave", () => { cursor.hidden = tip.hidden = true; });

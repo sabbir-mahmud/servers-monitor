@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}{{ monitor }}{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'monitors:list' %}">{% icon "arrow-left" 15 %} Applications</a>
+
+<header class="card hero mb-3">
+  <div class="hero-main">
+    <div id="hero-mark" class="hero-mark tone-{% if monitor.display_status == 'up' %}good{% elif monitor.display_status == 'down' %}critical{% else %}muted{% endif %}">{% icon "globe" 26 %}</div>
+    <div class="hero-id">
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <h1 class="page-title">{{ monitor.name }}</h1>
+        <span id="hero-health">{% monitor_badge monitor.display_status %}</span>
+      </div>
+      <div class="hero-sub">
+        <a class="mono" id="mon-url" href="{{ monitor.url }}" target="_blank" rel="noopener noreferrer">{{ monitor.url }}</a>
+        <button type="button" class="icon-btn icon-btn-sm" data-copy="#mon-url" title="Copy URL" aria-label="Copy URL">{% icon "copy" 14 %}</button>
+      </div>
+    </div>
+    {% if can_change %}
+    <div class="hero-actions">
+      <form method="post" action="{% url 'monitors:check' monitor.pk %}">{% csrf_token %}
+        <button class="btn btn-outline-primary btn-sm">{% icon "refresh" %} Check now</button></form>
+      <form method="post" action="{% url 'monitors:toggle' monitor.pk %}">{% csrf_token %}
+        <button class="btn btn-outline-secondary btn-sm">{% if monitor.is_enabled %}{% icon "pause" %} Pause{% else %}{% icon "play" %} Resume{% endif %}</button></form>
+      <a class="btn btn-outline-secondary btn-sm" href="{% url 'monitors:update' monitor.pk %}">{% icon "edit" %} Edit</a>
+      {% if perms.monitors.delete_monitor %}
+      <div class="dropdown">
+        <button class="btn btn-outline-secondary btn-sm btn-icon" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="More actions">{% icon "more" %}</button>
+        <div class="dropdown-menu dropdown-menu-end">
+          <a class="dropdown-item text-danger-soft" href="{% url 'monitors:delete' monitor.pk %}">{% icon "trash" 16 %}<span><span class="d-block">Delete monitor</span><small>Remove it and its history</small></span></a>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+  <dl class="spec-strip">
+    <div><dt>Request</dt><dd>{{ monitor.method }} · timeout {{ monitor.timeout_seconds }}s</dd></div>
+    <div><dt>Schedule</dt><dd>every {{ monitor.interval_seconds|every }}</dd></div>
+    <div><dt>Counts as up</dt><dd>HTTP {{ monitor.expected_status }}{% if monitor.keyword %} + “{{ monitor.keyword }}”{% endif %}</dd></div>
+    <div><dt>Down after</dt><dd>{{ monitor.failure_threshold }} failed check{{ monitor.failure_threshold|pluralize }}</dd></div>
+    <div><dt>Server</dt><dd>{% if monitor.server %}<a href="{% url 'fleet:server_detail' monitor.server_id %}">{{ monitor.server.name }}</a>{% else %}—{% endif %}</dd></div>
+  </dl>
+</header>
+
+{% partialdef live inline %}
+<div id="live" hx-get="{% url 'monitors:detail' monitor.pk %}?part=live" hx-trigger="every 15s" hx-swap="outerHTML">
+  {% if request.htmx %}
+    <span id="hero-health" hx-swap-oob="true">{% monitor_badge monitor.display_status %}</span>
+    <div id="hero-mark" hx-swap-oob="true" class="hero-mark tone-{% if monitor.display_status == 'up' %}good{% elif monitor.display_status == 'down' %}critical{% else %}muted{% endif %}">{% icon "globe" 26 %}</div>
+  {% endif %}
+
+  {% if open_alerts %}
+  <div class="alert alert-danger mb-3" role="alert">{% icon "alert" %}
+    <div class="flex-grow-1"><strong>{{ open_alerts|length }} open alert{{ open_alerts|length|pluralize }}</strong>
+      <ul class="alert-list">{% for a in open_alerts %}<li>{{ a.message }} <span class="muted">· since {{ a.opened_at|timesince }}</span></li>{% endfor %}</ul></div>
+  </div>
+  {% elif not monitor.is_enabled %}
+  <div class="alert alert-info mb-3" role="status">{% icon "pause" %}<div>Paused: no checks run and no alerts fire until you resume it.</div></div>
+  {% endif %}
+
+  <div class="stat-grid six">
+    <div class="stat"><div class="stat-label">{% icon "clock" 15 %} {% if monitor.display_status == "down" %}Down for{% elif monitor.display_status == "up" %}Up for{% else %}Status{% endif %}</div>
+      <div class="stat-value sm">{% if monitor.status_since and monitor.display_status != "paused" %}{{ monitor.status_since|timesince }}{% else %}{{ monitor.get_status_display }}{% endif %}</div>
+      <div class="stat-hint">checked {{ monitor.last_checked_at|ago }}</div></div>
+    {% for label, pct in uptime.items %}
+    <div class="stat"><div class="stat-label">{% icon "check" 15 %} Uptime · {{ label }}</div>
+      <div class="stat-value sm {% if pct is not None and pct < 99 %}text-critical{% endif %}">{% if pct is not None %}{{ pct|floatformat:2 }}%{% else %}—{% endif %}</div>
+      <div class="stat-hint">&nbsp;</div></div>
+    {% endfor %}
+    <div class="stat"><div class="stat-label">{% icon "activity" 15 %} Avg response</div>
+      <div class="stat-value sm">{% if avg_ms is not None %}{{ avg_ms|floatformat:0 }} ms{% else %}—{% endif %}</div>
+      <div class="stat-hint">last {% if monitor.last_response_ms is not None %}{{ monitor.last_response_ms }} ms{% else %}—{% endif %}{% if monitor.last_status_code %} · HTTP {{ monitor.last_status_code }}{% endif %}</div></div>
+    <div class="stat"><div class="stat-label">{% icon "lock" 15 %} Certificate</div>
+      {% with days=monitor.tls_days_left %}
+      <div class="stat-value sm {% if days is not None and days < 14 %}text-critical{% endif %}">{% if days is None %}—{% elif days < 0 %}Expired{% else %}{{ days }} days{% endif %}</div>
+      <div class="stat-hint">{% if monitor.tls_expires_at %}expires {{ monitor.tls_expires_at|date:"M j, Y" }}{% elif not monitor.url|slice:":5" == "https" %}plain HTTP{% else %}checked every 12 h{% endif %}</div>
+      {% endwith %}</div>
+  </div>
+
+  <div class="card mb-3"><div class="card-body">
+    <div class="d-flex justify-content-between align-items-baseline mb-2">
+      <span class="section-title">Last 24 hours</span>
+      <span class="small text-body-secondary">{% if monitor.last_error %}Last error: {{ monitor.last_error }}{% else %}Each bar is 20 minutes · hover for details{% endif %}</span>
+    </div>
+    {% include "monitors/_bar.html" with bar=bar tall=True %}
+    <div class="d-flex justify-content-between mt-2 small muted"><span>24 hours ago</span><span>now</span></div>
+  </div></div>
+</div>
+{% endpartialdef %}
+
+{% partialdef chart inline %}
+<div id="chart" class="card mb-3" hx-get="{% url 'monitors:detail' monitor.pk %}?part=chart&range={{ range_key }}" hx-trigger="every 60s" hx-swap="outerHTML">
+  <div class="card-header">{% icon "chart" 17 %} Response time
+    <div class="card-actions">
+      <div class="segmented" role="group" aria-label="Time range">
+        {% for r in ranges %}
+          <button type="button" class="{% if r == range_key %}active{% endif %}" {% if r == range_key %}aria-pressed="true"{% endif %}
+            hx-get="{% url 'monitors:detail' monitor.pk %}?part=chart&range={{ r }}" hx-target="#chart" hx-swap="outerHTML">{{ r }}</button>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  <div class="card-body pt-4">{% sparkline series.points series.start series.end "Response time" series.ymax "ms" %}</div>
+</div>
+{% endpartialdef %}
+
+<div class="row g-3">
+  <div class="col-12 col-xl-5"><div class="card h-100"><div class="card-header">{% icon "alert" 17 %} Incidents</div>
+    <div class="table-responsive"><table class="table table-sm align-middle">
+      <thead><tr><th>Started</th><th>Duration</th><th>Reason</th></tr></thead>
+      <tbody>
+      {% for inc in incidents %}
+        <tr><td class="text-nowrap">{{ inc.started|date:"M j, H:i" }}{% if not inc.ended %} <span class="status status-critical ms-1"><span class="status-dot"></span>Ongoing</span>{% endif %}</td>
+          <td class="text-nowrap">{{ inc.duration|duration_td }}</td><td class="text-body-secondary small">{{ inc.error|default:"check failed" }}</td></tr>
+      {% empty %}<tr><td colspan="3" class="empty-small">{% icon "check" 16 %} No failures in the last 14 days.</td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+  </div></div>
+  <div class="col-12 col-xl-7"><div class="card h-100"><div class="card-header">{% icon "layers" 17 %} Recent checks</div>
+    <div class="table-responsive"><table class="table table-sm table-hover align-middle">
+      <thead><tr><th>When</th><th>Result</th><th class="num">HTTP</th><th class="num">Time</th><th>Detail</th></tr></thead>
+      <tbody>
+      {% for c in recent %}
+        <tr><td class="text-body-secondary text-nowrap">{{ c.checked_at|ago }}</td>
+          <td>{% if c.ok %}<span class="status status-good"><span class="status-dot"></span>OK</span>{% else %}<span class="status status-critical"><span class="status-dot"></span>Failed</span>{% endif %}</td>
+          <td class="num">{{ c.status_code|default_if_none:"—" }}</td>
+          <td class="num text-body-secondary">{% if c.response_ms is not None %}{{ c.response_ms }} ms{% else %}—{% endif %}</td>
+          <td class="small text-body-secondary text-truncate" style="max-width: 16rem">{{ c.error }}</td></tr>
+      {% empty %}<tr><td colspan="5" class="empty-small">No checks yet. The relay process runs them; the first one happens within seconds.</td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+  </div></div>
+</div>
+{% endblock %}

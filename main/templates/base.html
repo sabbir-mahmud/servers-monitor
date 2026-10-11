@@ -30,6 +30,7 @@
       <nav class="side-nav" aria-label="Main">
         <div class="side-label">Monitor</div>
         <a class="side-link {% if ns == 'fleet' %}active{% endif %}" href="{% url 'fleet:dashboard' %}" {% if ns == 'fleet' %}aria-current="page"{% endif %}>{% icon "server" %} Servers</a>
+        {% if perms.monitors.view_monitor %}<a class="side-link {% if ns == 'monitors' %}active{% endif %}" href="{% url 'monitors:list' %}" {% if ns == 'monitors' %}aria-current="page"{% endif %}>{% icon "globe" %} Applications</a>{% endif %}
         {% if perms.alerts.view_alert %}<a class="side-link {% if ns == 'alerts' %}active{% endif %}" href="{% url 'alerts:list' %}" {% if ns == 'alerts' %}aria-current="page"{% endif %}>{% icon "bell" %} Alerts</a>{% endif %}
 
         {% if perms.operations.view_job or perms.operations.add_job %}<div class="side-label">Operate</div>{% endif %}

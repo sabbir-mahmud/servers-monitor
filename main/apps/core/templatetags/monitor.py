@@ -28,6 +28,12 @@ COMMAND_BADGES = {
     "expired": ("muted", "⌛", "Expired"),
     "cancelled": ("muted", "–", "Cancelled"),
 }
+MONITOR_BADGES = {
+    "up": ("good", "●", "Up"),
+    "down": ("critical", "✕", "Down"),
+    "pending": ("muted", "○", "Checking…"),
+    "paused": ("muted", "⏸", "Paused"),
+}
 SERVICE_BADGES = {
     "up": ("good", "●", "Up"),
     "down": ("critical", "✕", "Down"),
@@ -84,6 +90,8 @@ ICONS = {
     "lock": '<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
     "more": '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
     "timer": '<path d="M10 2h4M12 14l3-3"/><circle cx="12" cy="14" r="8"/>',
+    "globe": '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+    "pause": '<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>',
     "user": '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
 }
 
@@ -112,6 +120,11 @@ def health_tone(health):
 @register.simple_tag
 def command_badge(status):
     return _badge(COMMAND_BADGES, status)
+
+
+@register.simple_tag
+def monitor_badge(state):
+    return _badge(MONITOR_BADGES, state)
 
 
 @register.simple_tag
@@ -201,6 +214,30 @@ def ago(value):
 
 
 @register.filter
+def duration_td(delta):
+    """timedelta -> "3h 12m" / "45s"."""
+    if delta is None:
+        return "—"
+    seconds = int(delta.total_seconds())
+    if seconds < 60:
+        return f"{seconds}s"
+    return duration(seconds)
+
+
+@register.filter
+def every(seconds):
+    """Interval in seconds -> "30s" / "5m" / "1h 30m"."""
+    seconds = int(seconds or 0)
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds % 3600 == 0:
+        return f"{seconds // 3600}h"
+    if seconds < 3600:
+        return f"{seconds // 60}m" + (f" {seconds % 60}s" if seconds % 60 else "")
+    return duration(seconds)
+
+
+@register.filter
 def bps(value):
     if value in (None, ""):
         return "—"
@@ -220,10 +257,15 @@ def get_item(mapping, key):
 SPARK_W, SPARK_H = 600, 120
 
 
+def _fmt(value: float, unit: str) -> str:
+    return f"{value:.0f}{unit}" if unit == "%" else f"{value:,.0f} {unit}"
+
+
 @register.simple_tag
-def sparkline(points, start, end, label):
-    """Line chart of 0–100 % values over [start, end]. Gaps longer than three buckets break
-    the line, so an outage shows as a hole instead of a misleading straight segment."""
+def sparkline(points, start, end, label, ymax=100, unit="%"):
+    """Line chart of values in [0, ymax] over [start, end]. Gaps longer than three buckets
+    break the line, so an outage shows as a hole instead of a misleading straight segment."""
+    ymax = max(1, float(ymax))
     span = max(1, end - start)
     gap = span / 120 * 3
     segments, current, prev_t = [], [], None
@@ -232,7 +274,7 @@ def sparkline(points, start, end, label):
             segments.append(current)
             current = []
         x = (t - start) / span * SPARK_W
-        y = SPARK_H - (v / 100.0) * SPARK_H
+        y = SPARK_H - (min(v, ymax) / ymax) * SPARK_H
         current.append(f"{x:.1f},{y:.1f}")
         prev_t = t
     if current:
@@ -261,17 +303,18 @@ def sparkline(points, start, end, label):
     values = [v for _, v in points]
     stats = (
         format_html(
-            '<dl class="spark-stats"><div><dt>Now</dt><dd>{}%</dd></div>'
-            "<div><dt>Avg</dt><dd>{}%</dd></div><div><dt>Max</dt><dd>{}%</dd></div></dl>",
-            f"{values[-1]:.0f}",
-            f"{sum(values) / len(values):.0f}",
-            f"{max(values):.0f}",
+            '<dl class="spark-stats"><div><dt>Now</dt><dd>{}</dd></div>'
+            "<div><dt>Avg</dt><dd>{}</dd></div><div><dt>Max</dt><dd>{}</dd></div></dl>",
+            _fmt(values[-1], unit),
+            _fmt(sum(values) / len(values), unit),
+            _fmt(max(values), unit),
         )
         if values
         else mark_safe('<p class="text-muted small mb-0">No data in this range.</p>')
     )
     return format_html(
-        '<figure class="spark" data-points="{data}" data-start="{start}" data-end="{end}">'
+        '<figure class="spark" data-points="{data}" data-start="{start}" data-end="{end}" '
+        'data-unit="{unit}">'
         '<figcaption><span class="spark-title">{label}</span>{stats}</figcaption>'
         '<div class="spark-plot"><svg viewBox="0 0 {w} {h}" preserveAspectRatio="none" '
         'role="img" aria-label="{label} over time">'
@@ -280,8 +323,8 @@ def sparkline(points, start, end, label):
         "</linearGradient></defs>{grid}"
         '<line class="spark-base" x1="0" x2="{w}" y1="{h}" y2="{h}" vector-effect="non-scaling-stroke"/>'
         "{areas}{lines}</svg>"
-        '<span class="spark-axis spark-axis-top">100%</span>'
-        '<span class="spark-axis spark-axis-mid">50%</span>'
+        '<span class="spark-axis spark-axis-top">{top}</span>'
+        '<span class="spark-axis spark-axis-mid">{mid}</span>'
         '<div class="spark-cursor" hidden></div><div class="spark-tip" hidden></div></div>'
         "</figure>",
         data=json.dumps(points),
@@ -295,4 +338,7 @@ def sparkline(points, start, end, label):
         areas=areas,
         grad_id=grad_id,
         lines=lines,
+        unit=unit,
+        top=_fmt(ymax, unit),
+        mid=_fmt(ymax / 2, unit),
     )

@@ -11,6 +11,8 @@ class AlertKind(models.TextChoices):
     MEMORY = "memory", "High memory"
     DISK = "disk", "Disk filling up"
     SERVICE = "service", "Service down"
+    APP_DOWN = "app_down", "Application down"
+    CERT = "cert", "Certificate expiring"
 
 
 class Severity(models.TextChoices):
@@ -20,7 +22,14 @@ class Severity(models.TextChoices):
 
 class Alert(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
-    server = models.ForeignKey("fleet.Server", on_delete=models.CASCADE, related_name="alerts")
+    # Exactly one of these is set: server alerts come from heartbeats, monitor alerts from
+    # application health checks.
+    server = models.ForeignKey(
+        "fleet.Server", null=True, blank=True, on_delete=models.CASCADE, related_name="alerts"
+    )
+    monitor = models.ForeignKey(
+        "monitors.Monitor", null=True, blank=True, on_delete=models.CASCADE, related_name="alerts"
+    )
     kind = models.CharField(max_length=20, choices=AlertKind.choices)
     # Distinguishes several open alerts of one kind on one server (the service name).
     subject = models.CharField(max_length=100, blank=True, default="")
@@ -44,6 +53,15 @@ class Alert(models.Model):
                 condition=Q(resolved_at__isnull=True),
                 name="alert_one_open_per_subject",
             ),
+            models.UniqueConstraint(
+                fields=["monitor", "kind"],
+                condition=Q(resolved_at__isnull=True, monitor__isnull=False),
+                name="alert_one_open_per_monitor_kind",
+            ),
+            models.CheckConstraint(
+                condition=Q(server__isnull=False) ^ Q(monitor__isnull=False),
+                name="alert_server_xor_monitor",
+            ),
         ]
         indexes = [
             models.Index(
@@ -55,7 +73,7 @@ class Alert(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.server} {self.get_kind_display()} {self.subject}".strip()
+        return f"{self.server or self.monitor} {self.get_kind_display()} {self.subject}".strip()
 
     @property
     def is_open(self) -> bool:

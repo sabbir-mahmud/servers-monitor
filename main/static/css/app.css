@@ -738,3 +738,14 @@ tr.row-critical > td:first-child { box-shadow: inset 3px 0 0 var(--critical); }
 .token-details summary { cursor: pointer; color: var(--ink-2); }
 .smctl-cheats { margin-top: .75rem; }
 .smctl-cheats .c { color: rgb(212 215 222 / .45); }
+
+/* ---------- Application monitors ---------- */
+/* Uptime bar: one cell per time bucket, colour plus a native tooltip with the numbers. */
+.ubar { display: flex; gap: 2px; height: 22px; align-items: stretch; }
+.ubar-tall { height: 36px; gap: 3px; }
+.ubar > i { flex: 1 1 0; min-width: 2px; border-radius: 2px; background: var(--track); transition: transform .12s ease, opacity .12s; }
+.ubar > i:hover { transform: scaleY(1.15); opacity: .85; }
+.ubar > .ubar-up { background: var(--good); opacity: .85; }
+.ubar > .ubar-partial { background: var(--warning); }
+.ubar > .ubar-down { background: var(--critical); }
+.stat-value .unit { font-size: .55em; font-weight: 600; color: var(--muted); margin-left: 2px; }

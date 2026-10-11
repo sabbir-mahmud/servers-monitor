@@ -18,7 +18,7 @@ class AlertListView(StaffViewMixin, HtmxTemplateMixin, ListView):
     paginate_by = 50
 
     def get_queryset(self):
-        qs = Alert.objects.select_related("server", "acknowledged_by")
+        qs = Alert.objects.select_related("server", "monitor", "acknowledged_by")
         state = self.request.GET.get("state", "open")
         if state == "open":
             qs = qs.filter(resolved_at__isnull=True)

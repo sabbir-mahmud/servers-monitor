@@ -72,7 +72,16 @@ streamed output add a few commands each. Raise the interval on quiet servers to 
 - **Run on servers:** pick an action, tick servers (or select all), queue it, then watch
   per-server status and output live. Servers that can't run the action are skipped and
   the reason is shown.
-- **Alerts:** offline, CPU, memory, disk, service down. Acknowledge, resolve
+- **Applications:** HTTP(S) health checks for your apps (`/apps/`). Each one has a URL,
+  an interval (30 s to 1 h), the status codes that count as up, an optional keyword the
+  body must contain, and an optional link to the server it runs on. You get a 24-hour
+  uptime bar, uptime over 24 h, 7 d and 14 d, a response-time chart, incidents, and TLS
+  certificate expiry (warning under 14 days). A failed check is retried after 15 s and it
+  only counts as down after N failures in a row, so a blip never pages you. Checks run
+  from the relay process over plain HTTPS, so they cost no Redis commands. For URLs only
+  reachable from inside a server (`localhost:8000/health`), use
+  `smctl service add --kind http` on that server instead.
+- **Alerts:** offline, CPU, memory, disk, service down, application down, certificate expiring. Acknowledge, resolve
   automatically, notify via webhook.
 - **Roles:** Viewer (read), Operator (run actions, ack alerts), Admin (manage servers
   and tokens, shell, audit log). Defined in `apps/users/roles.py` and synced on every migrate.
@@ -176,6 +185,7 @@ main/
                      payload validation
   apps/operations/   Job (fan-out) + Command (per server) lifecycle
   apps/alerts/       rules, offline sweep, webhook notifications (thread + retries)
+  apps/monitors/     application health checks: checker (runs in the relay), stats, UI
   apps/audit/        append-only audit trail
   apps/users/        custom User, roles matrix, throttled login
   templates/         Bootstrap 5 + HTMX, Django 6 template partials for live regions
