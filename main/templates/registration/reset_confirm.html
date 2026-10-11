@@ -1,0 +1,33 @@
+{% extends "registration/auth_base.html" %}
+{% load monitor %}
+{% block auth_title %}Choose a new password{% endblock %}
+{% block auth_form %}
+      {% if validlink %}
+      <div class="login-heading">
+        <h1>Choose a new password</h1>
+        <p>At least 10 characters. You'll sign in with it next, and any other signed-in devices are signed out.</p>
+      </div>
+      <form method="post" class="form-section" data-loading-form novalidate>{% csrf_token %}
+        {% if form.non_field_errors %}<div class="alert alert-danger mb-0" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+        <div>
+          <label class="form-label" for="id_new_password1">New password</label>
+          <div class="input-icon has-trailing">{% icon "lock" 16 %}{{ form.new_password1 }}
+            <button type="button" class="input-trailing" data-toggle-password="#id_new_password1" aria-label="Show password" aria-pressed="false"><span data-when="hidden">{% icon "eye" 17 %}</span><span data-when="shown" hidden>{% icon "eye-off" 17 %}</span></button></div>
+          {% for e in form.new_password1.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+        </div>
+        <div>
+          <label class="form-label" for="id_new_password2">Confirm new password</label>
+          <div class="input-icon">{% icon "lock" 16 %}{{ form.new_password2 }}</div>
+          {% for e in form.new_password2.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+        </div>
+        <button class="btn btn-primary btn-lg w-100 login-submit"><span class="spinner" aria-hidden="true"></span><span class="login-submit-label">Set password</span></button>
+      </form>
+      {% else %}
+      <div class="auth-result">
+        <span class="auth-result-icon is-warning">{% icon "alert" 26 %}</span>
+        <h1>This link doesn't work any more</h1>
+        <p>Reset links work once and expire after a couple of hours. Request a new one, or ask an administrator.</p>
+        <a class="btn btn-primary w-100 mt-2" href="{% url 'password_forgot' %}">Get a new link</a>
+      </div>
+      {% endif %}
+{% endblock %}

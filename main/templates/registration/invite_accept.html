@@ -1,0 +1,22 @@
+{% extends "registration/auth_base.html" %}
+{% load monitor %}
+{% block auth_title %}Join {{ SITE_NAME }}{% endblock %}
+{% block auth_form %}
+      <div class="login-heading">
+        <h1>Join {{ SITE_NAME }}</h1>
+        <p>{% if invite.invited_by %}{{ invite.invited_by.display_name }} invited{% else %}You're invited{% endif %} <b>{{ invite.email }}</b> as <span class="chip">{{ invite.role }}</span>. Choose how you'll sign in.</p>
+      </div>
+      {% if logout_first %}<div class="alert alert-warning" role="status">{% icon "alert" %}<div>You're signed in as {{ user.get_username }}. Finishing this creates a separate account and signs you in to it.</div></div>{% endif %}
+      <form method="post" class="form-section" data-loading-form novalidate>{% csrf_token %}
+        {% if form.non_field_errors %}<div class="alert alert-danger mb-0" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+        <div class="row g-3">
+          <div class="col-6">{% include "alerts/_field.html" with field=form.first_name %}</div>
+          <div class="col-6">{% include "alerts/_field.html" with field=form.last_name %}</div>
+        </div>
+        {% include "alerts/_field.html" with field=form.username %}
+        {% include "alerts/_field.html" with field=form.password1 %}
+        {% include "alerts/_field.html" with field=form.password2 %}
+        <button class="btn btn-primary btn-lg w-100 login-submit"><span class="spinner" aria-hidden="true"></span><span class="login-submit-label">Create my account</span></button>
+      </form>
+      <p class="login-note">{% icon "clock" 13 %} This invitation expires {{ invite.expires_at|date:"M j" }}.</p>
+{% endblock %}

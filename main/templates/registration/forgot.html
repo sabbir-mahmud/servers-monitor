@@ -1,0 +1,27 @@
+{% extends "registration/auth_base.html" %}
+{% load monitor %}
+{% block auth_title %}Reset your password{% endblock %}
+{% block auth_form %}
+      <a class="back-link" href="{% url 'login' %}">{% icon "arrow-left" 15 %} Back to sign in</a>
+      <div class="login-heading">
+        <h1>Forgot your password?</h1>
+        {% if email_enabled %}<p>Enter your account's email and we'll send you a link to choose a new one.</p>
+        {% else %}<p>This dashboard doesn't send email, so an administrator resets passwords.</p>{% endif %}
+      </div>
+      {% if email_enabled %}
+      <form method="post" class="form-section" data-loading-form novalidate>{% csrf_token %}
+        {% if form.non_field_errors %}<div class="alert alert-danger mb-0" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+        <div>
+          <label class="form-label" for="id_email">Email</label>
+          <div class="input-icon">{% icon "user" 16 %}{{ form.email }}</div>
+          {% for e in form.email.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+        </div>
+        <button class="btn btn-primary btn-lg w-100 login-submit"><span class="spinner" aria-hidden="true"></span><span class="login-submit-label">Send reset link</span></button>
+      </form>
+      {% else %}
+      <div class="card"><div class="card-body"><div class="steps">
+        <div class="step"><span class="step-num"></span><div><h2>Ask an administrator</h2><p class="mb-0">They open <b>Users</b>, pick your account and press <b>Create reset link</b>.</p></div></div>
+        <div class="step"><span class="step-num"></span><div><h2>Open the link</h2><p class="mb-0">It works once and expires after a couple of hours. Choose a new password and sign in.</p></div></div>
+      </div></div></div>
+      {% endif %}
+{% endblock %}

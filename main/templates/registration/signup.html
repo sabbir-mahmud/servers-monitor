@@ -1,0 +1,22 @@
+{% extends "registration/auth_base.html" %}
+{% load monitor %}
+{% block auth_title %}Request an account{% endblock %}
+{% block auth_form %}
+      <a class="back-link" href="{% url 'login' %}">{% icon "arrow-left" 15 %} Back to sign in</a>
+      <div class="login-heading">
+        <h1>Request an account</h1>
+        <p>An administrator reviews new accounts before they can sign in.</p>
+      </div>
+      <form method="post" class="form-section" data-loading-form novalidate>{% csrf_token %}
+        {% if form.non_field_errors %}<div class="alert alert-danger mb-0" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+        {% include "alerts/_field.html" with field=form.email %}
+        <div class="row g-3">
+          <div class="col-6">{% include "alerts/_field.html" with field=form.first_name %}</div>
+          <div class="col-6">{% include "alerts/_field.html" with field=form.last_name %}</div>
+        </div>
+        {% include "alerts/_field.html" with field=form.username %}
+        {% include "alerts/_field.html" with field=form.password1 %}
+        {% include "alerts/_field.html" with field=form.password2 %}
+        <button class="btn btn-primary btn-lg w-100 login-submit"><span class="spinner" aria-hidden="true"></span><span class="login-submit-label">Request account</span></button>
+      </form>
+{% endblock %}

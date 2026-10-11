@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Invite someone{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'users:list' %}">{% icon "arrow-left" 15 %} Users</a>
+<div class="page-head"><div>
+  <h1 class="page-title">Invite someone</h1>
+  <p class="page-sub">They get a single-use link to choose a username and password. It expires in {{ INVITATION_DAYS|default:7 }} days.</p>
+</div></div>
+<form method="post" novalidate style="max-width: 44rem">{% csrf_token %}
+  <div class="card mb-3"><div class="card-body form-section">
+    {% include "alerts/_field.html" with field=form.email %}
+    <div>
+      <span class="form-label d-block">Role</span>
+      <div class="role-choices">
+        {% for radio in form.role %}
+        <label class="role-choice">{{ radio.tag }}<span><span class="role-pill role-{{ radio.choice_label|lower }}">{{ radio.choice_label }}</span><span class="row-sub d-block mt-1">{% for name, text in form.role_help.items %}{% if name == radio.choice_label %}{{ text }}{% endif %}{% endfor %}</span></span></label>
+        {% endfor %}
+      </div>
+      {% for e in form.role.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+    </div>
+  </div></div>
+  <div class="d-flex gap-2"><button class="btn btn-primary">{% icon "send" %} Create invitation</button><a class="btn btn-link" href="{% url 'users:list' %}">Cancel</a></div>
+</form>
+{% endblock %}

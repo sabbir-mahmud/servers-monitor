@@ -122,10 +122,15 @@ if "test" in sys.argv or "pytest" in sys.modules:
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 10},
+    },
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
+# Sign in with a username or an email address.
+AUTHENTICATION_BACKENDS = ["apps.users.backends.UsernameOrEmailBackend"]
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "fleet:dashboard"
 LOGOUT_REDIRECT_URL = "login"
@@ -133,6 +138,43 @@ LOGOUT_REDIRECT_URL = "login"
 SESSION_COOKIE_AGE = config("SESSION_COOKIE_AGE", default=60 * 60 * 12, cast=int)
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = CSRF_COOKIE_SAMESITE = "Lax"
+
+# Accounts: invitations (the default way in), password resets, optional self sign-up.
+INVITATION_DAYS = config("INVITATION_DAYS", default=7, cast=int)
+PASSWORD_RESET_TIMEOUT = config("PASSWORD_RESET_TIMEOUT", default=2 * 60 * 60, cast=int)
+# Public sign-up is off: this dashboard can deploy to servers. When on, new accounts wait
+# for an Admin to approve them and start with no access.
+ALLOW_SIGNUP = config("ALLOW_SIGNUP", default=False, cast=bool)
+
+# Email (password resets, invitations). Without EMAIL_HOST nothing is sent: Admins hand
+# out reset and invitation links themselves, which works fully offline. Django 6.1's MAILERS
+# replaces the deprecated EMAIL_* settings; the .env names stay the familiar ones.
+_SMTP_HOST = config("EMAIL_HOST", default="")
+EMAIL_ENABLED = bool(_SMTP_HOST)
+MAILERS = {
+    "default": (
+        {
+            "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+            "OPTIONS": {
+                "host": _SMTP_HOST,
+                "port": config("EMAIL_PORT", default=587, cast=int),
+                "username": config("EMAIL_HOST_USER", default=""),
+                "password": config("EMAIL_HOST_PASSWORD", default=""),
+                "use_tls": config("EMAIL_USE_TLS", default=True, cast=bool),
+                "use_ssl": config("EMAIL_USE_SSL", default=False, cast=bool),
+                "timeout": 15,
+            },
+        }
+        if EMAIL_ENABLED
+        # Development prints mail to the console; production without SMTP is deliberately
+        # mail-free and says so if anything ever tries to send.
+        else {"BACKEND": "django.core.mail.backends.console.EmailBackend"}
+        if DEBUG
+        else {"BACKEND": "apps.core.mail.DisabledEmailBackend"}
+    )
+}
+DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="Server Monitor <noreply@localhost>")
+SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
 LOGIN_FAILURE_LIMIT = config("LOGIN_FAILURE_LIMIT", default=6, cast=int)
 LOGIN_FAILURE_TIMEOUT = config("LOGIN_FAILURE_TIMEOUT", default=900, cast=int)

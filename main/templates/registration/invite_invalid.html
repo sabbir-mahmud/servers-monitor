@@ -1,0 +1,12 @@
+{% extends "registration/auth_base.html" %}
+{% load monitor %}
+{% block auth_title %}Invitation unavailable{% endblock %}
+{% block auth_form %}
+      <div class="auth-result">
+        <span class="auth-result-icon is-warning">{% icon "alert" 26 %}</span>
+        {% if throttled %}<h1>Too many attempts</h1><p>Wait a while and open the link again.</p>
+        {% else %}<h1>This invitation can't be used</h1>
+        <p>It may have expired, been used already, or been replaced by a newer one. Ask the person who invited you to send a fresh link.</p>{% endif %}
+        <a class="btn btn-outline-secondary w-100 mt-2" href="{% url 'login' %}">Go to sign in</a>
+      </div>
+{% endblock %}

@@ -1,0 +1,8 @@
+Hi,
+
+{% if inviter %}{{ inviter.display_name }} invited you{% else %}You're invited{% endif %} to {{ SITE_NAME }} as {{ invitation.role }}.
+
+Create your account here (works once, expires in {{ days }} days):
+{{ link }}
+
+If you weren't expecting this, ignore this email.

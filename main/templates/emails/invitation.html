@@ -1,0 +1,6 @@
+{% include "emails/_layout_top.html" %}
+<h1 style="font-size:20px;margin:0 0 12px">You're invited to {{ SITE_NAME }}</h1>
+<p>{% if inviter %}{{ inviter.display_name }} invited you{% else %}You've been invited{% endif %} to join as <b>{{ invitation.role }}</b>.</p>
+<p style="margin:24px 0"><a href="{{ link }}" style="background:#3b62d9;color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:600;display:inline-block">Create my account</a></p>
+<p style="color:#55555b;font-size:13px">The link works once and expires in {{ days }} days. If you weren't expecting this, ignore this email.</p>
+{% include "emails/_layout_bottom.html" %}

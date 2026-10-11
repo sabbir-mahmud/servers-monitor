@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Invitation created{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'users:list' %}">{% icon "arrow-left" 15 %} Users</a>
+<div class="page-head"><div>
+  <h1 class="page-title">Invitation for {{ invite.email }}</h1>
+  <p class="page-sub">Role <span class="role-pill role-{{ invite.role|lower }}">{{ invite.role }}</span> · works once · expires {{ invite.expires_at|date:"M j, H:i" }}</p>
+</div></div>
+<div style="max-width: 46rem">
+  {% if email_enabled %}<div class="alert alert-success" role="status">{% icon "check" %}<div>Emailed to <b>{{ invite.email }}</b>. You can also share the link below.</div></div>
+  {% else %}<div class="alert alert-warning" role="status">{% icon "alert" %}<div><b>Copy the link now and send it yourself</b> (chat, email). It's shown only once; email isn't configured on this dashboard.</div></div>{% endif %}
+  <div class="card"><div class="card-body">
+    <div class="token-box"><code id="invite-link" class="text-break">{{ link }}</code>
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-copy="#invite-link">{% icon "copy" %} <span data-copy-label>Copy</span></button></div>
+    <p class="small text-body-secondary mt-3 mb-0">Anyone with this link can create the account, so send it only to {{ invite.email }}. Revoke it from Users if it goes astray.</p>
+  </div></div>
+  <a class="btn btn-primary mt-3" href="{% url 'users:list' %}">Done</a>
+</div>
+{% endblock %}

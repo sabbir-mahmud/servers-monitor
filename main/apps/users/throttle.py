@@ -27,3 +27,17 @@ def record_failure(username: str, ip: str | None) -> None:
 
 def clear(username: str, ip: str | None) -> None:
     cache.delete(_key(username, ip))
+
+
+def allow(scope: str, key: str, limit: int, window: int) -> bool:
+    """Fixed-window rate limit: True if this hit is within `limit` per `window` seconds.
+    Used for password resets, sign-ups and invitation links (per IP and per address)."""
+    digest = hashlib.sha256(f"{scope}|{key.lower()}".encode()).hexdigest()[:32]
+    cache_key = f"rate:{scope}:{digest}"
+    if cache.add(cache_key, 1, window):
+        return True
+    try:
+        return cache.incr(cache_key) <= limit
+    except ValueError:  # expired between add and incr
+        cache.set(cache_key, 1, window)
+        return True

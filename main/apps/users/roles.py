@@ -5,8 +5,8 @@ way to change what a role can do. `sync_roles` runs after every migrate.
 Viewer   — read everything except the audit log.
 Operator — Viewer + run allow-listed actions, cancel commands, acknowledge alerts,
            edit/pause/re-check application monitors, schedule maintenance windows.
-Admin    — Operator + manage servers/tokens, monitors and notification channels,
-           free-form shell, audit log.
+Admin    — Operator + manage servers/tokens, monitors, notification channels and users
+           (invite, roles, deactivate, reset passwords), free-form shell, audit log.
 """
 
 import logging
@@ -48,6 +48,9 @@ ADMINISTER = [
     "monitors.delete_monitor",
     "operations.run_shell",
     "audit.view_auditlog",
+    "users.view_user",
+    "users.add_user",
+    "users.change_user",
 ]
 
 ROLE_MATRIX = {

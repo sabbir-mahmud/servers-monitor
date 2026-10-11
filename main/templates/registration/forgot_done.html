@@ -1,0 +1,12 @@
+{% extends "registration/auth_base.html" %}
+{% load monitor %}
+{% block auth_title %}Check your email{% endblock %}
+{% block auth_form %}
+      <div class="auth-result">
+        <span class="auth-result-icon">{% icon "send" 26 %}</span>
+        <h1>Check your email</h1>
+        <p>If <b>{{ email }}</b> belongs to an account here, a reset link is on its way. It works once and expires in {{ hours }} hour{{ hours|pluralize }}.</p>
+        <p class="small muted">Nothing after a few minutes? Check spam, or ask an administrator for a reset link.</p>
+        <a class="btn btn-outline-secondary w-100 mt-2" href="{% url 'login' %}">Back to sign in</a>
+      </div>
+{% endblock %}

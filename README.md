@@ -93,8 +93,21 @@ streamed output add a few commands each. Raise the interval on quiet servers to 
   nobody is notified; anything still broken when the window ends is sent then, marked
   "held during maintenance". Muting a server also mutes the applications on it. Acknowledge, resolve
   automatically, notify via webhook.
-- **Roles:** Viewer (read), Operator (run actions, ack alerts), Admin (manage servers
-  and tokens, shell, audit log). Defined in `apps/users/roles.py` and synced on every migrate.
+- **Roles:** Viewer (read), Operator (run actions, ack alerts, mute, edit apps), Admin
+  (servers, credentials, users, notifications, shell, audit log). Defined in
+  `apps/users/roles.py` and synced on every migrate.
+- **Users** (Administration → Users): invite people by email with a role. They get a
+  single-use link (7 days) to pick a username and password; the link is emailed if SMTP is
+  set, and always shown to the Admin to copy. Change roles, deactivate (signs them out
+  everywhere at once), create password-reset links. You can't demote or deactivate
+  yourself or the last Admin. Optional public sign-up (`ALLOW_SIGNUP=True`) puts new
+  accounts in an approval queue with no access.
+- **Passwords:** sign in with username or email. "Forgot password" emails a single-use
+  link (2 h) when SMTP is configured, and never reveals whether an address has an
+  account (same page, same timing; mail goes out in the background). Without SMTP, an Admin
+  creates the link. Minimum 10 characters plus Django's common-password checks; changing
+  your password signs out your other devices. Resets, sign-ups and invitation links are
+  rate-limited per IP and per address, and every account event is in the audit log.
 
 ## Deploying the dashboard
 

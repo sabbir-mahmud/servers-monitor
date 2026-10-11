@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}{{ person.display_name }}{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'users:list' %}">{% icon "arrow-left" 15 %} Users</a>
+<header class="card hero mb-3"><div class="hero-main pb-4">
+  <span class="avatar avatar-lg" aria-hidden="true">{{ person.initials }}</span>
+  <div class="hero-id">
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <h1 class="page-title">{{ person.display_name }}</h1>
+      {% if person.pending_approval %}<span class="status status-info"><span class="status-dot"></span>Waiting for approval</span>
+      {% elif person.is_active %}<span class="status status-good"><span class="status-dot"></span>Active</span>
+      {% else %}<span class="status status-muted"><span class="status-dot"></span>Deactivated</span>{% endif %}
+      {% if is_self %}<span class="chip">You</span>{% endif %}
+    </div>
+    <div class="hero-sub"><span class="mono">{{ person.get_username }}</span>{% if person.email %}<span class="sep"></span><span>{{ person.email }}</span>{% endif %}<span class="sep"></span><span>joined {{ person.date_joined|date:"M j, Y" }}</span><span class="sep"></span><span>last sign-in {% if person.last_login %}{{ person.last_login|ago }}{% else %}never{% endif %}</span></div>
+  </div>
+</div></header>
+
+{% if person.pending_approval %}
+<div class="card mb-3 pending-card"><div class="card-header">{% icon "user" 17 %} Approve this request</div><div class="card-body">
+  <p class="text-body-secondary">{{ person.display_name }} asked for an account {{ person.date_joined|ago }}. Choose what they can do, or leave them waiting.</p>
+  <form method="post" class="d-flex flex-wrap gap-2 align-items-center">{% csrf_token %}<input type="hidden" name="action" value="approve">
+    <select name="role" class="form-select" style="width:auto">{% for r, help in role_help.items %}<option value="{{ r }}" {% if r == "Viewer" %}selected{% endif %}>{{ r }}</option>{% endfor %}</select>
+    <button class="btn btn-primary">{% icon "check" %} Approve</button></form>
+</div></div>
+{% endif %}
+
+<div class="row g-3 align-items-start">
+  <div class="col-12 col-xl-7">
+    <form method="post" novalidate>{% csrf_token %}<input type="hidden" name="action" value="save">
+      <div class="card mb-3"><div class="card-header">{% icon "user" 17 %} Profile and role</div><div class="card-body form-section">
+        <div class="row g-3">
+          <div class="col-sm-6">{% include "alerts/_field.html" with field=form.first_name %}</div>
+          <div class="col-sm-6">{% include "alerts/_field.html" with field=form.last_name %}</div>
+        </div>
+        {% include "alerts/_field.html" with field=form.email %}
+        <div>
+          <label class="form-label" for="id_role">Role</label>
+          <select name="role" id="id_role" class="form-select" {% if is_self or person.is_superuser %}disabled{% endif %}>
+            {% for value, label in form.fields.role.choices %}<option value="{{ value }}" {% if form.role.value == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+          {% if is_self or person.is_superuser %}<input type="hidden" name="role" value="{{ form.role.value }}">{% endif %}
+          <div class="form-text">{% if is_self %}You can't change your own role.{% elif person.is_superuser %}Superusers are always Admins.{% elif is_last_admin %}This is the only Admin; promote someone else before changing it.{% else %}{% for r, help in role_help.items %}<b>{{ r }}</b>: {{ help }} {% endfor %}{% endif %}</div>
+        </div>
+      </div></div>
+      <button class="btn btn-primary">Save changes</button>
+    </form>
+  </div>
+
+  <div class="col-12 col-xl-5">
+    <div class="card mb-3"><div class="card-header">{% icon "key" 17 %} Password</div><div class="card-body">
+      {% if reset_link %}
+        <div class="alert alert-warning" role="status">{% icon "alert" %}<div><b>Send this to {{ person.display_name }} privately.</b> It works once and expires in about {{ PASSWORD_RESET_HOURS|default:2 }} hours.</div></div>
+        <div class="token-box"><code id="reset-link" class="text-break small">{{ reset_link }}</code>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-copy="#reset-link">{% icon "copy" %} <span data-copy-label>Copy</span></button></div>
+      {% else %}
+        <p class="text-body-secondary small">Administrators never see or set passwords. Give {{ person.display_name }} a link to choose a new one.</p>
+        <div class="d-flex flex-wrap gap-2">
+          <form method="post">{% csrf_token %}<input type="hidden" name="action" value="reset_link"><button class="btn btn-sm btn-outline-secondary">{% icon "link" %} Create reset link</button></form>
+          {% if email_enabled and person.email %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="reset_email"><button class="btn btn-sm btn-outline-secondary">{% icon "send" %} Email reset link</button></form>{% endif %}
+        </div>
+      {% endif %}
+    </div></div>
+
+    {% if not is_self and not person.pending_approval %}
+    <div class="card {% if person.is_active %}danger-zone{% endif %}"><div class="card-header">{% icon "shield" 17 %} Access</div><div class="card-body">
+      {% if person.is_active %}
+        <p class="text-body-secondary small">Deactivating signs {{ person.display_name }} out everywhere and blocks sign-in. Their history stays in the audit log. You can reactivate them later.</p>
+        <form method="post" data-confirm="Deactivate {{ person.display_name }}? They're signed out immediately.">{% csrf_token %}<input type="hidden" name="action" value="deactivate">
+          <button class="btn btn-sm btn-outline-danger" {% if is_last_admin %}disabled title="The last Admin can't be deactivated"{% endif %}>Deactivate account</button></form>
+      {% else %}
+        <p class="text-body-secondary small">This account can't sign in.</p>
+        <form method="post">{% csrf_token %}<input type="hidden" name="action" value="activate"><button class="btn btn-sm btn-outline-secondary">Reactivate account</button></form>
+      {% endif %}
+    </div></div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

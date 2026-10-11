@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Users{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Users</h1>
+    <p class="page-sub">Who can sign in, and what they can do. New people join through invitations; deactivating someone signs them out everywhere.</p>
+  </div>
+  {% if perms.users.add_user %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'users:invite' %}">{% icon "plus" %} Invite someone</a></div>{% endif %}
+</div>
+
+{% if pending %}
+<div class="card mb-3 pending-card"><div class="card-header">{% icon "user" 17 %} Waiting for approval <span class="nav-badge is-info ms-1">{{ pending|length }}</span></div>
+  <div class="table-responsive"><table class="table align-middle">
+    <tbody>{% for u in pending %}
+      <tr><td>{% include "users/_person.html" with u=u %}</td>
+        <td class="text-body-secondary">requested {{ u.date_joined|ago }}</td>
+        <td class="text-end"><a class="btn btn-sm btn-primary" href="{% url 'users:detail' u.pk %}">Review</a></td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+</div>
+{% endif %}
+
+<div class="card mb-3"><div class="table-responsive"><table class="table table-hover align-middle">
+  <thead><tr><th>Person</th><th>Role</th><th>Status</th><th>Last sign-in</th><th class="num">Joined</th></tr></thead>
+  <tbody>
+  {% for u in people %}
+    <tr {% if not u.is_active %}class="row-muted"{% endif %}>
+      <td>{% if perms.users.change_user %}<a class="text-reset" href="{% url 'users:detail' u.pk %}">{% include "users/_person.html" with u=u %}</a>{% else %}{% include "users/_person.html" with u=u %}{% endif %}</td>
+      <td>{% if u.role %}<span class="role-pill role-{{ u.role|lower }}">{{ u.role }}</span>{% else %}<span class="muted">No access</span>{% endif %}{% if u.is_superuser %} <span class="chip" title="Django superuser">owner</span>{% endif %}</td>
+      <td>{% if u.is_active %}<span class="status status-good"><span class="status-dot"></span>Active</span>{% else %}<span class="status status-muted"><span class="status-dot"></span>Deactivated</span>{% endif %}</td>
+      <td class="text-body-secondary">{% if u.last_login %}{{ u.last_login|ago }}{% else %}never{% endif %}</td>
+      <td class="num text-body-secondary">{{ u.date_joined|date:"M j, Y" }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+
+{% if invitations %}
+<div class="card"><div class="card-header">{% icon "send" 17 %} Invitations</div>
+  <div class="table-responsive"><table class="table table-sm align-middle">
+    <thead><tr><th>Email</th><th>Role</th><th>Invited by</th><th>Status</th><th></th></tr></thead>
+    <tbody>{% for i in invitations %}
+      <tr><td class="fw-medium">{{ i.email }}</td><td><span class="role-pill role-{{ i.role|lower }}">{{ i.role }}</span></td>
+        <td class="text-body-secondary">{{ i.invited_by.display_name|default:"—" }} · {{ i.created_at|ago }}</td>
+        <td>{% if i.state == "pending" %}<span class="status status-info"><span class="status-dot"></span>Expires {{ i.expires_at|date:"M j" }}</span>{% else %}<span class="status status-muted"><span class="status-dot"></span>Expired</span>{% endif %}</td>
+        <td class="text-end">{% if perms.users.add_user %}<form method="post" action="{% url 'users:invite_revoke' i.pk %}">{% csrf_token %}<button class="btn btn-sm btn-link">Revoke</button></form>{% endif %}</td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+</div>
+{% endif %}
+{% endblock %}
