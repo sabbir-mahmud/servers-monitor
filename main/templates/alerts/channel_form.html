@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}{% if object %}Edit {{ object }}{% else %}Add notification channel{% endif %}{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'alerts:channels' %}">{% icon "arrow-left" 15 %} Notifications</a>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">{% if object %}Edit {{ object }}{% else %}Add {% if kind == "telegram" %}Telegram{% else %}a webhook{% endif %}{% endif %}</h1>
+    {% if not object %}
+    <nav class="segmented mt-3" aria-label="Channel type">
+      <a href="?kind=telegram" class="{% if kind == 'telegram' %}active{% endif %}">{% icon "send" 14 %} Telegram</a>
+      <a href="?kind=webhook" class="{% if kind == 'webhook' %}active{% endif %}">{% icon "link" 14 %} Slack · Discord · Teams</a>
+    </nav>
+    {% endif %}
+  </div>
+</div>
+
+<form method="post" novalidate>{% csrf_token %}
+  <input type="hidden" name="kind" value="{{ kind }}">
+  {% if form.non_field_errors %}<div class="alert alert-danger" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+  <div class="row g-3 align-items-start">
+    <div class="col-12 col-xl-7">
+      <div class="card mb-3"><div class="card-header">{% icon "send" 17 %} Destination</div><div class="card-body form-section">
+        {% include "alerts/_field.html" with field=form.name %}
+        {% if kind == "telegram" %}
+          {% include "alerts/_field.html" with field=form.telegram_token %}
+          <div>
+            <label class="form-label" for="{{ form.telegram_chat_id.id_for_label }}">{{ form.telegram_chat_id.label }}</label>
+            <div class="d-flex gap-2">{{ form.telegram_chat_id }}
+              <button type="button" class="btn btn-outline-secondary text-nowrap"
+                hx-post="{% url 'alerts:telegram_chats' %}" hx-include="#id_telegram_token" hx-target="#chat-results"
+                {% if object %}hx-vals='{"channel": "{{ object.pk }}"}'{% endif %}>{% icon "search" %} Find my chats</button></div>
+            <div class="form-text">{{ form.telegram_chat_id.help_text }}</div>
+            {% for e in form.telegram_chat_id.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+            <div id="chat-results" class="mt-2"></div>
+          </div>
+        {% else %}
+          {% include "alerts/_field.html" with field=form.webhook_url %}
+        {% endif %}
+      </div></div>
+
+      <div class="card mb-3"><div class="card-header">{% icon "bell" 17 %} Which alerts</div><div class="card-body form-section">
+        {% include "alerts/_field.html" with field=form.min_severity %}
+        <div>
+          <span class="form-label d-block">Sources</span>
+          {% include "alerts/_field.html" with field=form.include_servers %}
+          {% include "alerts/_field.html" with field=form.include_apps %}
+        </div>
+        <div>
+          <span class="form-label d-block">Environments</span>
+          <div class="d-flex flex-wrap gap-2">{% for cb in form.environments %}<label class="check-tile py-2">{{ cb.tag }} <span class="check-tile-name">{{ cb.choice_label }}</span></label>{% endfor %}</div>
+          <div class="form-text">{{ form.environments.help_text }} Applications not linked to a server are always included.</div>
+        </div>
+        {% include "alerts/_field.html" with field=form.notify_resolved %}
+      </div></div>
+
+      <div class="card mb-3"><div class="card-header">{% icon "refresh" 17 %} Reminders</div><div class="card-body form-section">
+        {% include "alerts/_field.html" with field=form.repeat_minutes %}
+        <div class="form-text mt-0">Keeps nudging until someone acknowledges the alert on the Alerts page, or it resolves. Never during maintenance.</div>
+        {% include "alerts/_field.html" with field=form.is_enabled %}
+      </div></div>
+
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary">{% if object %}Save changes{% else %}Add channel{% endif %}</button>
+        <a class="btn btn-link" href="{% url 'alerts:channels' %}">Cancel</a>
+      </div>
+    </div>
+
+    <div class="col-12 col-xl-5">
+      {% if kind == "telegram" %}
+      <div class="card"><div class="card-header">{% icon "send" 17 %} Setting up the bot</div><div class="card-body"><div class="steps">
+        <div class="step"><span class="step-num"></span><div><h2>Create it</h2><p class="mb-0">In Telegram, open <b>@BotFather</b> and send <code>/newbot</code>. Copy the token it gives you into <b>Bot token</b>.</p></div></div>
+        <div class="step"><span class="step-num"></span><div><h2>Start a chat</h2><p class="mb-0">Open your bot and send it any message. For a team, add the bot to a group and post something there.</p></div></div>
+        <div class="step"><span class="step-num"></span><div><h2>Pick the chat</h2><p class="mb-0">Press <b>Find my chats</b> and choose where alerts should go. Save, then send a test.</p></div></div>
+      </div>
+      <p class="small text-body-secondary mt-3 mb-0">The token is stored in this dashboard's database and never shown again. Nothing needs to reach this machine: Telegram is only ever called outbound.</p>
+      </div></div>
+      {% else %}
+      <div class="card"><div class="card-header">{% icon "link" 17 %} Where to get the URL</div><div class="card-body small text-body-secondary">
+        <p><b>Slack:</b> create an app → Incoming Webhooks → add to a channel.</p>
+        <p><b>Discord:</b> channel settings → Integrations → Webhooks → New webhook → Copy URL.</p>
+        <p class="mb-0"><b>Teams:</b> a channel's Workflows → “Post to a channel when a webhook request is received”.</p>
+      </div></div>
+      {% endif %}
+    </div>
+  </div>
+</form>
+{% endblock %}

@@ -163,3 +163,15 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 })();
+
+// "Use this chat" buttons fill a form field (Telegram chat discovery).
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-fill]");
+  if (!btn) return;
+  const input = document.querySelector(btn.dataset.fill);
+  if (!input) return;
+  input.value = btn.dataset.value;
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  input.focus();
+  btn.closest("[data-chat-list]")?.querySelectorAll("[data-fill]").forEach((b) => b.classList.toggle("active", b === btn));
+});

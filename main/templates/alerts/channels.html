@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Notifications{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Notifications</h1>
+    <p class="page-sub">Where alerts are sent, and which ones. Messages go out from this dashboard over HTTPS, retry on failure, and pause during maintenance windows.</p>
+  </div>
+  {% if perms.alerts.add_channel %}
+  <div class="page-actions">
+    <a class="btn btn-outline-secondary" href="{% url 'alerts:channel_create' %}?kind=webhook">{% icon "link" %} Webhook</a>
+    <a class="btn btn-primary" href="{% url 'alerts:channel_create' %}?kind=telegram">{% icon "send" %} Add Telegram</a>
+  </div>
+  {% endif %}
+</div>
+
+{% if channels %}
+<div class="channel-grid mb-4">
+  {% for c in channels %}
+  <div class="card channel-card {% if not c.is_enabled %}is-off{% endif %}">
+    <div class="card-body">
+      <div class="d-flex align-items-start gap-3">
+        <span class="channel-icon channel-{{ c.kind }}">{% if c.kind == "telegram" %}{% icon "send" 18 %}{% else %}{% icon "link" 18 %}{% endif %}</span>
+        <div class="flex-grow-1 min-w-0" style="min-width:0">
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="fw-semibold">{{ c.name }}</span>
+            {% if not c.is_enabled %}<span class="status status-muted"><span class="status-dot"></span>Off</span>{% endif %}
+          </div>
+          <div class="row-sub">{{ c.get_kind_display }} · {{ c.target_display }}</div>
+        </div>
+      </div>
+      <div class="d-flex flex-wrap gap-1 mt-3">
+        <span class="chip">{% if c.min_severity == "critical" %}Critical only{% else %}Warning + critical{% endif %}</span>
+        {% if c.include_servers %}<span class="chip">Servers</span>{% endif %}
+        {% if c.include_apps %}<span class="chip">Applications</span>{% endif %}
+        {% for env in c.environments %}<span class="chip chip-env">{{ env }}</span>{% empty %}<span class="chip">All environments</span>{% endfor %}
+        {% if c.notify_resolved %}<span class="chip">+ resolved</span>{% endif %}
+        {% if c.repeat_minutes %}<span class="chip">{% icon "refresh" 11 %} every {{ c.repeat_minutes }}m</span>{% endif %}
+      </div>
+      <div class="channel-status">
+        {% if c.last_delivery_at %}
+          {% if c.last_delivery_ok %}<span class="text-good">{% icon "check" 14 %} Last message delivered {{ c.last_delivery_at|ago }}</span>
+          {% else %}<span class="text-critical">{% icon "alert" 14 %} Failed {{ c.last_delivery_at|ago }}: {{ c.last_error }}</span>{% endif %}
+        {% else %}<span class="muted">Nothing sent yet. Send a test to check it.</span>{% endif %}
+      </div>
+    </div>
+    {% if perms.alerts.change_channel %}
+    <div class="card-footer d-flex gap-2">
+      <form method="post" action="{% url 'alerts:channel_test' c.pk %}">{% csrf_token %}<button class="btn btn-sm btn-outline-primary">{% icon "send" %} Send test</button></form>
+      <a class="btn btn-sm btn-outline-secondary" href="{% url 'alerts:channel_update' c.pk %}">{% icon "edit" %} Edit</a>
+      {% if perms.alerts.delete_channel %}<a class="btn btn-sm btn-link ms-auto" href="{% url 'alerts:channel_delete' c.pk %}">Delete</a>{% endif %}
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card mb-4"><div class="card-body p-4"><div class="row g-4 align-items-center">
+  <div class="col-12 col-lg-5">
+    <span class="channel-icon channel-telegram mb-3" style="width:48px;height:48px">{% icon "send" 24 %}</span>
+    <h2 class="h5 mb-2">Get alerts on Telegram</h2>
+    <p class="text-body-secondary mb-3">Free, instant, works on your phone, and needs nothing exposed to the internet. Takes about two minutes.</p>
+    {% if perms.alerts.add_channel %}<a class="btn btn-primary" href="{% url 'alerts:channel_create' %}?kind=telegram">{% icon "send" %} Set up Telegram</a>{% endif %}
+  </div>
+  <div class="col-12 col-lg-7"><div class="steps">
+    <div class="step"><span class="step-num"></span><div><h2>Create a bot</h2><p class="mb-0">In Telegram, message <b>@BotFather</b>, send <code>/newbot</code>, pick a name. It replies with a token.</p></div></div>
+    <div class="step"><span class="step-num"></span><div><h2>Say hello to it</h2><p class="mb-0">Open your new bot and send it any message, or add it to a team group.</p></div></div>
+    <div class="step"><span class="step-num"></span><div><h2>Connect it here</h2><p class="mb-0">Paste the token, press <b>Find my chats</b>, pick the chat, save, and send a test.</p></div></div>
+  </div></div>
+</div></div></div>
+{% endif %}
+
+<div class="card"><div class="card-header">{% icon "layers" 17 %} Recent deliveries</div>
+  <div class="table-responsive"><table class="table table-sm align-middle">
+    <thead><tr><th>When</th><th>Channel</th><th>Event</th><th>Alert</th><th>Result</th></tr></thead>
+    <tbody>
+    {% for d in deliveries %}
+      <tr><td class="text-body-secondary text-nowrap">{{ d.created_at|ago }}</td>
+        <td class="fw-medium">{{ d.channel.name }}</td>
+        <td><span class="chip">{{ d.get_event_display }}</span></td>
+        <td class="small text-truncate" style="max-width: 22rem">{{ d.alert.message|default:"—" }}</td>
+        <td>{% if d.ok %}<span class="status status-good"><span class="status-dot"></span>Sent</span>{% elif d.next_attempt_at %}<span class="status status-warning"><span class="status-dot"></span>Retrying</span> <span class="row-sub d-inline">{{ d.error }}</span>{% else %}<span class="status status-critical"><span class="status-dot"></span>Failed</span> <span class="row-sub d-inline">{{ d.error }}</span>{% endif %}</td></tr>
+    {% empty %}<tr><td colspan="5" class="empty-small">No notifications sent yet.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}

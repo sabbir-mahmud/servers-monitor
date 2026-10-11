@@ -81,7 +81,17 @@ streamed output add a few commands each. Raise the interval on quiet servers to 
   from the relay process over plain HTTPS, so they cost no Redis commands. For URLs only
   reachable from inside a server (`localhost:8000/health`), use
   `smctl service add --kind http` on that server instead.
-- **Alerts:** offline, CPU, memory, disk, service down, application down, certificate expiring. Acknowledge, resolve
+- **Alerts:** offline, CPU, memory, disk, service down, application down, certificate expiring.
+- **Notifications** (Incidents → Notifications): Telegram and webhooks (Slack, Discord,
+  Mattermost, Teams). Each channel has routing rules (minimum severity, environments, server
+  and/or application alerts, resolved messages) and optional reminders every 15 min to 4 h
+  until someone acknowledges. Sent by the relay process from a database outbox: retried
+  with backoff, never duplicated, logged. Telegram setup needs no inbound access: create a
+  bot with @BotFather, message it, press **Find my chats**.
+- **Maintenance windows** (Incidents → Maintenance): schedule a window, or press **Mute**
+  on any server or application page (1 h / 4 h / 24 h). Alerts are still recorded but
+  nobody is notified; anything still broken when the window ends is sent then, marked
+  "held during maintenance". Muting a server also mutes the applications on it. Acknowledge, resolve
   automatically, notify via webhook.
 - **Roles:** Viewer (read), Operator (run actions, ack alerts), Admin (manage servers
   and tokens, shell, audit log). Defined in `apps/users/roles.py` and synced on every migrate.

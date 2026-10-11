@@ -6,6 +6,7 @@
   the offline/expiry sweep every 15 s and prunes old metrics hourly. These are DB-only and
   cost no Redis commands while nothing is queued.
 - Checker thread: application health checks (plain HTTPS from this machine, no Redis).
+- Notify thread: sends alert notifications from the database outbox (Telegram, webhooks).
 
 It replaces Celery + beat. Run exactly one per dashboard.
 """
@@ -20,6 +21,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections
 
+from apps.alerts import delivery
 from apps.alerts.services import sweep
 from apps.fleet.models import Server
 from apps.fleet.services import ingest_report, prune_samples
@@ -123,8 +125,23 @@ class Bridge:
             relay.mark_alive()
             self.stop.wait(5)
 
+    def notify_forever(self) -> None:
+        """Alert notifications (Telegram, webhooks): outbound HTTPS, no Redis."""
+        last_prune = 0.0
+        while not self.stop.is_set():
+            close_old_connections()
+            try:
+                delivery.process()
+                if time.monotonic() - last_prune >= 3600:
+                    last_prune = time.monotonic()
+                    delivery.prune()
+            except Exception:
+                logger.exception("Notification round failed")
+            self.stop.wait(5)
+
     def run(self) -> None:
         threads = [
+            threading.Thread(target=self.notify_forever, name="notify", daemon=True),
             threading.Thread(target=self.receive_forever, name="relay-receive", daemon=True),
             threading.Thread(target=self.schedule_forever, name="relay-schedule", daemon=True),
             threading.Thread(target=Checker(self.stop).run_forever, name="app-checks", daemon=True),

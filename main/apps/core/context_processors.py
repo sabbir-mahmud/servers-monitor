@@ -2,7 +2,7 @@ from django.conf import settings
 
 
 def site(request):
-    ctx = {"SITE_NAME": settings.SITE_NAME}
+    ctx = {"SITE_NAME": settings.SITE_NAME, "TIME_ZONE_NAME": settings.TIME_ZONE}
     user = getattr(request, "user", None)
     # Full page loads only: HTMX partial refreshes never render the sidebar.
     if user is None or not user.is_authenticated or getattr(request, "htmx", False):
@@ -34,4 +34,13 @@ def _nav_counts(user) -> dict:
         ).count()
     if user.has_perm("alerts.view_alert"):
         counts["alerts"] = Alert.objects.filter(resolved_at__isnull=True).count()
+    if user.has_perm("alerts.view_maintenancewindow"):
+        from django.utils import timezone
+
+        from apps.alerts.models import MaintenanceWindow
+
+        now = timezone.now()
+        counts["maintenance"] = MaintenanceWindow.objects.filter(
+            starts_at__lte=now, ends_at__gt=now
+        ).count()
     return counts

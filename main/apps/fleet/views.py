@@ -8,6 +8,7 @@ from django.views.generic import DeleteView, DetailView, ListView, TemplateView,
 from django.views.generic.edit import CreateView
 
 from apps.agent_api.relay import RelayError
+from apps.alerts import maintenance
 from apps.alerts.models import Alert
 from apps.alerts.services import resolve_all
 from apps.audit.services import record
@@ -18,6 +19,7 @@ from .forms import ServerForm
 from .models import Environment, Health, Server, ServerGroup
 
 ENROLL_SESSION_KEY = "enroll-token:{}"
+MUTE_CHOICES = [(60, "Mute for 1 hour"), (240, "Mute for 4 hours"), (1440, "Mute for 24 hours")]
 
 
 class DashboardView(StaffViewMixin, HtmxTemplateMixin, ListView):
@@ -132,6 +134,8 @@ class ServerDetailView(StaffViewMixin, DetailView):
             can_operate=self.request.user.has_perm("operations.add_job"),
             can_shell=self.request.user.has_perm("operations.run_shell"),
             can_admin=self.request.user.has_perm("fleet.change_server"),
+            maintenance_window=maintenance.coverage().window_for_server(server.pk),
+            mute_choices=MUTE_CHOICES,
         )
         return ctx
 

@@ -22,8 +22,9 @@
       </div>
       {% if server.description %}<p class="hero-desc">{{ server.description }}</p>{% endif %}
     </div>
-    {% if can_admin %}
     <div class="hero-actions">
+      {% include "alerts/_mute_menu.html" with target=server target_field="server" %}
+    {% if can_admin %}
       <a class="btn btn-outline-secondary btn-sm" href="{% url 'fleet:server_update' server.pk %}">{% icon "edit" %} Edit</a>
       <div class="dropdown">
         <button class="btn btn-outline-secondary btn-sm btn-icon" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="More actions">{% icon "more" %}</button>
@@ -37,8 +38,8 @@
           {% endif %}
         </div>
       </div>
+  {% endif %}
     </div>
-    {% endif %}
   </div>
   <dl class="spec-strip">
     <div><dt>Environment</dt><dd><span class="chip chip-env">{{ server.get_environment_display }}</span>{% for g in server.groups.all %} <a class="chip" href="{% url 'fleet:dashboard' %}?group={{ g.name }}">{{ g.name }}</a>{% endfor %}</dd></div>
@@ -48,6 +49,8 @@
     <div><dt>Credential</dt><dd><code>{{ server.token_prefix }}…</code></dd></div>
   </dl>
 </header>
+
+{% include "alerts/_maintenance_banner.html" with window=maintenance_window %}
 
 {# ---------- Section nav ---------- #}
 <nav class="section-nav" aria-label="On this page">

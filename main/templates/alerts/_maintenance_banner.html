@@ -1,0 +1,7 @@
+{% load monitor %}
+{% if window %}
+<div class="alert alert-info mb-3" role="status">{% icon "wrench" %}
+  <div class="flex-grow-1"><strong>In maintenance until {{ window.ends_at|date:"M j, H:i" }}</strong> ({{ window.ends_at|timeuntil }} left) · {{ window.title }}. Alerts are recorded; notifications wait.</div>
+  {% if perms.alerts.change_maintenancewindow %}<form method="post" action="{% url 'alerts:maintenance_end' window.pk %}" class="align-self-center">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-sm btn-outline-secondary">End now</button></form>{% endif %}
+</div>
+{% endif %}

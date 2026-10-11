@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Schedule maintenance{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'alerts:maintenance' %}">{% icon "arrow-left" 15 %} Maintenance</a>
+<div class="page-head"><div>
+  <h1 class="page-title">Schedule maintenance</h1>
+  <p class="page-sub">Alerts during the window are recorded but not sent. Times are in {{ TIME_ZONE_NAME }}.</p>
+</div></div>
+<form method="post" novalidate style="max-width: 48rem">{% csrf_token %}
+  {% if form.non_field_errors %}<div class="alert alert-danger" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+  <div class="card mb-3"><div class="card-header">{% icon "wrench" 17 %} When</div><div class="card-body form-section">
+    {% include "alerts/_field.html" with field=form.title %}
+    <div class="row g-3">
+      <div class="col-sm-6">{% include "alerts/_field.html" with field=form.starts_at %}</div>
+      <div class="col-sm-6">{% include "alerts/_field.html" with field=form.ends_at %}</div>
+    </div>
+  </div></div>
+  <div class="card mb-3"><div class="card-header">{% icon "bell-off" 17 %} What to mute</div><div class="card-body form-section">
+    {% include "alerts/_field.html" with field=form.all_targets %}
+    <div>
+      <span class="form-label d-block">Servers</span>
+      <div class="check-grid">{% for cb in form.servers %}<label class="check-tile">{{ cb.tag }} <span class="check-tile-name">{{ cb.choice_label }}</span></label>{% empty %}<span class="muted small">No servers yet.</span>{% endfor %}</div>
+      <div class="form-text">{{ form.servers.help_text }}</div>
+    </div>
+    <div>
+      <span class="form-label d-block">Applications</span>
+      <div class="check-grid">{% for cb in form.monitors %}<label class="check-tile">{{ cb.tag }} <span class="check-tile-name">{{ cb.choice_label }}</span></label>{% empty %}<span class="muted small">No applications yet.</span>{% endfor %}</div>
+    </div>
+  </div></div>
+  <div class="d-flex gap-2">
+    <button class="btn btn-primary">{% icon "wrench" %} Schedule</button>
+    <a class="btn btn-link" href="{% url 'alerts:maintenance' %}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

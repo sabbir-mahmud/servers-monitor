@@ -46,8 +46,11 @@
             {% if NAV.alerts %}<span class="nav-group-dot" title="Open alerts"></span>{% endif %}
             {% icon "chevron" 14 %}</summary>
           <div class="nav-group-body">
-            <a class="side-link {% if ns == 'alerts' %}active{% endif %}" href="{% url 'alerts:list' %}" {% if ns == 'alerts' %}aria-current="page"{% endif %}>{% icon "bell" %}<span class="side-text">Alerts</span>
+            <a class="side-link {% if url_name == 'list' and ns == 'alerts' %}active{% endif %}" href="{% url 'alerts:list' %}" {% if url_name == 'list' and ns == 'alerts' %}aria-current="page"{% endif %}>{% icon "bell" %}<span class="side-text">Alerts</span>
               {% if NAV.alerts %}<span class="nav-badge is-critical" title="{{ NAV.alerts }} open">{{ NAV.alerts }}</span>{% endif %}</a>
+            {% if perms.alerts.view_maintenancewindow %}<a class="side-link {% if 'maintenance' in url_name %}active{% endif %}" href="{% url 'alerts:maintenance' %}" {% if 'maintenance' in url_name %}aria-current="page"{% endif %}>{% icon "wrench" %}<span class="side-text">Maintenance</span>
+              {% if NAV.maintenance %}<span class="nav-badge is-info" title="{{ NAV.maintenance }} active">{{ NAV.maintenance }}</span>{% endif %}</a>{% endif %}
+            {% if perms.alerts.view_channel %}<a class="side-link {% if 'channel' in url_name %}active{% endif %}" href="{% url 'alerts:channels' %}" {% if 'channel' in url_name %}aria-current="page"{% endif %}>{% icon "send" %}<span class="side-text">Notifications</span></a>{% endif %}
           </div>
         </details>
         {% endif %}

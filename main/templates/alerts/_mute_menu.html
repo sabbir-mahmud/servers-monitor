@@ -1,0 +1,17 @@
+{% load monitor %}
+{% if perms.alerts.add_maintenancewindow %}
+<div class="dropdown">
+  <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="dropdown" aria-expanded="false">{% icon "bell-off" %} Mute</button>
+  <div class="dropdown-menu dropdown-menu-end">
+    {% for minutes, label in mute_choices %}
+    <form method="post" action="{% url 'alerts:quick_mute' %}">{% csrf_token %}
+      <input type="hidden" name="{{ target_field }}" value="{{ target.pk }}"><input type="hidden" name="minutes" value="{{ minutes }}">
+      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+      <button class="dropdown-item">{% icon "clock" 16 %}<span><span class="d-block">{{ label }}</span><small>Notifications wait; alerts still recorded</small></span></button>
+    </form>
+    {% endfor %}
+    <div class="dropdown-divider"></div>
+    <a class="dropdown-item" href="{% url 'alerts:maintenance_create' %}?{{ target_field }}={{ target.pk }}">{% icon "wrench" 16 %}<span><span class="d-block">Schedule a window…</span><small>Pick a start and end time</small></span></a>
+  </div>
+</div>
+{% endif %}

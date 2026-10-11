@@ -17,8 +17,9 @@
         <button type="button" class="icon-btn icon-btn-sm" data-copy="#mon-url" title="Copy URL" aria-label="Copy URL">{% icon "copy" 14 %}</button>
       </div>
     </div>
-    {% if can_change %}
     <div class="hero-actions">
+      {% include "alerts/_mute_menu.html" with target=monitor target_field="monitor" %}
+    {% if can_change %}
       <form method="post" action="{% url 'monitors:check' monitor.pk %}">{% csrf_token %}
         <button class="btn btn-outline-primary btn-sm">{% icon "refresh" %} Check now</button></form>
       <form method="post" action="{% url 'monitors:toggle' monitor.pk %}">{% csrf_token %}
@@ -32,8 +33,8 @@
         </div>
       </div>
       {% endif %}
-    </div>
     {% endif %}
+    </div>
   </div>
   <dl class="spec-strip">
     <div><dt>Request</dt><dd>{{ monitor.method }} · timeout {{ monitor.timeout_seconds }}s</dd></div>
@@ -43,6 +44,8 @@
     <div><dt>Server</dt><dd>{% if monitor.server %}<a href="{% url 'fleet:server_detail' monitor.server_id %}">{{ monitor.server.name }}</a>{% else %}—{% endif %}</dd></div>
   </dl>
 </header>
+
+{% include "alerts/_maintenance_banner.html" with window=maintenance_window %}
 
 {% partialdef live inline %}
 <div id="live" hx-get="{% url 'monitors:detail' monitor.pk %}?part=live" hx-trigger="every 15s" hx-swap="outerHTML">

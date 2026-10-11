@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Maintenance{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Maintenance</h1>
+    <p class="page-sub">During a window, alerts on the covered servers and apps are still recorded, but nobody is notified. Anything still broken when it ends is sent then.</p>
+  </div>
+  {% if perms.alerts.add_maintenancewindow %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'alerts:maintenance_create' %}">{% icon "plus" %} Schedule maintenance</a></div>{% endif %}
+</div>
+
+{% if active %}
+<h2 class="section-title mb-2">Happening now</h2>
+<div class="channel-grid mb-4">
+  {% for w in active %}{% include "alerts/_window_card.html" with w=w live=True %}{% endfor %}
+</div>
+{% endif %}
+
+<h2 class="section-title mb-2">Upcoming</h2>
+{% if upcoming %}
+<div class="channel-grid mb-4">{% for w in upcoming %}{% include "alerts/_window_card.html" with w=w %}{% endfor %}</div>
+{% else %}
+<div class="card mb-4"><div class="empty">{% icon "wrench" 26 %}<div class="empty-title">Nothing scheduled</div><div>Planning a deploy or an upgrade? Schedule a window so nobody gets paged for it.</div></div></div>
+{% endif %}
+
+{% if past %}
+<div class="card"><div class="card-header">{% icon "clock" 17 %} Past windows</div>
+  <div class="table-responsive"><table class="table table-sm align-middle">
+    <thead><tr><th>Window</th><th>When</th><th>Covered</th><th>By</th></tr></thead>
+    <tbody>{% for w in past %}
+      <tr><td class="fw-medium">{{ w.title }}</td>
+        <td class="text-body-secondary text-nowrap">{{ w.starts_at|date:"M j, H:i" }} – {{ w.ends_at|date:"H:i" }}</td>
+        <td class="small">{% if w.all_targets %}Everything{% else %}{% for s in w.servers.all %}{{ s.name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% if w.servers.all and w.monitors.all %}, {% endif %}{% for m in w.monitors.all %}{{ m.name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</td>
+        <td class="text-body-secondary">{{ w.created_by|default:"—" }}</td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+</div>
+{% endif %}
+<p class="small muted mt-3">Times are in {{ TIME_ZONE_NAME }}. Change it with <code>TIME_ZONE</code> in <code>.env</code>.</p>
+{% endblock %}

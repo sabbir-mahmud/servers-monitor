@@ -216,8 +216,9 @@ ALERT_DISK_PERCENT = config("ALERT_DISK_PERCENT", default=90, cast=float)
 ALERT_HYSTERESIS_PERCENT = 5.0
 # CPU alerts on the average of the last N samples: one compile spike is not an incident.
 ALERT_CPU_SAMPLES = 3
-# Slack/Discord/Teams-compatible incoming webhook. Empty disables notifications.
-ALERT_WEBHOOK_URL = config("ALERT_WEBHOOK_URL", default="")
+# Notifications are configured in the dashboard (Incidents → Notifications). If set, this
+# base URL turns alert messages into links back here (e.g. your Tailscale or LAN address).
+DASHBOARD_URL = config("DASHBOARD_URL", default="")
 
 # ---------------------------------------------------------------------------#
 # Security

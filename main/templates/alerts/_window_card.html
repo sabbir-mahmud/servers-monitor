@@ -1,0 +1,23 @@
+{% load monitor %}
+<div class="card window-card {% if live %}is-live{% endif %}"><div class="card-body">
+  <div class="d-flex align-items-start gap-3">
+    <span class="channel-icon channel-maintenance">{% icon "wrench" 18 %}</span>
+    <div class="flex-grow-1" style="min-width:0">
+      <div class="fw-semibold">{{ w.title }}</div>
+      <div class="row-sub">{% if live %}Ends {{ w.ends_at|date:"M j, H:i" }} · {{ w.ends_at|timeuntil }} left{% else %}{{ w.starts_at|date:"D M j, H:i" }} – {{ w.ends_at|date:"H:i" }} · in {{ w.starts_at|timeuntil }}{% endif %}</div>
+    </div>
+    {% if live %}<span class="status status-info"><span class="status-dot"></span>Active</span>{% endif %}
+  </div>
+  <div class="d-flex flex-wrap gap-1 mt-3">
+    {% if w.all_targets %}<span class="chip">{% icon "bell-off" 11 %} Everything</span>{% endif %}
+    {% for s in w.servers.all %}<span class="chip">{% icon "server" 11 %} {{ s.name }}</span>{% endfor %}
+    {% for m in w.monitors.all %}<span class="chip">{% icon "globe" 11 %} {{ m.name }}</span>{% endfor %}
+  </div>
+</div>
+{% if perms.alerts.change_maintenancewindow %}
+<div class="card-footer d-flex gap-2">
+  {% if live %}<form method="post" action="{% url 'alerts:maintenance_end' w.pk %}">{% csrf_token %}<button class="btn btn-sm btn-outline-secondary">End now</button></form>{% endif %}
+  {% if perms.alerts.delete_maintenancewindow %}<a class="btn btn-sm btn-link ms-auto" href="{% url 'alerts:maintenance_delete' w.pk %}">{% if live %}Delete{% else %}Cancel window{% endif %}</a>{% endif %}
+</div>
+{% endif %}
+</div>

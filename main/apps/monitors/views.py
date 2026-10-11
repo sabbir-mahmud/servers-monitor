@@ -5,9 +5,11 @@ from django.utils import timezone
 from django.views import View
 from django.views.generic import CreateView, DeleteView, DetailView, ListView, UpdateView
 
+from apps.alerts import maintenance
 from apps.alerts.models import Alert
 from apps.audit.services import record
 from apps.core.mixins import HtmxTemplateMixin, StaffViewMixin
+from apps.fleet.views import MUTE_CHOICES
 
 from . import checker, stats
 from .forms import MonitorForm
@@ -83,6 +85,8 @@ class MonitorDetailView(StaffViewMixin, DetailView):
             recent=m.checks.all()[:15],
             open_alerts=Alert.objects.filter(monitor=m, resolved_at__isnull=True),
             can_change=self.request.user.has_perm("monitors.change_monitor"),
+            maintenance_window=maintenance.coverage().window_for_monitor(m.pk, m.server_id),
+            mute_choices=MUTE_CHOICES,
         )
         return ctx
 

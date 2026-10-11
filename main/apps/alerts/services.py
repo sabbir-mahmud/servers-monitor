@@ -17,12 +17,6 @@ CRITICAL_PERCENT = 97.0
 DOWN_STATES = {"down"}
 
 
-def _notify(alert: Alert, event: str) -> None:
-    from .notify import notify
-
-    transaction.on_commit(lambda: notify(str(alert.pk), event))
-
-
 def _open(server, open_alerts, kind, message, severity, subject="", value=None) -> None:
     existing = open_alerts.get((kind, subject))
     if existing is not None:
@@ -43,8 +37,7 @@ def _open(server, open_alerts, kind, message, severity, subject="", value=None) 
     except IntegrityError:
         logger.info("Alert %s/%s on %s already opened concurrently", kind, subject, server)
         return
-    open_alerts[(kind, subject)] = alert
-    _notify(alert, "opened")
+    open_alerts[(kind, subject)] = alert  # the relay's notification outbox announces it
 
 
 def _resolve(open_alerts, kind, subject="") -> None:
@@ -53,7 +46,6 @@ def _resolve(open_alerts, kind, subject="") -> None:
         return
     alert.resolved_at = timezone.now()
     alert.save(update_fields=["resolved_at"])
-    _notify(alert, "resolved")
 
 
 def _threshold(server, open_alerts, kind, value, threshold, label) -> None:

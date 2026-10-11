@@ -1,0 +1,16 @@
+{% load monitor %}
+{% if error %}
+  <div class="alert alert-danger mb-0" role="alert">{% icon "alert" %}<div>{{ error }}</div></div>
+{% elif chats %}
+  <div class="chat-list" data-chat-list>
+    {% for c in chats %}
+    <button type="button" class="chat-pick" data-fill="#id_telegram_chat_id" data-value="{{ c.id }}">
+      <span class="channel-icon channel-telegram" style="width:30px;height:30px">{% if c.type == "private" %}{% icon "user" 15 %}{% else %}{% icon "layers" 15 %}{% endif %}</span>
+      <span class="flex-grow-1 text-start"><span class="d-block fw-semibold">{{ c.name|default:"Unnamed chat" }}</span><span class="row-sub">{{ c.type|title }} · {{ c.id }}</span></span>
+      <span class="chat-pick-use">Use this chat</span>
+    </button>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="alert alert-warning mb-0" role="status">{% icon "alert" %}<div>The bot has no messages yet. Open it in Telegram, send it anything (or post in a group it's in), then press <b>Find my chats</b> again.</div></div>
+{% endif %}

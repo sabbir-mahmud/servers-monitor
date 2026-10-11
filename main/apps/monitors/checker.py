@@ -123,12 +123,6 @@ def cert_expiry(monitor: Monitor) -> datetime | None:
 # --------------------------------------------------------------------------- alerts
 
 
-def _notify(alert: Alert, event: str) -> None:
-    from apps.alerts.notify import notify
-
-    transaction.on_commit(lambda: notify(str(alert.pk), event))
-
-
 def _open_alert(monitor, kind, severity, message) -> None:
     existing = Alert.objects.filter(monitor=monitor, kind=kind, resolved_at=None).first()
     if existing is not None:
@@ -138,19 +132,17 @@ def _open_alert(monitor, kind, severity, message) -> None:
         return
     try:
         with transaction.atomic():
-            alert = Alert.objects.create(
+            Alert.objects.create(
                 monitor=monitor, kind=kind, severity=severity, message=message[:300]
-            )
+            )  # announced by the relay's notification outbox
     except IntegrityError:  # opened concurrently by a "check now"
         return
-    _notify(alert, "opened")
 
 
 def _resolve_alert(monitor, kind) -> None:
     for alert in Alert.objects.filter(monitor=monitor, kind=kind, resolved_at=None):
         alert.resolved_at = timezone.now()
         alert.save(update_fields=["resolved_at"])
-        _notify(alert, "resolved")
 
 
 def resolve_all(monitor: Monitor) -> None:

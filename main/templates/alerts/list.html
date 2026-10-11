@@ -21,7 +21,7 @@
   {% for a in object_list %}
     <tr>
       <td><span class="status {% if a.severity == 'critical' %}status-critical{% else %}status-warning{% endif %}"><span class="status-dot" aria-hidden="true"></span>{{ a.get_severity_display }}</span></td>
-      <td class="fw-medium">{{ a.message }}</td>
+      <td class="fw-medium">{{ a.message }}{% if a.muted %} <span class="chip ms-1" title="In a maintenance window: no notifications">{% icon "bell-off" 11 %} Muted</span>{% endif %}</td>
       <td>{% if a.server_id %}<a class="row-link" href="{% url 'fleet:server_detail' a.server_id %}">{{ a.server.name }}</a>{% elif a.monitor_id %}<a class="row-link d-inline-flex align-items-center gap-1" href="{% url 'monitors:detail' a.monitor_id %}">{% icon "globe" 14 %} {{ a.monitor.name }}</a>{% endif %}</td>
       <td class="text-nowrap">{{ a.opened_at|date:"M j, H:i" }}<div class="row-sub">{{ a.opened_at|timesince }} ago</div></td>
       <td class="text-body-secondary small">{% if a.resolved_at %}Resolved {{ a.resolved_at|timesince }} ago{% elif a.acknowledged_at %}Acknowledged by {{ a.acknowledged_by|default:"—" }}{% else %}<span class="text-critical fw-semibold">Open</span>{% endif %}</td>
