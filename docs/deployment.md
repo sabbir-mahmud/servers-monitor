@@ -130,6 +130,10 @@ Set `HTTPS=True` and `TRUST_PROXY_HEADERS=True`, because Caddy overwrites `X-For
 unencrypted, and Admins see a warning whenever the dashboard is opened that way from another
 machine.
 
+Over HTTPS the dashboard is also an **installable app** (Install app in the sidebar, or Add to
+Home Screen on a phone) and can send **browser push** alerts (Notifications → Add → Browser
+push, once per device). Browsers only allow both on HTTPS or `localhost`.
+
 ## 5. First steps
 
 1. Sign in, open **My account** (bottom of the sidebar) and add your email.
@@ -157,20 +161,47 @@ Any SMTP provider works (Gmail with an app password, Brevo, Mailgun, Postmark, A
 
 ## Backups
 
-All state is one SQLite file. Back it up safely while running:
+All state is one SQLite file. Two layers protect it:
+
+**Daily snapshots (automatic).** The relay process takes a consistent snapshot every 24 hours
+into `BACKUP_DIR` (default: a `backups/` folder next to the database) and keeps the last
+`BACKUP_KEEP` (14). *Administration → System* shows the latest one and warns when it's over
+36 hours old. Take one now with `python manage.py backup`.
+
+Snapshots sit on the same disk as the database, so copy them elsewhere, or use:
+
+**Continuous off-site replication (optional).** [Litestream](https://litestream.io) streams
+every change to any S3-compatible bucket (Cloudflare R2, Backblaze B2, AWS S3) within seconds.
+Set the `LITESTREAM_*` variables in `main/.env` (see [configuration](configuration.md)), then:
 
 ```bash
-# Docker
-docker compose exec web python -c "import sqlite3; s=sqlite3.connect('/data/db.sqlite3'); d=sqlite3.connect('/data/backup.sqlite3'); s.backup(d)"
-docker compose cp web:/data/backup.sqlite3 ./backup-$(date +%F).sqlite3
-
-# systemd
-sqlite3 /opt/server-monitor/data/db.sqlite3 ".backup '/var/backups/server-monitor-$(date +%F).sqlite3'"
+docker compose --profile backup up -d
 ```
+
+**Restoring** a snapshot:
+
+```bash
+docker compose stop web relay
+docker compose run --rm web python manage.py restore /data/backups/db-20261011-031500.sqlite3
+docker compose start web relay
+```
+
+`restore` refuses while the relay is running and checks the file's integrity first; the
+database it replaces is kept beside it. From Litestream, restore with
+`litestream restore -config deploy/litestream.yml -o /data/db.sqlite3 /data/db.sqlite3`
+with both processes stopped.
 
 Keep `main/.env` (above all `SECRET_KEY`) with your backups: encrypted secrets and agent
 signing keys can't be recovered without it. The relay holds only in-flight messages; nothing
 there needs backing up.
+
+## Watching the dashboard itself
+
+The dashboard can't tell you it has stopped. Create a free check at
+[healthchecks.io](https://healthchecks.io) (period 1 minute, grace 5 minutes) and put its ping
+URL in `WATCHDOG_URL`. The relay process pings it every minute; if the machine goes down, that
+service alerts you. When the relay starts again after more than 5 minutes away, every
+notification channel is told how long monitoring was blind.
 
 ## Upgrading
 
@@ -179,8 +210,10 @@ git pull
 docker compose up -d --build      # or: make install && sudo systemctl restart server-monitor-web server-monitor-relay
 ```
 
-Migrations run automatically. If the release changed anything under `agent/`, upgrade each
-server with the command on its page (**⋯ → Install / upgrade agent**).
+Migrations run automatically. If the release changed anything under `agent/` (the
+[changelog](../CHANGELOG.md) says **agents must be upgraded**), upgrade each server with the
+command on its page (**⋯ → Install / upgrade agent**). Older agents keep working; their
+server page lists what upgrading unlocks.
 
 > Install and upgrade commands only accept agent files whose checksums match the dashboard
 > you deployed. Deploy the dashboard from the same commit you'll install agents from, or pin
@@ -193,7 +226,8 @@ server with the command on its page (**⋯ → Install / upgrade agent**).
 | Dashboard | ≈ 200 MB RAM in total; SQLite comfortably handles hundreds of servers |
 | Redis commands | ≈ 65K per server per month at the default 2-minute heartbeat, plus ≈ 45K/month for the idle relay |
 | Upstash cost | Free up to about 6 servers; pay-as-you-go is $0.20 per 100K commands (10 servers ≈ $1.40/month) |
-| Metrics retention | 14 days (`MONITOR_METRIC_RETENTION_DAYS`) |
+| Metrics retention | 14 days of raw samples (`MONITOR_METRIC_RETENTION_DAYS`), 400 days of hourly rollups (`ROLLUP_RETENTION_DAYS`, ≈ 10K rows per server) |
+| Uptime probes from agents, live log follow | Probes add no Redis commands (results ride on heartbeats); following a log costs ≈ 1 command every 3 s while it runs |
 
 Raise a server's heartbeat interval on its edit page to spend fewer commands. Jobs still
 arrive instantly, because agents block on their mailbox between heartbeats.

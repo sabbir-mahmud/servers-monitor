@@ -87,6 +87,7 @@ def ingest_report(server: Server, report: dict, remote_addr: str | None = None) 
             "capabilities",
             "services",
             "disks",
+            "inventory",
             "cpu_percent",
             "memory_percent",
             "disk_percent",
@@ -94,7 +95,9 @@ def ingest_report(server: Server, report: dict, remote_addr: str | None = None) 
             "net_rx_bps",
             "net_tx_bps",
         ):
-            setattr(server, field, report[field])
+            if field == "inventory":
+                server.previous_inventory = server.inventory  # for "container stopped" alerts
+            setattr(server, field, report.get(field, {}))
         server.remote_addr = remote_addr
         server.last_seen_at = now
         was = server.last_health
@@ -110,6 +113,7 @@ def ingest_report(server: Server, report: dict, remote_addr: str | None = None) 
                 "capabilities",
                 "services",
                 "disks",
+                "inventory",
                 "cpu_percent",
                 "memory_percent",
                 "disk_percent",
@@ -155,27 +159,42 @@ CHART_RANGES = {
     "6h": timedelta(hours=6),
     "24h": timedelta(hours=24),
     "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
+    "90d": timedelta(days=90),
 }
 CHART_POINTS = 120
+RAW_UP_TO = timedelta(hours=24)  # longer ranges read hourly rollups
+
+
+def _chart_rows(server: Server, start, span):
+    """(time, cpu, memory, disk) rows: raw samples up to 24 h; beyond that, hourly rollups
+    plus raw samples for the hours not rolled up yet (the current one, a fresh install)."""
+    from .models import MetricRollup
+
+    samples = MetricSample.objects.filter(server=server).order_by("recorded_at")
+    fields = ("recorded_at", "cpu_percent", "memory_percent", "disk_percent")
+    if span <= RAW_UP_TO:
+        return list(samples.filter(recorded_at__gte=start).values_list(*fields))
+    hourly = list(
+        MetricRollup.objects.filter(server=server, hour__gte=start)
+        .order_by("hour")
+        .values_list("hour", "cpu_avg", "memory_avg", "disk_avg")
+    )
+    raw_from = hourly[-1][0] + timedelta(hours=1) if hourly else start
+    half = timedelta(minutes=30)  # plot an hour's average at its middle
+    return [(h + half, c, m, d) for h, c, m, d in hourly] + list(
+        samples.filter(recorded_at__gte=raw_from).values_list(*fields)
+    )
 
 
 def chart_series(server: Server, range_key: str) -> dict:
-    """Bucket-averaged CPU/memory/disk for the range, at most CHART_POINTS per series.
-
-    Averaged in Python over a values_list: 7 days at 30 s is ~20k narrow rows, which is a
-    single index range scan. Move to Postgres `date_bin` or a rollup table past that.
-    """
+    """Bucket-averaged CPU/memory/disk for the range, at most CHART_POINTS per series."""
     span = CHART_RANGES.get(range_key, CHART_RANGES["1h"])
     end = timezone.now()
     start = end - span
     bucket = span.total_seconds() / CHART_POINTS
-    rows = (
-        MetricSample.objects.filter(server=server, recorded_at__gte=start)
-        .order_by("recorded_at")
-        .values_list("recorded_at", "cpu_percent", "memory_percent", "disk_percent")
-    )
     buckets: dict[int, list] = {}
-    for ts, cpu, mem, disk in rows:
+    for ts, cpu, mem, disk in _chart_rows(server, start, span):
         idx = min(int((ts - start).total_seconds() // bucket), CHART_POINTS - 1)
         acc = buckets.setdefault(idx, [ts, 0.0, 0.0, 0.0, 0])
         acc[0] = ts

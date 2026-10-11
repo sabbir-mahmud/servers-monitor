@@ -1,4 +1,5 @@
-"""Alert notifications: Telegram and webhooks, sent from a database outbox.
+"""Alert notifications (Telegram, webhooks and the kinds in channels.py), sent from a
+database outbox.
 
 The relay process calls `process()` every few seconds. For every enabled channel it works
 out what that channel still owes: an "opened" message for each new matching alert, a
@@ -27,6 +28,7 @@ from django.utils.timesince import timesince
 
 from apps.core import netguard
 
+from .channels import KINDS, Message, SendError
 from .maintenance import coverage, was_covered
 from .models import Alert, Channel, ChannelKind, Delivery, DeliveryEvent, Severity
 
@@ -35,10 +37,6 @@ logger = logging.getLogger(__name__)
 MAX_ATTEMPTS = 5
 TIMEOUT = 10
 TELEGRAM_API = "https://api.telegram.org"
-
-
-class SendError(Exception):
-    pass
 
 
 # --------------------------------------------------------------------------- transports
@@ -135,48 +133,99 @@ def _link(alert) -> str:
     return f"{base}/servers/{alert.server_id}/"
 
 
-def compose(alert: Alert, event: str, note: str = "") -> tuple[str, str]:
-    """(Telegram HTML, plain text) for one alert event."""
+def compose(alert: Alert, event: str, note: str = "") -> Message:
+    """One alert event as a Message (unpacks as (Telegram HTML, plain text))."""
     where = ""
     if alert.server_id:
         where = f"{alert.server.name} · {alert.server.get_environment_display()}"
     elif alert.monitor_id:
-        where = f"{alert.monitor.name} · {alert.monitor.url}"
+        where = f"{alert.monitor.name} · {alert.monitor.where}"
     if event == DeliveryEvent.RESOLVED:
-        head = f"✅ RESOLVED · {alert.get_kind_display()}"
+        title = f"RESOLVED · {alert.get_kind_display()}"
+        head = f"✅ {title}"
         tail = f"after {timesince(alert.opened_at, alert.resolved_at or timezone.now())}"
     elif event == DeliveryEvent.REPEAT:
-        head = f"🔁 STILL OPEN · {alert.get_kind_display()}"
+        title = f"STILL OPEN · {alert.get_kind_display()}"
+        head = f"🔁 {title}"
         tail = f"open for {timesince(alert.opened_at)}, not acknowledged"
     else:
         icon = "🔴" if alert.severity == Severity.CRITICAL else "🟠"
-        head = f"{icon} {alert.get_severity_display().upper()} · {alert.get_kind_display()}"
+        title = f"{alert.get_severity_display().upper()} · {alert.get_kind_display()}"
+        head = f"{icon} {title}"
         tail = f"since {timezone.localtime(alert.opened_at):%H:%M %Z}"
     link = _link(alert)
-    lines_plain = [head, alert.message, where, tail + (f" · {note}" if note else "")]
+    tail += f" · {note}" if note else ""
+    body = "\n".join(x for x in [alert.message, where, tail] if x)
+    lines_plain = [head, body]
     lines_html = [
         f"<b>{html.escape(head)}</b>",
         html.escape(alert.message),
         f"<i>{html.escape(where)}</i>" if where else "",
-        html.escape(tail + (f" · {note}" if note else "")),
+        html.escape(tail),
     ]
     if link:
         lines_plain.append(link)
         lines_html.append(
             f'<a href="{html.escape(link)}">Open in {html.escape(settings.SITE_NAME)}</a>'
         )
-    return "\n".join(x for x in lines_html if x), "\n".join(x for x in lines_plain if x)
+    return Message(
+        title=title,
+        body=body,
+        plain="\n".join(x for x in lines_plain if x),
+        html="\n".join(x for x in lines_html if x),
+        url=link,
+        severity=alert.severity,
+        event=event,
+        key=f"server-monitor-{alert.pk}",
+    )
 
 
-def send(channel: Channel, text_html: str, text_plain: str) -> None:
-    if channel.kind == ChannelKind.TELEGRAM:
+def _simple(text: str, icon: str, event: str) -> Message:
+    return Message(title=f"{settings.SITE_NAME}", body=text, plain=f"{icon} {text}",
+                   html=f"<b>{icon} {html.escape(settings.SITE_NAME)}</b>\n{html.escape(text)}",
+                   url=settings.DASHBOARD_URL, severity="warning" if event == "system" else "info",
+                   event=event)  # fmt: skip
+
+
+def send(channel: Channel, text_html, text_plain: str = "", message: Message | None = None) -> None:
+    """Send to one channel. Pass a Message (or text_html/text_plain for the old callers)."""
+    if isinstance(text_html, Message):
+        message = text_html
+    if message is None:
+        message = Message(
+            title=settings.SITE_NAME, body=text_plain, plain=text_plain, html=text_html
+        )
+    if channel.kind in KINDS:
+        kind = KINDS[channel.kind]
+        config = channel.settings
+        if missing := [s.label for s in kind.settings if s.required and not config.get(s.name)]:
+            raise SendError(f"{', '.join(missing)} missing")
+        kind.send(config, message)
+    elif channel.kind == ChannelKind.TELEGRAM:
         if not (channel.telegram_token and channel.telegram_chat_id):
             raise SendError("Telegram bot token and chat id are both required")
-        telegram_send(channel.telegram_token, channel.telegram_chat_id, text_html)
+        telegram_send(channel.telegram_token, channel.telegram_chat_id, message.html)
     else:
         if not channel.webhook_url:
             raise SendError("webhook URL is missing")
-        webhook_send(channel.webhook_url, text_plain)
+        webhook_send(channel.webhook_url, message.plain)
+
+
+def send_system(text: str) -> int:
+    """A message about the dashboard itself (e.g. "was offline for 2 h") to every enabled
+    channel, regardless of routing rules. Returns how many went out."""
+    sent = 0
+    for channel in Channel.objects.filter(is_enabled=True):
+        delivery = Delivery(channel=channel, event=DeliveryEvent.SYSTEM, attempts=1)
+        try:
+            send(channel, _simple(text, "⚠️", "system"))
+            delivery.ok, delivery.sent_at = True, timezone.now()
+            sent += 1
+        except SendError as exc:
+            delivery.error = str(exc)[:300]
+        delivery.save()
+        _mark_channel(channel, delivery)
+    return sent
 
 
 def send_test(channel: Channel, user=None) -> Delivery:
@@ -184,7 +233,7 @@ def send_test(channel: Channel, user=None) -> Delivery:
     text = f"Test notification from {settings.SITE_NAME}{who}. This channel works."
     delivery = Delivery(channel=channel, event=DeliveryEvent.TEST, attempts=1)
     try:
-        send(channel, f"<b>✅ {html.escape(text)}</b>", f"✅ {text}")
+        send(channel, _simple(text, "✅", "test"))
         delivery.ok, delivery.sent_at = True, timezone.now()
     except SendError as exc:
         delivery.error = str(exc)[:300]
@@ -212,10 +261,10 @@ def _attempt(
                 delivery = Delivery.objects.create(channel=channel, alert=alert, event=event)
         except IntegrityError:
             return False  # another relay process got here first
-    text_html, text_plain = compose(alert, event, note)
+    message = compose(alert, event, note)
     delivery.attempts += 1
     try:
-        send(channel, text_html, text_plain)
+        send(channel, message)
         delivery.ok, delivery.sent_at, delivery.error, delivery.next_attempt_at = (
             True,
             now,

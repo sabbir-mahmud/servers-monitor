@@ -13,6 +13,8 @@ def record(request_or_user, action: str, target: str = "", server=None, **data) 
     user = getattr(request, "user", None) if request is not None else request_or_user
     if user is not None and not getattr(user, "is_authenticated", False):
         user = None
+    if token := getattr(request, "api_token", None):
+        data.setdefault("via", f"API token {token.name} ({token.prefix}…)")
     entry = AuditLog.objects.create(
         actor=user,
         actor_label=user.get_username() if user else "",

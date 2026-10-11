@@ -22,13 +22,18 @@ Dependencies: Python 3.11+ (tomllib) and psutil. The Redis client is built in.
 from __future__ import annotations
 
 import argparse
+import glob
 import hashlib
 import hmac
+import http.client
+import ipaddress
 import json
 import logging
 import os
 import platform
 import random
+import re
+import shutil
 import signal
 import socket
 import ssl
@@ -47,7 +52,7 @@ from pathlib import Path
 
 import psutil
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 NET_TIMEOUT = 20  # seconds for a single non-blocking Redis round trip
 MAX_BLOCK = 120  # longest BLPOP wait (Upstash holds 110 s+); heartbeats go between waits
 MAX_CHUNK = 60 * 1024  # main accepts 64 KiB per progress message
@@ -97,6 +102,12 @@ class Config:
     key_prefix: str = "sm"
     verify_tls: bool = True
     ca_file: str | None = None
+    inventory: bool = True  # processes, temperatures, containers, GPUs in each heartbeat
+    # Let the dashboard ask root (server-monitor-upgrade.path) to install a release tag.
+    remote_upgrade: bool = False
+    # Run HTTP/TCP checks the dashboard assigns (agents as uptime probes; opt-in).
+    probes: bool = False
+    docker_names: bool = False  # `smctl docker enable` gives the agent docker access
     report_interval: int = 120
     max_concurrent_commands: int = 2
     disk_mounts: list[str] = field(default_factory=list)
@@ -108,7 +119,7 @@ class Config:
     use_sudo_for_restart: bool = True
 
 
-BUILTIN_NAMES = {"tail_log", "restart_service", "shell"}
+BUILTIN_NAMES = {"tail_log", "tail_follow", "restart_service", "shell", "_upgrade"}
 SERVICE_KINDS = {"systemd", "docker", "pm2", "process", "http"}
 
 
@@ -164,6 +175,10 @@ def load_config(path: str | Path) -> Config:
         shell_enabled=bool(raw.get("shell", {}).get("enabled", False)),
         shell_timeout=int(raw.get("shell", {}).get("timeout", 120)),
         use_sudo_for_restart=bool(agent.get("use_sudo_for_restart", True)),
+        inventory=bool(agent.get("inventory", True)),
+        remote_upgrade=bool(agent.get("remote_upgrade", False)),
+        probes=bool(raw.get("probes", {}).get("enabled", False)),
+        docker_names=bool(raw.get("docker", {}).get("names", False)),
     )
 
     for name, svc in raw.get("services", {}).items():
@@ -366,8 +381,112 @@ class Collector:
             )
         return out
 
+    # ---------------------------------------------------------------- inventory
+    def processes(self) -> dict:
+        """Top 10 by CPU and by memory. psutil keeps Process objects between calls, so
+        cpu_percent is measured over the time since the previous heartbeat."""
+        rows = []
+        for p in psutil.process_iter(["pid", "name", "username", "cmdline", "memory_info"]):
+            try:
+                cpu = p.cpu_percent(interval=None)
+            except (psutil.Error, OSError):
+                continue
+            info = p.info
+            rss = info["memory_info"].rss if info.get("memory_info") else 0
+            rows.append({"pid": info["pid"], "name": (info.get("name") or "")[:60],
+                         "user": (info.get("username") or "")[:32], "cpu": round(cpu, 1), "rss": rss,
+                         "cmd": " ".join(info.get("cmdline") or [])[:120]})  # fmt: skip
+        by_cpu = sorted(rows, key=lambda r: r["cpu"], reverse=True)[:10]
+        by_mem = sorted(rows, key=lambda r: r["rss"], reverse=True)[:10]
+        return {"cpu": by_cpu, "memory": by_mem, "count": len(rows)}
+
+    def temperatures(self) -> list[dict]:
+        read = getattr(psutil, "sensors_temperatures", None)
+        if read is None:
+            return []
+        try:
+            sensors = read() or {}
+        except (OSError, RuntimeError):
+            return []
+        out = []
+        for chip, entries in sensors.items():
+            for e in entries:
+                if e.current is None or e.current <= 0:
+                    continue
+                out.append({"sensor": f"{chip} {e.label}".strip()[:60], "current": round(e.current, 1),
+                            "high": e.high or None, "critical": e.critical or None})  # fmt: skip
+        return sorted(out, key=lambda t: t["current"], reverse=True)[:16]
+
+    def gpus(self) -> list[dict]:
+        if not shutil.which("nvidia-smi"):
+            return []
+        code, text = _run(["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu",
+                           "--format=csv,noheader,nounits"], timeout=10)  # fmt: skip
+        if code != 0:
+            return []
+        out = []
+        for line in text.strip().splitlines()[:8]:
+            parts = [x.strip() for x in line.split(",")]
+            if len(parts) != 5:
+                continue
+            try:
+                out.append({"name": parts[0][:60], "util": float(parts[1]), "mem_used": float(parts[2]) * 2**20,
+                            "mem_total": float(parts[3]) * 2**20, "temp": float(parts[4])})  # fmt: skip
+            except ValueError:
+                continue
+        return out
+
+    def containers(self) -> list[dict]:
+        """Running containers from cgroup v2 files (no docker group needed); names and
+        stopped containers from `docker ps` when the agent may use Docker."""
+        now = time.monotonic()
+        prev, self._last_cgroups = getattr(self, "_last_cgroups", {}), {}
+        found = {}
+        for pattern in CGROUP_GLOBS:
+            for path in glob.glob(pattern):
+                m = CONTAINER_ID_RE.search(path)
+                if not m:
+                    continue
+                cid = m.group(1)
+                try:
+                    usage = int(next(ln.split()[1] for ln in Path(path, "cpu.stat").read_text().splitlines()
+                                     if ln.startswith("usage_usec")))  # fmt: skip
+                    memory = int(Path(path, "memory.current").read_text().strip())
+                except (OSError, StopIteration, ValueError, IndexError):
+                    continue
+                cpu = None
+                if cid in prev and now > prev[cid][0]:
+                    cpu = round(
+                        max(0.0, (usage - prev[cid][1]) / ((now - prev[cid][0]) * 1e6) * 100), 1
+                    )
+                self._last_cgroups[cid] = (now, usage)
+                found[cid[:12]] = {"id": cid[:12], "name": cid[:12], "image": "", "state": "running",
+                                   "cpu": cpu, "memory": memory}  # fmt: skip
+        if self.cfg.docker_names and shutil.which("docker"):
+            code, text = _run(["docker", "ps", "-a", "--no-trunc", "--format",
+                               "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.State}}"], timeout=10)  # fmt: skip
+            if code == 0:
+                for line in text.strip().splitlines():
+                    parts = line.split("\t")
+                    if len(parts) != 4:
+                        continue
+                    row = found.setdefault(
+                        parts[0][:12], {"id": parts[0][:12], "cpu": None, "memory": None}
+                    )
+                    row.update(name=parts[1][:80], image=parts[2][:120], state=parts[3][:20])
+        return sorted(found.values(), key=lambda c: c["name"])[:50]
+
+    def inventory(self) -> dict:
+        if not self.cfg.inventory:
+            return {}
+        return {"containers": self.containers(), "processes": self.processes(),
+                "temps": self.temperatures(), "gpus": self.gpus()}  # fmt: skip
+
     def capabilities(self) -> dict:
         return {
+            "features": FEATURES
+            + (["remote_upgrade"] if self.cfg.remote_upgrade else [])
+            + (["probes"] if self.cfg.probes else []),
             "actions": [
                 {"name": a.name, "description": a.description, "timeout": a.timeout}
                 for a in self.cfg.actions.values()
@@ -385,6 +504,7 @@ class Collector:
             "disks": disks,
             "services": self.services(),
             "capabilities": self.capabilities(),
+            "inventory": self.inventory(),
         }
 
 
@@ -393,6 +513,10 @@ class Collector:
 
 class Rejected(Exception):
     """The command is not allowed by this agent's config."""
+
+
+def _follow_end(stopped: bool, seconds: int) -> str:
+    return "stopped from the dashboard" if stopped else f"stopped following after {seconds} s"
 
 
 def tail_file(path: str, lines: int) -> str:
@@ -419,12 +543,85 @@ class Plan:
     cwd: str | None = None
     env: dict[str, str] | None = None
     inline_output: str | None = None  # result produced without a subprocess
+    # Handed to another process that reports the final result itself (remote upgrades).
+    detached_output: str | None = None
+    # Live log follow: a declared file to follow, or a journalctl -f subprocess (follow=True).
+    # Reaching the timeout or being stopped is the normal end, not a failure.
+    follow_file: str | None = None
+    follow: bool = False
+    line_filter: str = ""
 
 
-def plan_command(cfg: Config, action: str, args: dict) -> Plan:
+UPGRADE_REF_RE = re.compile(r"^v\d{1,4}\.\d{1,4}\.\d{1,4}$")  # release tags only
+SUM_RE = re.compile(r"^[0-9a-f]{64}$")
+COMMAND_ID_RE = re.compile(r"^[0-9a-f-]{36}$")
+UPGRADE_FILES = ("install", "agent", "smctl", "unit", "upath", "uservice")
+UPGRADE_REQUEST = "upgrade-request.json"
+
+
+def _state_dir() -> Path:
+    return Path(os.environ.get("STATE_DIRECTORY") or "/var/lib/server-monitor-agent")
+
+
+def request_upgrade(cfg: Config, command_id: str, args: dict) -> str:
+    """Write the request that root's server-monitor-upgrade.path acts on. The agent never
+    installs anything itself; `smctl upgrade --from-request` (root) re-validates all of
+    this and only installs a release tag of the repository recorded at install."""
+    if not cfg.remote_upgrade:
+        raise Rejected("remote upgrades are off on this server (sudo smctl remote-upgrade on)")
+    ref, sums = args.get("ref"), args.get("sums")
+    if not isinstance(ref, str) or not UPGRADE_REF_RE.match(ref):
+        raise Rejected("upgrades must name a release tag like v2.3.0")
+    if not isinstance(sums, dict) or set(sums) != set(UPGRADE_FILES):
+        raise Rejected(f"upgrades need checksums for {', '.join(UPGRADE_FILES)}")
+    if not all(isinstance(v, str) and SUM_RE.match(v) for v in sums.values()):
+        raise Rejected("checksums must be SHA-256 hex digests")
+    if not COMMAND_ID_RE.match(command_id or ""):
+        raise Rejected("bad command id")
+    target = _state_dir() / UPGRADE_REQUEST
+    tmp = target.with_suffix(".tmp")
+    body = {"id": command_id, "ref": ref, "sums": sums, "at": int(time.time())}
+    try:
+        tmp.write_text(json.dumps(body, sort_keys=True))
+        os.replace(tmp, target)  # the path unit sees one complete file, never a partial one
+    except OSError as exc:
+        raise Rejected(f"cannot write the upgrade request: {exc.strerror}") from exc
+    return f"Upgrade to {ref} requested. Waiting for root (server-monitor-upgrade) to install it…\n"
+
+
+FOLLOW_MAX_SECONDS = 600
+
+
+def plan_follow(cfg: Config, args: dict) -> Plan:
+    """Follow a declared log file, or the journal of a declared systemd service."""
+    try:
+        seconds = max(10, min(FOLLOW_MAX_SECONDS, int(args.get("seconds") or FOLLOW_MAX_SECONDS)))
+    except (TypeError, ValueError):
+        raise Rejected("seconds must be a number") from None
+    line_filter = str(args.get("filter") or "")[:200]
+    name = str(args.get("name", ""))
+    if args.get("source") == "journal":
+        svc = cfg.services.get(name)
+        if svc is None or svc.kind != "systemd":
+            raise Rejected(f"{name!r} is not a declared systemd service")
+        argv = ["journalctl", f"--unit={svc.unit}", "--follow", "--lines=20", "--output=short-iso",
+                "--no-pager", "--quiet"]  # fmt: skip
+        return Plan(argv=argv, timeout=seconds, follow=True, line_filter=line_filter)
+    if name not in cfg.logs:
+        raise Rejected(f"log {name!r} is not declared in [logs]")
+    if not os.access(cfg.logs[name], os.R_OK):
+        raise Rejected(f"cannot read {cfg.logs[name]}")
+    return Plan(follow_file=cfg.logs[name], timeout=seconds, follow=True, line_filter=line_filter)
+
+
+def plan_command(cfg: Config, action: str, args: dict, command_id: str = "") -> Plan:
     """Map a requested action to what will actually run — or refuse. This function is
     the security boundary: nothing reaches subprocess without passing through it."""
     args = args if isinstance(args, dict) else {}
+    if action == "tail_follow":
+        return plan_follow(cfg, args)
+    if action == "_upgrade":
+        return Plan(detached_output=request_upgrade(cfg, command_id, args))
     if action == "tail_log":
         name = str(args.get("name", ""))
         if name not in cfg.logs:
@@ -716,10 +913,16 @@ class Executor:
     def _run(self, cid: str, action: str, args: dict) -> None:
         log.info("Command %s: %s %s", cid, action, json.dumps(args)[:200])
         try:
-            plan = plan_command(self.cfg, action, args)
+            plan = plan_command(self.cfg, action, args, cid)
         except Rejected as exc:
             log.warning("Rejected %s: %s", action, exc)
             self._post(cid, "failed", f"rejected by agent: {exc}\n", None, retries=3)
+            return
+        if plan.detached_output is not None:
+            self._post(cid, "running", plan.detached_output, retries=3)
+            return
+        if plan.follow_file is not None:
+            self._follow_file(cid, plan)
             return
         if plan.inline_output is not None:
             self._post(cid, "succeeded", plan.inline_output, 0, retries=3)
@@ -742,8 +945,12 @@ class Executor:
         buffer: list[bytes] = []
         buf_lock = threading.Lock()
 
+        wanted = plan.line_filter.encode()
+
         def reader():
             for line in iter(proc.stdout.readline, b""):
+                if wanted and wanted not in line:
+                    continue
                 with buf_lock:
                     buffer.append(line)
             proc.stdout.close()
@@ -777,18 +984,97 @@ class Executor:
         proc.wait()
         t.join(timeout=5)
         tail = drain()
-        if timed_out:
-            tail += f"\n[agent] killed after {plan.timeout}s timeout\n"
-        if cancelled:
-            tail += "\n[agent] stopped: the dashboard cancelled this command\n"
         code = proc.returncode
-        status = "succeeded" if code == 0 and not (timed_out or cancelled) else "failed"
+        if plan.follow and (timed_out or cancelled):
+            tail += f"\n[agent] {_follow_end(cancelled, plan.timeout)}\n"
+            status, code = "succeeded", 0
+        else:
+            if timed_out:
+                tail += f"\n[agent] killed after {plan.timeout}s timeout\n"
+            if cancelled:
+                tail += "\n[agent] stopped: the dashboard cancelled this command\n"
+            status = "succeeded" if code == 0 and not (timed_out or cancelled) else "failed"
         # Large final output goes up in chunks so nothing is cut at the 64 KiB limit.
         while len(tail) > MAX_CHUNK:
             self._post(cid, "running", tail[:MAX_CHUNK], retries=2)
             tail = tail[MAX_CHUNK:]
         self._post(cid, status, tail, code, retries=5)
         log.info("Command %s finished: %s (exit %s)", cid, status, code)
+
+    def _follow_file(self, cid: str, plan: Plan) -> None:
+        """Stream new lines of a log file (surviving rotation and truncation) until the
+        time is up or the dashboard stops it. One message per FLUSH_EVERY at most, so a busy
+        log costs no more relay commands than a quiet one."""
+        path, wanted = plan.follow_file, plan.line_filter.encode()
+        out: list[bytes] = []
+        skipped = 0
+
+        def keep(line: bytes, notice: bool = False) -> None:
+            nonlocal skipped
+            if wanted and wanted not in line and not notice:
+                return
+            out.append(line if line.endswith(b"\n") else line + b"\n")
+            if len(out) > 2000:  # flooding: keep the newest, say how many were dropped
+                skipped += len(out) - 2000
+                del out[:-2000]
+
+        def flush(status: str, extra: str = "") -> None:
+            nonlocal skipped
+            text = b"".join(out).decode("utf-8", errors="replace")
+            if skipped:
+                text = f"[agent] {skipped} lines skipped (too fast to stream)\n" + text
+            out.clear()
+            skipped = 0
+            text += extra
+            if text or status != "running":
+                self._post(cid, status, text[-MAX_CHUNK:], 0 if status == "succeeded" else None,
+                           retries=5 if status != "running" else 0)  # fmt: skip
+
+        try:
+            fh = open(path, "rb")  # noqa: SIM115 (reopened on rotation)
+        except OSError as exc:
+            self._post(cid, "failed", f"cannot read {path}: {exc.strerror}\n", None, retries=3)
+            return
+        try:
+            for line in tail_file(path, 20).splitlines(keepends=True):
+                keep(line.encode())
+            fh.seek(0, os.SEEK_END)
+            inode, pending = os.fstat(fh.fileno()).st_ino, b""
+            deadline = time.monotonic() + plan.timeout
+            last_flush, end = time.monotonic(), ""
+            while not end:
+                if self._is_cancelled(cid):
+                    end = _follow_end(True, plan.timeout)
+                elif time.monotonic() > deadline:
+                    end = _follow_end(False, plan.timeout)
+                chunk = fh.read(65536)
+                if chunk:
+                    pending += chunk
+                    *lines, pending = pending.split(b"\n")
+                    for line in lines:
+                        keep(line)
+                    if len(pending) > 65536:  # a giant line without a newline
+                        keep(pending)
+                        pending = b""
+                elif not end:
+                    try:
+                        st = os.stat(path)
+                    except OSError:
+                        st = None
+                    if st is not None and (st.st_ino != inode or st.st_size < fh.tell()):
+                        fh.close()
+                        fh = open(path, "rb")  # noqa: SIM115
+                        inode = os.fstat(fh.fileno()).st_ino
+                        keep(b"[agent] the log was rotated; following the new file", notice=True)
+                    time.sleep(0.5)
+                if not end and time.monotonic() - last_flush >= FLUSH_EVERY:
+                    last_flush = time.monotonic()
+                    flush("running")
+            if pending:
+                keep(pending)
+            flush("succeeded", f"\n[agent] {end}\n")
+        finally:
+            fh.close()
 
     @staticmethod
     def _kill(proc: subprocess.Popen) -> None:
@@ -805,6 +1091,249 @@ class Executor:
         self.pool.shutdown(wait=True, cancel_futures=True)
 
 
+# --------------------------------------------------------------------------- probes
+
+# Never probed, even when assigned: cloud metadata services hand out credentials, and
+# link-local / unspecified / multicast addresses have no business in a health check.
+# Private and loopback addresses ARE allowed: checking internal URLs is the point.
+PROBE_BLOCKED = [
+    ipaddress.ip_network(n)
+    for n in ("0.0.0.0/8", "169.254.0.0/16", "100.100.100.200/32", "224.0.0.0/4",
+              "255.255.255.255/32", "::/128", "fe80::/10", "fd00:ec2::254/128", "ff00::/8")
+]  # fmt: skip
+MAX_PROBES = 20
+PROBE_BODY_LIMIT = 1024 * 1024
+STATUS_SPEC_RE = re.compile(r"^\s*\d{3}(\s*-\s*\d{3})?(\s*,\s*\d{3}(\s*-\s*\d{3})?)*\s*$")
+
+
+class ProbeBlocked(Exception):
+    pass
+
+
+def probe_address(host: str, port: int) -> str:
+    """Resolve once and check: the address checked is the address connected to."""
+    infos = socket.getaddrinfo(host.strip("[]"), port, type=socket.SOCK_STREAM)
+    ip = infos[0][4][0]
+    addr = ipaddress.ip_address(ip.split("%")[0])
+    if getattr(addr, "ipv4_mapped", None):
+        addr = addr.ipv4_mapped
+    if any(addr in net for net in PROBE_BLOCKED):
+        raise ProbeBlocked(f"{host} resolves to {addr}, which probes never contact")
+    return ip
+
+
+def clean_probe(spec) -> dict | None:
+    """One assignment from the dashboard, validated (signed, but still bounded here)."""
+    if not isinstance(spec, dict) or not isinstance(spec.get("id"), str):
+        return None
+    if not COMMAND_ID_RE.match(spec["id"]):
+        return None
+    try:
+        out = {"id": spec["id"], "kind": spec.get("kind"),
+               "interval": max(30, min(3600, int(spec.get("interval") or 60))),
+               "timeout": max(1, min(60, int(spec.get("timeout") or 10))),
+               "verify_tls": spec.get("verify_tls") is not False,
+               "slow_ms": int(spec["slow_ms"]) if spec.get("slow_ms") else None}  # fmt: skip
+        if out["kind"] == "http":
+            url = str(spec.get("url") or "")
+            parts = urllib.parse.urlsplit(url)
+            expected = str(spec.get("expected") or "200-399")
+            if parts.scheme not in ("http", "https") or not parts.hostname:
+                return None
+            if not STATUS_SPEC_RE.match(expected) or spec.get("method") not in (
+                "GET",
+                "HEAD",
+                "POST",
+                "PUT",
+            ):
+                return None
+            out.update(url=url, method=spec["method"], expected=expected,
+                       keyword=str(spec.get("keyword") or "")[:200],
+                       keyword_absent=bool(spec.get("keyword_absent")),
+                       follow_redirects=spec.get("follow_redirects") is not False,
+                       body=str(spec.get("body") or "")[:4000])  # fmt: skip
+        elif out["kind"] == "tcp":
+            host, port = str(spec.get("host") or ""), int(spec.get("port") or 0)
+            if not host or not 1 <= port <= 65535:
+                return None
+            out.update(host=host, port=port, tls=bool(spec.get("tls")))
+        else:
+            return None
+    except (TypeError, ValueError):
+        return None
+    return out
+
+
+class _PinnedConnection(http.client.HTTPSConnection):
+    """HTTP(S) to an already-checked IP, with the real host name for SNI and Host."""
+
+    def __init__(self, host, port, ip, timeout, context, tls):
+        super().__init__(host, port, timeout=timeout, context=context)
+        self._ip, self._tls = ip, tls
+
+    def connect(self):
+        sock = socket.create_connection((self._ip, self.port), self.timeout)
+        self.sock = (
+            self._context.wrap_socket(sock, server_hostname=self.host) if self._tls else sock
+        )
+
+
+def _ranges(spec: str) -> list[tuple[int, int]]:
+    out = []
+    for part in spec.split(","):
+        lo, _, hi = part.strip().partition("-")
+        out.append((int(lo), int(hi or lo)))
+    return out
+
+
+def _probe_error(exc: BaseException) -> str:
+    if isinstance(exc, ProbeBlocked):
+        return str(exc)
+    if isinstance(exc, ssl.SSLCertVerificationError):
+        return f"TLS certificate invalid: {exc.verify_message}"
+    if isinstance(exc, (TimeoutError, socket.timeout)):
+        return "timed out"
+    if isinstance(exc, socket.gaierror):
+        return "DNS lookup failed"
+    if isinstance(exc, ConnectionRefusedError):
+        return "connection refused"
+    return (str(exc) or type(exc).__name__)[:200]
+
+
+def run_http_probe(spec: dict) -> dict:
+    ctx = ssl.create_default_context()
+    if not spec["verify_tls"]:
+        ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
+    url, started = spec["url"], time.perf_counter()
+    body = spec["body"].encode() if spec["method"] in ("POST", "PUT") and spec["body"] else None
+    try:
+        for _ in range(6):  # the request plus at most five redirects, each re-checked
+            parts = urllib.parse.urlsplit(url)
+            tls = parts.scheme == "https"
+            port = parts.port or (443 if tls else 80)
+            ip = probe_address(parts.hostname, port)
+            conn = _PinnedConnection(parts.hostname, port, ip, spec["timeout"], ctx, tls)
+            try:
+                path = parts.path or "/"
+                conn.request(spec["method"], path + (f"?{parts.query}" if parts.query else ""),
+                             body=body, headers={"User-Agent": f"ServerMonitorAgent/{VERSION} (probe)"})  # fmt: skip
+                resp = conn.getresponse()
+                code = resp.status
+                location = resp.getheader("Location")
+                want = bool(spec["keyword"]) and spec["method"] != "HEAD"
+                content = resp.read(PROBE_BODY_LIMIT) if want else b""
+            finally:
+                conn.close()
+            if spec["follow_redirects"] and code in (301, 302, 303, 307, 308) and location:
+                url = urllib.parse.urljoin(url, location)
+                if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
+                    return {"ok": False, "error": "redirect to a non-HTTP URL"}
+                continue
+            break
+        else:
+            return {"ok": False, "error": "too many redirects"}
+    except (OSError, ProbeBlocked, http.client.HTTPException, ValueError) as exc:
+        return {"ok": False, "error": _probe_error(exc)}
+    ms = int((time.perf_counter() - started) * 1000)
+    if not any(lo <= code <= hi for lo, hi in _ranges(spec["expected"])):
+        return {"ok": False, "code": code, "ms": ms, "error": f"HTTP {code}"}
+    if spec["keyword"] and spec["method"] != "HEAD":
+        found = spec["keyword"].encode() in content
+        if found == spec["keyword_absent"]:
+            verb = "appeared" if found else "not found"
+            return {
+                "ok": False,
+                "code": code,
+                "ms": ms,
+                "error": f"keyword {spec['keyword']!r} {verb}",
+            }
+    return {"ok": True, "code": code, "ms": ms}
+
+
+def run_tcp_probe(spec: dict) -> dict:
+    started = time.perf_counter()
+    try:
+        ip = probe_address(spec["host"], spec["port"])
+        with socket.create_connection((ip, spec["port"]), timeout=spec["timeout"]) as sock:
+            if spec["tls"]:
+                ctx = ssl.create_default_context()
+                if not spec["verify_tls"]:
+                    ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
+                with ctx.wrap_socket(sock, server_hostname=spec["host"]):
+                    pass
+    except (OSError, ProbeBlocked, ValueError) as exc:
+        return {"ok": False, "error": _probe_error(exc)}
+    return {"ok": True, "ms": int((time.perf_counter() - started) * 1000)}
+
+
+def run_probe(spec: dict) -> dict:
+    try:
+        result = (run_http_probe if spec["kind"] == "http" else run_tcp_probe)(spec)
+    except Exception as exc:  # a probe bug must never stop the others
+        log.exception("Probe %s crashed", spec.get("id"))
+        result = {"ok": False, "error": f"agent error: {exc}"[:200]}
+    if result["ok"] and spec.get("slow_ms") and (result.get("ms") or 0) > spec["slow_ms"]:
+        result.update(degraded=True, error=f"slow: {result['ms']} ms (limit {spec['slow_ms']} ms)")
+    result["id"] = spec["id"]
+    return result
+
+
+class Prober:
+    """Runs the checks the dashboard assigned, each at most once per heartbeat interval,
+    and keeps the latest results for the next heartbeat (no extra Redis commands)."""
+
+    def __init__(self, interval_fn):
+        self.interval_fn = interval_fn
+        self.lock = threading.Lock()
+        self.specs: list[dict] = []
+        self.rev = ""
+        self.due: dict[str, float] = {}
+        self.results: dict[str, list[dict]] = {}
+
+    def assign(self, specs, rev) -> None:
+        cleaned = [c for c in (clean_probe(s) for s in (specs or [])[:MAX_PROBES]) if c]
+        with self.lock:
+            self.specs, self.rev = cleaned, str(rev or "")[:64]
+            ids = {s["id"] for s in cleaned}
+            self.due = {k: v for k, v in self.due.items() if k in ids}
+            self.results = {k: v for k, v in self.results.items() if k in ids}
+        log.info("Probing %d target(s) for the dashboard", len(cleaned))
+
+    def take(self) -> list[dict]:
+        with self.lock:
+            out = [r for rs in self.results.values() for r in rs]
+            self.results = {}
+        return out
+
+    def put_back(self, results: list[dict]) -> None:
+        """A heartbeat failed: keep its results for the next one (newest 3 per probe)."""
+        with self.lock:
+            for r in results:
+                kept = self.results.setdefault(r["id"], [])
+                kept.insert(0, r)
+                del kept[:-3]
+
+    def run_due(self) -> int:
+        now = time.monotonic()
+        with self.lock:
+            due = [s for s in self.specs if self.due.get(s["id"], 0) <= now]
+            for s in due:
+                self.due[s["id"]] = now + max(s["interval"], self.interval_fn())
+        for spec in due:
+            result = run_probe(spec)
+            with self.lock:
+                if any(s["id"] == spec["id"] for s in self.specs):
+                    kept = self.results.setdefault(spec["id"], [])
+                    kept.append(result)
+                    del kept[:-3]
+        return len(due)
+
+    def run_forever(self, stop: threading.Event) -> None:
+        while not stop.is_set():
+            self.run_due()
+            stop.wait(5)
+
+
 # --------------------------------------------------------------------------- main loop
 
 
@@ -817,6 +1346,7 @@ class Agent:
         self.stop = threading.Event()
         self.report_interval = cfg.report_interval
         self.failures = 0
+        self.prober = Prober(lambda: self.report_interval) if cfg.probes else None
 
     def request_stop(self) -> None:
         self.stop.set()
@@ -829,7 +1359,16 @@ class Agent:
     def heartbeat(self) -> bool:
         try:
             report = self.collector.report()
-            self.relay.send({"t": "hb", "interval": self.report_interval, "report": report})
+            results = []
+            if self.prober is not None:
+                results = self.prober.take()
+                report["probe_results"], report["probes_rev"] = results, self.prober.rev
+            try:
+                self.relay.send({"t": "hb", "interval": self.report_interval, "report": report})
+            except BaseException:
+                if self.prober is not None:
+                    self.prober.put_back(results)
+                raise
             self.failures = 0
             return True
         except RedisError as exc:
@@ -867,10 +1406,15 @@ class Agent:
             self.executor.cancel(str(message.get("id")))
         elif kind == "cfg":
             # The dashboard owns the schedule: changing it there retunes the agent.
-            self.report_interval = max(
-                10, int(message.get("report_interval") or self.report_interval)
-            )
-            log.info("Report interval set to %ss by the dashboard", self.report_interval)
+            interval = max(10, int(message.get("report_interval") or self.report_interval))
+            if interval != self.report_interval:
+                self.report_interval = interval
+                log.info("Report interval set to %ss by the dashboard", interval)
+            if "probes" in message:
+                if self.prober is None:
+                    log.warning("The dashboard assigned probes, but [probes] enabled = false here")
+                else:
+                    self.prober.assign(message.get("probes"), message.get("probes_rev"))
 
     def run(self) -> None:
         log.info(
@@ -884,6 +1428,10 @@ class Agent:
                 "Running WITHOUT message signing (legacy credentials). Rotate this server's "
                 "credentials in the dashboard, then: sudo smctl connect"
             )
+        if self.prober is not None:
+            threading.Thread(
+                target=self.prober.run_forever, args=(self.stop,), name="probes", daemon=True
+            ).start()
         next_report = time.monotonic()
         while not self.stop.is_set():
             now = time.monotonic()
@@ -917,6 +1465,58 @@ class Agent:
         self.relay.close()
 
 
+CGROUP_GLOBS = (
+    "/sys/fs/cgroup/system.slice/docker-*.scope",
+    "/sys/fs/cgroup/docker/*",
+    "/sys/fs/cgroup/machine.slice/libpod-*.scope",
+)
+CONTAINER_ID_RE = re.compile(r"(?:docker-|libpod-|/docker/)([0-9a-f]{64})")
+# What this agent can do, so the dashboard only offers features it supports.
+FEATURES = ["job_ping", "inventory", "log_follow"]
+
+JOB_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
+
+
+def send_job_ping(cfg: Config, name: str, status: str, exit_code: int | None) -> int:
+    """One signed heartbeat for a cron/backup job; the dashboard matches it by name."""
+    if not JOB_NAME_RE.match(name):
+        print(
+            "job names use lowercase letters, digits, dots, dashes or underscores", file=sys.stderr
+        )
+        return 2
+    message = {"t": "ping", "name": name, "status": status}
+    if exit_code is not None:
+        message["exit"] = exit_code
+    relay = Relay(cfg)
+    try:
+        relay.send(message)
+    except (RedisError, OSError, ConnectionError) as exc:
+        print(f"could not reach the relay: {exc}", file=sys.stderr)
+        return 4
+    finally:
+        relay.close()
+    return 0
+
+
+def send_command_result(cfg: Config, cid: str, status: str, exit_code: int | None) -> int:
+    """Report a detached command's result (stdin is its output): `smctl upgrade
+    --from-request` runs as root, then reports through the agent's own signed channel."""
+    if not COMMAND_ID_RE.match(cid):
+        print("bad command id", file=sys.stderr)
+        return 2
+    output = sys.stdin.read()[-MAX_CHUNK:] if not sys.stdin.isatty() else ""
+    relay = Relay(cfg)
+    try:
+        relay.send({"t": "res", "id": cid, "status": status, "output": output,
+                    "exit_code": exit_code})  # fmt: skip
+    except (RedisError, OSError, ConnectionError) as exc:
+        print(f"could not reach the relay: {exc}", file=sys.stderr)
+        return 4
+    finally:
+        relay.close()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Server Monitor agent")
     parser.add_argument("-c", "--config", default="/etc/server-monitor-agent/agent.toml")
@@ -930,6 +1530,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--ping", action="store_true", help="Log in to the relay and exit (used by the installer)"
     )
+    parser.add_argument(
+        "--job-ping",
+        metavar="NAME",
+        help="Report a heartbeat for cron job NAME and exit (smctl ping)",
+    )
+    parser.add_argument("--job-status", choices=("ok", "fail", "start"), default="ok")
+    parser.add_argument("--job-exit-code", type=int, default=None)
+    parser.add_argument("--command-result", metavar="ID", help=argparse.SUPPRESS)
+    parser.add_argument("--result-status", choices=("succeeded", "failed"), default="failed")
+    parser.add_argument("--result-exit-code", type=int, default=None)
     parser.add_argument("-v", "--verbose", action="store_true")
     opts = parser.parse_args(argv)
     logging.basicConfig(
@@ -955,6 +1565,12 @@ def main(argv: list[str] | None = None) -> int:
             return 4
         print(f"ok: logged in to {urllib.parse.urlsplit(cfg.redis_url).hostname}")
         return 0
+    if opts.job_ping:
+        return send_job_ping(cfg, opts.job_ping, opts.job_status, opts.job_exit_code)
+    if opts.command_result:
+        return send_command_result(
+            cfg, opts.command_result, opts.result_status, opts.result_exit_code
+        )
     if opts.print_only:
         collector = Collector(cfg)
         time.sleep(0.5)  # let cpu_percent measure something

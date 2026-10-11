@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Two-factor sign-in{% endblock %}
+{% block content %}
+<div class="page-head"><div>
+  <a class="back-link" href="{% url 'account' %}">{% icon "arrow-left" 15 %} My account</a>
+  <h1 class="page-title">Two-factor sign-in</h1>
+  <p class="page-sub">A code from your phone on top of your password, so a leaked password alone can't reach your servers.</p>
+</div></div>
+
+{% if required and not enabled %}<div class="alert alert-warning" role="status">{% icon "shield" %}<div><b>Administrators must use two-factor sign-in.</b> Set it up to continue using the dashboard.</div></div>{% endif %}
+{% if error %}<div class="alert alert-danger" role="alert">{% icon "alert" %}<div>{{ error }}</div></div>{% endif %}
+
+{% if codes %}
+<div class="card mb-3"><div class="card-header">{% icon "key" 17 %} Your recovery codes</div><div class="card-body">
+  <div class="alert alert-warning" role="status">{% icon "alert" %}<div><b>Save these now; they won't be shown again.</b> Each one works once if you lose your phone.</div></div>
+  <pre class="recovery-codes" id="recovery-codes">{% for c in codes %}{{ c }}
+{% endfor %}</pre>
+  <button type="button" class="btn btn-sm btn-outline-secondary" data-copy="#recovery-codes">{% icon "copy" %} <span data-copy-label>Copy all</span></button>
+  <a class="btn btn-sm btn-primary ms-2" href="{% url 'fleet:dashboard' %}">I've saved them</a>
+</div></div>
+{% endif %}
+
+{% if not enabled %}
+<div class="card"><div class="card-header">{% icon "shield" 17 %} Set up your authenticator</div><div class="card-body">
+  <div class="totp-setup">
+    <div class="totp-qr" aria-label="QR code for your authenticator app">{{ qr|safe }}</div>
+    <ol class="totp-steps">
+      <li>Open an authenticator app (1Password, Google Authenticator, Authy, Bitwarden…).</li>
+      <li>Scan the code, or enter this key: <code class="text-break" id="totp-secret">{{ secret }}</code>
+        <button type="button" class="btn btn-sm btn-link p-0" data-copy="#totp-secret"><span data-copy-label>Copy</span></button></li>
+      <li>Enter the 6-digit code it shows:
+        <form method="post" class="d-flex gap-2 mt-2" novalidate>{% csrf_token %}<input type="hidden" name="action" value="confirm">
+          <input class="form-control otp-input" name="code" inputmode="numeric" autocomplete="one-time-code" required placeholder="123 456" maxlength="8" aria-label="Code">
+          <button class="btn btn-primary">Turn on</button>
+        </form></li>
+    </ol>
+  </div>
+</div></div>
+{% else %}
+<div class="row g-3">
+  <div class="col-12 col-xl-6"><div class="card h-100"><div class="card-header">{% icon "check" 17 %} Two-factor is on</div><div class="card-body">
+    <p class="mb-2">You'll be asked for a code each time you sign in.</p>
+    <p class="text-body-secondary small mb-0">Recovery codes left: <b>{{ remaining }}</b>{% if remaining < 3 %} · <span class="text-critical">generate new ones</span>{% endif %}</p>
+  </div></div></div>
+  <div class="col-12 col-xl-6"><div class="card h-100"><div class="card-header">{% icon "key" 17 %} Manage</div><div class="card-body">
+    <form method="post" class="form-section" novalidate>{% csrf_token %}
+      <div><label class="form-label" for="id_password">Password</label><input class="form-control" type="password" id="id_password" name="password" autocomplete="current-password" required></div>
+      <div><label class="form-label" for="id_code">Current code</label><input class="form-control otp-input" id="id_code" name="code" inputmode="numeric" autocomplete="one-time-code" required></div>
+      <div class="d-flex flex-wrap gap-2">
+        <button class="btn btn-outline-secondary" name="action" value="regenerate">New recovery codes</button>
+        <button class="btn btn-outline-danger" name="action" value="disable">{% if required %}Reset authenticator{% else %}Turn off{% endif %}</button>
+      </div>
+    </form>
+  </div></div></div>
+</div>
+{% endif %}
+{% endblock %}

@@ -80,12 +80,16 @@ class Server(models.Model):
     capabilities = models.JSONField(default=dict, blank=True)
     services = models.JSONField(default=list, blank=True)
     disks = models.JSONField(default=list, blank=True)
+    # Containers, top processes, temperatures, GPUs from the latest heartbeat (agent 2.2+).
+    inventory = models.JSONField(default=dict, blank=True)
 
     # Latest snapshot, denormalised so the dashboard is one query with no subqueries.
     last_seen_at = models.DateTimeField(null=True, blank=True)
     cpu_percent = models.FloatField(null=True, blank=True)
     memory_percent = models.FloatField(null=True, blank=True)
     disk_percent = models.FloatField(null=True, blank=True)
+    # When the fullest disk is predicted to reach 100 % (apps/alerts/forecast.py), or None.
+    disk_full_at = models.DateTimeField(null=True, blank=True)
     load_1 = models.FloatField(null=True, blank=True)
     net_rx_bps = models.FloatField(null=True, blank=True)
     net_tx_bps = models.FloatField(null=True, blank=True)
@@ -153,6 +157,28 @@ class Server(models.Model):
         return list(self.capabilities.get("logs", []))
 
     @property
+    def journal_services(self) -> list[str]:
+        """Declared systemd services, whose journals can be followed (agent 2.2+)."""
+        return [s["name"] for s in self.services if s.get("kind") == "systemd"]
+
+    @property
+    def agent_outdated(self) -> bool:
+        from .agentdist import agent_version
+
+        latest = agent_version()
+        return bool(self.agent_version and latest and self.agent_version != latest)
+
+    @property
+    def can_remote_upgrade(self) -> bool:
+        return bool(self.signing_salt) and "remote_upgrade" in (
+            self.capabilities.get("features") or []
+        )
+
+    @property
+    def can_follow_logs(self) -> bool:
+        return "log_follow" in (self.capabilities.get("features") or [])
+
+    @property
     def restartable_services(self) -> list[str]:
         return [s["name"] for s in self.services if s.get("restartable")]
 
@@ -189,3 +215,30 @@ class MetricSample(models.Model):
     @classmethod
     def retention_cutoff(cls) -> datetime:
         return timezone.now() - timedelta(days=settings.MONITOR_METRIC_RETENTION_DAYS)
+
+
+class MetricRollup(models.Model):
+    """One server-hour of samples (UTC hours), kept ROLLUP_RETENTION_DAYS for long charts and
+    forecasts. `disks` is the per-mount use at the end of the hour ({mount: percent})."""
+
+    server = models.ForeignKey(Server, on_delete=models.CASCADE, related_name="rollups")
+    hour = models.DateTimeField()
+    samples = models.PositiveIntegerField()
+    cpu_avg = models.FloatField()
+    cpu_max = models.FloatField()
+    memory_avg = models.FloatField()
+    memory_max = models.FloatField()
+    disk_avg = models.FloatField()
+    disk_max = models.FloatField()
+    load_avg = models.FloatField(null=True)
+    disks = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-hour"]
+        constraints = [
+            models.UniqueConstraint(fields=["server", "hour"], name="rollup_one_per_server_hour")
+        ]
+        indexes = [models.Index(fields=["hour"], name="rollup_hour")]
+
+    def __str__(self):
+        return f"{self.server_id} @ {self.hour:%Y-%m-%d %H}:00"

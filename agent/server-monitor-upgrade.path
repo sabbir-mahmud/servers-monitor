@@ -1,0 +1,11 @@
+# Watches for an upgrade request written by the agent (opt-in: sudo smctl remote-upgrade on).
+# The agent can only ask; root re-checks everything before installing a release tag.
+[Unit]
+Description=Server Monitor agent upgrade requests
+
+[Path]
+PathExists=/var/lib/server-monitor-agent/upgrade-request.json
+Unit=server-monitor-upgrade.service
+
+[Install]
+WantedBy=paths.target

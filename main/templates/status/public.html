@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="60">
+<meta name="robots" content="noindex">
+<title>{{ s.title }} status</title>
+<meta name="description" content="{{ s.status.label }}">
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1d1d1f;--muted:#6b7280;--line:#e5e7eb;--ok:#2fb344;--minor:#f59f00;--down:#d63939;--none:#d9dce1;--maint:#4263eb}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#171a21;--ink:#e8eaed;--muted:#9aa0a6;--line:#2a2f3a;--none:#2f3542}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:52rem;margin:0 auto;padding:2.5rem 1rem 3rem}
+header{display:flex;align-items:center;gap:.85rem;margin-bottom:1.5rem}header img{height:2.25rem;width:auto}
+h1{font-size:1.45rem;margin:0;letter-spacing:-.01em}header p{margin:.15rem 0 0;color:var(--muted)}
+.banner{display:flex;align-items:center;gap:.6rem;padding:1rem 1.2rem;border-radius:.75rem;color:#fff;font-weight:650;font-size:1.05rem;margin-bottom:1.5rem}
+.banner.operational{background:var(--ok)}.banner.degraded{background:var(--minor)}.banner.partial,.banner.major{background:var(--down)}.banner.maintenance{background:var(--maint)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:.75rem;margin-bottom:1.5rem;overflow:hidden}
+.comp{padding:1rem 1.2rem;border-top:1px solid var(--line)}.comp:first-child{border-top:0}
+.row{display:flex;justify-content:space-between;gap:1rem;align-items:baseline}.name{font-weight:600}
+.st{font-size:.875rem;font-weight:600}.st.operational{color:var(--ok)}.st.degraded{color:var(--minor)}.st.outage{color:var(--down)}.st.unknown{color:var(--muted)}.st.maintenance{color:var(--maint)}
+.bars{display:flex;gap:2px;height:2rem;margin:.6rem 0 .3rem}.bars i{flex:1;border-radius:2px;background:var(--none)}
+.bars i.up{background:var(--ok)}.bars i.minor{background:var(--minor)}.bars i.down{background:var(--down)}
+.legend{display:flex;justify-content:space-between;color:var(--muted);font-size:.78rem}
+h2{font-size:1.05rem;margin:2rem 0 .75rem}
+.inc{padding:1rem 1.2rem;border-top:1px solid var(--line)}.inc:first-child{border-top:0}.inc h3{margin:0 0 .35rem;font-size:1rem}
+.inc.major h3{color:var(--down)}.inc.minor h3{color:var(--minor)}.inc.maintenance h3{color:var(--maint)}
+.upd{margin:.5rem 0 0;font-size:.9rem}.upd b{font-weight:650}.when{color:var(--muted);font-size:.8rem}
+.affects{color:var(--muted);font-size:.82rem}
+footer{color:var(--muted);font-size:.8rem;text-align:center;margin-top:2rem}footer a{color:inherit}
+.empty{padding:1rem 1.2rem;color:var(--muted)}
+@media (max-width:40rem){.bars{height:1.6rem}.bars i:nth-child(-n+60){display:none}.legend .from{visibility:hidden}}
+</style>
+</head>
+<body>
+<main class="wrap">
+<header>
+  {% if s.logo_url %}<img src="{{ s.logo_url }}" alt="">{% endif %}
+  <div><h1>{% if s.homepage_url %}<a href="{{ s.homepage_url }}" style="color:inherit;text-decoration:none">{{ s.title }}</a>{% else %}{{ s.title }}{% endif %}</h1>
+  {% if s.description %}<p>{{ s.description }}</p>{% endif %}</div>
+</header>
+
+<div class="banner {{ s.status.level }}" role="status">{% if s.status.level == "operational" %}✓{% else %}!{% endif %} {{ s.status.label }}</div>
+
+{% for i in s.active_incidents %}
+<div class="card"><div class="inc {{ i.impact }}">
+  <h3>{{ i.title }}</h3>
+  {% if i.affects %}<div class="affects">Affects {{ i.affects|join:", " }}</div>{% endif %}
+  {% for u in i.updates %}<p class="upd"><b>{{ u.status }}</b> · {{ u.message }} <span class="when">· <time datetime="{{ u.at }}">{{ u.at|slice:":10" }} {{ u.at|slice:"11:16" }} UTC</time></span></p>{% endfor %}
+</div></div>
+{% endfor %}
+
+<div class="card">
+{% for c in s.components %}
+  <div class="comp">
+    <div class="row"><span class="name">{{ c.name }}</span><span class="st {{ c.state }}">{{ c.label }}</span></div>
+    {% if s.days %}
+    <div class="bars" role="img" aria-label="Daily uptime for {{ c.name }} over {{ s.days }} days">{% for d in c.days %}<i class="{{ d.level }}" title="{{ d.date }}: {% if d.pct is None %}no data{% else %}{{ d.pct }}% up{% endif %}"></i>{% endfor %}</div>
+    <div class="legend"><span class="from">{{ s.days }} days ago</span><span>{% if c.uptime is not None %}{{ c.uptime }}% uptime{% endif %}</span><span>Today</span></div>
+    {% endif %}
+  </div>
+{% empty %}<div class="empty">Nothing is listed on this page yet.</div>
+{% endfor %}
+</div>
+
+{% if s.past_incidents %}
+<h2>Past incidents</h2>
+<div class="card">
+{% for i in s.past_incidents %}
+  <div class="inc {{ i.impact }}"><h3>{{ i.title }}</h3>
+  {% for u in i.updates %}<p class="upd"><b>{{ u.status }}</b> · {{ u.message }} <span class="when">· {{ u.at|slice:":10" }} {{ u.at|slice:"11:16" }} UTC</span></p>{% endfor %}</div>
+{% endfor %}
+</div>
+{% endif %}
+
+<footer>Updated <time datetime="{{ generated_at|date:'c' }}">{{ generated_at|date:"M j, H:i e" }}</time> · refreshes every minute{% if s.homepage_url %} · <a href="{{ s.homepage_url }}">Back to site</a>{% endif %}</footer>
+</main>
+</body>
+</html>

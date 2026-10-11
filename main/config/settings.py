@@ -15,6 +15,13 @@ from django.utils.csp import CSP
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# One version for the dashboard and the agent: the repo's VERSION file (copied into the
+# Docker image). A test keeps agent/server_monitor_agent.py's VERSION in step.
+try:
+    APP_VERSION = (BASE_DIR.parent / "VERSION").read_text().strip()
+except OSError:
+    APP_VERSION = "dev"
+
 # ---------------------------------------------------------------------------#
 # Core
 # ---------------------------------------------------------------------------#
@@ -42,7 +49,9 @@ INSTALLED_APPS = [
     "apps.operations",
     "apps.alerts",
     "apps.monitors",
+    "apps.status",
     "apps.agent_api",
+    "apps.api",
 ]
 
 MIDDLEWARE = [
@@ -57,6 +66,7 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django.middleware.csp.ContentSecurityPolicyMiddleware",
     "apps.core.middleware.HtmxMiddleware",
+    "apps.users.middleware.Require2FAMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -131,6 +141,32 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 # Sign in with a username or an email address.
 AUTHENTICATION_BACKENDS = ["apps.users.backends.UsernameOrEmailBackend"]
+
+# Single sign-on with an OpenID Connect provider (docs/configuration.md#single-sign-on).
+# On when OIDC_RP_CLIENT_ID is set. Local accounts keep working (superusers only ever sign
+# in locally: they're the break-glass accounts).
+OIDC_RP_CLIENT_ID = config("OIDC_RP_CLIENT_ID", default="")
+OIDC_ENABLED = bool(OIDC_RP_CLIENT_ID)
+OIDC_RP_CLIENT_SECRET = config("OIDC_RP_CLIENT_SECRET", default="")
+OIDC_OP_AUTHORIZATION_ENDPOINT = config("OIDC_OP_AUTHORIZATION_ENDPOINT", default="")
+OIDC_OP_TOKEN_ENDPOINT = config("OIDC_OP_TOKEN_ENDPOINT", default="")
+OIDC_OP_USER_ENDPOINT = config("OIDC_OP_USER_ENDPOINT", default="")
+OIDC_OP_JWKS_ENDPOINT = config("OIDC_OP_JWKS_ENDPOINT", default="")
+OIDC_RP_SIGN_ALGO = config("OIDC_RP_SIGN_ALGO", default="RS256")
+OIDC_RP_SCOPES = config("OIDC_RP_SCOPES", default="openid email profile")
+OIDC_PROVIDER_NAME = config("OIDC_PROVIDER_NAME", default="single sign-on")
+OIDC_GROUPS_CLAIM = config("OIDC_GROUPS_CLAIM", default="groups")
+OIDC_ADMIN_GROUPS = config("OIDC_ADMIN_GROUPS", default="", cast=Csv())
+OIDC_OPERATOR_GROUPS = config("OIDC_OPERATOR_GROUPS", default="", cast=Csv())
+OIDC_VIEWER_GROUPS = config("OIDC_VIEWER_GROUPS", default="", cast=Csv())
+OIDC_DEFAULT_ROLE = config("OIDC_DEFAULT_ROLE", default="")  # for people in no mapped group
+OIDC_CREATE_USERS = config("OIDC_CREATE_USERS", default=True, cast=bool)  # no invitation needed
+OIDC_ALLOW_UNVERIFIED_EMAIL = config("OIDC_ALLOW_UNVERIFIED_EMAIL", default=False, cast=bool)
+OIDC_USE_PKCE = True
+OIDC_USERNAME_ALGO = "apps.users.sso.username_for"
+LOGIN_REDIRECT_URL_FAILURE = "/login/?sso=failed"
+if OIDC_ENABLED:
+    AUTHENTICATION_BACKENDS.append("apps.users.sso.SSOBackend")
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "fleet:dashboard"
 LOGOUT_REDIRECT_URL = "login"
@@ -145,6 +181,8 @@ PASSWORD_RESET_TIMEOUT = config("PASSWORD_RESET_TIMEOUT", default=2 * 60 * 60, c
 # Public sign-up is off: this dashboard can deploy to servers. When on, new accounts wait
 # for an Admin to approve them and start with no access.
 ALLOW_SIGNUP = config("ALLOW_SIGNUP", default=False, cast=bool)
+# Admins must sign in with a second factor (authenticator app); everyone else may opt in.
+REQUIRE_2FA_FOR_ADMINS = config("REQUIRE_2FA_FOR_ADMINS", default=True, cast=bool)
 
 # Email (password resets, invitations). Without EMAIL_HOST nothing is sent: Admins hand
 # out reset and invitation links themselves, which works fully offline. Django 6.1's MAILERS
@@ -228,6 +266,21 @@ RELAY_PUBLIC_HOST = config("RELAY_PUBLIC_HOST", default="")
 # billed commands when idle; new servers are noticed within this many seconds.
 RELAY_BLOCK_SECONDS = config("RELAY_BLOCK_SECONDS", default=60, cast=int)
 
+# Redis usage meter on the System page (defaults: Upstash pay-as-you-go).
+RELAY_FREE_COMMANDS = config("RELAY_FREE_COMMANDS", default=500_000, cast=int)
+RELAY_PRICE_PER_100K = config("RELAY_PRICE_PER_100K", default=0.2, cast=float)
+
+# Who watches the watcher: the relay process pings this URL every minute (create a check at
+# healthchecks.io or similar). If pings stop, that service alerts you that monitoring is down.
+WATCHDOG_URL = config("WATCHDOG_URL", default="")
+# Daily database snapshots by the relay process (empty = a "backups" folder next to the db).
+BACKUP_DIR = config("BACKUP_DIR", default="")
+BACKUP_KEEP = config("BACKUP_KEEP", default=14, cast=int)
+# Browser push: the contact push services see (mailto: or https:). Default: DEFAULT_FROM_EMAIL.
+WEBPUSH_CONTACT = config("WEBPUSH_CONTACT", default="")
+# REST API (/api/v1/) and /metrics: requests per minute per token.
+API_RATE_LIMIT = config("API_RATE_LIMIT", default=120, cast=int)
+
 # Agents install from GitHub, not from this dashboard (which isn't reachable from servers).
 AGENT_REPO = config("AGENT_REPO", default="sabbir-mahmud/servers-monitor")
 AGENT_REF = config("AGENT_REF", default="main")  # pin to a release tag in production
@@ -247,6 +300,9 @@ MONITOR_OFFLINE_AFTER_INTERVALS = config("MONITOR_OFFLINE_AFTER_INTERVALS", defa
 # Network jitter allowance added on top of the interval maths.
 MONITOR_GRACE_SECONDS = config("MONITOR_GRACE_SECONDS", default=10, cast=int)
 MONITOR_METRIC_RETENTION_DAYS = config("MONITOR_METRIC_RETENTION_DAYS", default=14, cast=int)
+# Hourly server rollups and daily monitor uptime outlive raw samples: long charts, forecasts
+# and status-page history (~24 rows per server per day).
+ROLLUP_RETENTION_DAYS = config("ROLLUP_RETENTION_DAYS", default=400, cast=int)
 # Pending commands no agent picked up within this window expire instead of firing late —
 # a deploy that runs an hour after someone clicked it is worse than one that never ran.
 MONITOR_COMMAND_DELIVERY_SECONDS = config("MONITOR_COMMAND_DELIVERY_SECONDS", default=300, cast=int)

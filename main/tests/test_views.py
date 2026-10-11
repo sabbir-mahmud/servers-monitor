@@ -174,3 +174,11 @@ def test_sidebar_categories_and_problem_badges(client, admin_user, viewer):
     client.force_login(viewer)
     page = client.get(reverse("fleet:dashboard")).content.decode()
     assert "<span>Administration</span>" not in page and "<span>Infrastructure</span>" in page
+
+
+def test_dashboard_and_agent_versions_agree(settings):
+    from pathlib import Path
+
+    agent = (Path(__file__).resolve().parents[2] / "agent" / "server_monitor_agent.py").read_text()
+    agent_version = next(ln.split('"')[1] for ln in agent.splitlines() if ln.startswith("VERSION"))
+    assert settings.APP_VERSION == agent_version  # bump both (VERSION file + agent) together

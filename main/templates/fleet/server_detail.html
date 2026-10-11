@@ -30,6 +30,11 @@
         <button class="btn btn-outline-secondary btn-sm btn-icon" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="More actions">{% icon "more" %}</button>
         <div class="dropdown-menu dropdown-menu-end">
           <a class="dropdown-item" href="{% url 'fleet:server_enroll' server.pk %}">{% icon "terminal" 16 %}<span><span class="d-block">Install / upgrade agent</span><small>Verified command for this server</small></span></a>
+          {% if server.agent_outdated and server.can_remote_upgrade %}
+          <form method="post" action="{% url 'fleet:server_upgrade' server.pk %}" data-confirm="Upgrade {{ server.name }}'s agent from v{{ server.agent_version }}? It restarts once.">{% csrf_token %}
+            <button class="dropdown-item">{% icon "download" 16 %}<span><span class="d-block">Upgrade agent now</span><small>From v{{ server.agent_version }}, verified, no SSH</small></span></button>
+          </form>
+          {% endif %}
           <form method="post" action="{% url 'fleet:server_rotate_token' server.pk %}" data-confirm="Rotate credentials for {{ server.name }}? The agent is disconnected until you install the new ones (sudo smctl connect).">{% csrf_token %}
             <button class="dropdown-item">{% icon "key" 16 %}<span><span class="d-block">Rotate credentials</span><small>New relay password for the agent</small></span></button>
           </form>
@@ -46,7 +51,7 @@
     <div><dt>Environment</dt><dd><span class="chip chip-env">{{ server.get_environment_display }}</span>{% for g in server.groups.all %} <a class="chip" href="{% url 'fleet:dashboard' %}?group={{ g.name }}">{{ g.name }}</a>{% endfor %}</dd></div>
     <div><dt>Platform</dt><dd>{{ server.platform|default:"—" }}</dd></div>
     <div><dt>Hardware</dt><dd>{% if server.cpu_count %}{{ server.cpu_count }} cores{% else %}—{% endif %}{% if server.memory_total %} · {{ server.memory_total|filesizeformat }}{% endif %}</dd></div>
-    <div><dt>Agent</dt><dd>{% if server.agent_version %}v{{ server.agent_version }}{% else %}—{% endif %} · every {{ server.report_interval }}s</dd></div>
+    <div><dt>Agent</dt><dd>{% if server.agent_version %}v{{ server.agent_version }}{% else %}—{% endif %} · every {{ server.report_interval }}s{% if server.agent_outdated %} · <span class="text-critical" title="{% if server.can_remote_upgrade %}Upgrade from the ⋯ menu{% else %}Run the upgrade command from ⋯ → Install / upgrade agent, or sudo smctl remote-upgrade on to upgrade from here{% endif %}">update available</span>{% endif %}</dd></div>
     <div><dt>Credential</dt><dd><code>{{ server.token_prefix }}…</code></dd></div>
   </dl>
 </header>
@@ -87,7 +92,7 @@
   <section id="overview" class="anchor overview-grid mb-3">
     <div class="stat gauge"><div class="stat-label">{% icon "cpu" 15 %} CPU</div>{% ring server.cpu_percent "CPU" %}<div class="stat-hint">{% if server.cpu_count %}{{ server.cpu_count }} cores{% else %}&nbsp;{% endif %}</div></div>
     <div class="stat gauge"><div class="stat-label">{% icon "memory" 15 %} Memory</div>{% ring server.memory_percent "Memory" %}<div class="stat-hint">{% if server.memory_total %}of {{ server.memory_total|filesizeformat }}{% else %}&nbsp;{% endif %}</div></div>
-    <div class="stat gauge"><div class="stat-label">{% icon "disk" 15 %} Fullest disk</div>{% ring server.disk_percent "Disk" %}<div class="stat-hint">{{ server.disks|length }} mount{{ server.disks|length|pluralize }}</div></div>
+    <div class="stat gauge"><div class="stat-label">{% icon "disk" 15 %} Fullest disk</div>{% ring server.disk_percent "Disk" %}<div class="stat-hint">{% with f=server.disk_full_at|fills_in %}{% if f %}<span class="text-critical fw-semibold" title="Forecast from the last week's growth">{{ f }}</span>{% else %}{{ server.disks|length }} mount{{ server.disks|length|pluralize }}{% endif %}{% endwith %}</div></div>
     <div class="stat vitals">
       <div class="vital"><span class="vital-label">{% icon "clock" 15 %} Last report</span><span class="vital-value">{{ server.last_seen_at|ago }}</span><span class="stat-hint">expected every {{ server.report_interval }}s</span></div>
       <div class="vital"><span class="vital-label">{% icon "refresh" 15 %} Uptime</span><span class="vital-value">{{ server.uptime_seconds|duration }}</span><span class="stat-hint">since last boot</span></div>
@@ -133,6 +138,47 @@
       </div>
     </div></div>
   </div>
+
+  {% with inv=server.inventory %}{% if inv %}
+  <div id="inventory" class="anchor row g-3 mb-3">
+    <div class="col-12 col-xl-7"><div class="card h-100"><div class="card-header">{% icon "activity" 17 %} Top processes
+      <div class="card-actions"><span class="muted small">{{ inv.processes.count }} running</span></div></div>
+      <div class="table-responsive"><table class="table table-sm align-middle">
+        <thead><tr><th>Process</th><th>User</th><th class="num">CPU</th><th class="num">Memory</th></tr></thead>
+        <tbody>
+        {% for p in inv.processes.cpu|slice:":8" %}
+          <tr><td><div class="fw-semibold text-nowrap">{{ p.name }} <span class="muted small fw-normal">{{ p.pid }}</span></div><div class="row-sub mono text-truncate" style="max-width: 26rem" title="{{ p.cmd }}">{{ p.cmd }}</div></td>
+            <td class="text-body-secondary">{{ p.user }}</td><td class="num">{{ p.cpu|floatformat:1 }}%</td><td class="num text-body-secondary">{{ p.rss|filesizeformat }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+      {% if inv.processes.memory %}<details class="px-3 pb-3"><summary class="small fw-medium">Largest by memory</summary>
+        <table class="table table-sm mb-0 mt-2"><tbody>{% for p in inv.processes.memory|slice:":8" %}<tr><td>{{ p.name }} <span class="muted small">{{ p.pid }}</span></td><td class="text-body-secondary">{{ p.user }}</td><td class="num">{{ p.rss|filesizeformat }}</td></tr>{% endfor %}</tbody></table>
+      </details>{% endif %}
+    </div></div>
+    <div class="col-12 col-xl-5 d-flex flex-column gap-3">
+      <div class="card"><div class="card-header">{% icon "box" 17 %} Containers</div>
+        {% if inv.containers %}<div class="table-responsive"><table class="table table-sm align-middle mb-0">
+          <thead><tr><th>Name</th><th>State</th><th class="num">CPU</th><th class="num">Memory</th></tr></thead>
+          <tbody>{% for c in inv.containers %}
+            <tr {% if c.state != "running" %}class="row-muted"{% endif %}><td><div class="fw-semibold text-nowrap">{{ c.name }}</div>{% if c.image %}<div class="row-sub mono text-truncate" style="max-width: 14rem">{{ c.image }}</div>{% endif %}</td>
+              <td>{% if c.state == "running" %}{% service_badge "up" %}{% else %}<span class="muted small">{{ c.state }}</span>{% endif %}</td>
+              <td class="num">{% if c.cpu is not None %}{{ c.cpu|floatformat:1 }}%{% else %}—{% endif %}</td><td class="num text-body-secondary">{% if c.memory %}{{ c.memory|filesizeformat }}{% else %}—{% endif %}</td></tr>
+          {% endfor %}</tbody></table></div>
+        {% else %}<div class="empty-small">No containers running.</div>{% endif %}
+        {% if inv.containers and not inv.containers.0.image %}<div class="card-footer small text-body-secondary">For names and stopped containers: <code>sudo smctl docker enable</code></div>{% endif %}
+      </div>
+      {% if inv.temps or inv.gpus %}
+      <div class="card"><div class="card-header">{% icon "cpu" 17 %} Hardware</div><div class="card-body">
+        <dl class="kv mb-0">
+        {% for t in inv.temps|slice:":6" %}<dt>{{ t.sensor }}</dt><dd class="{% if t.high and t.current >= t.high %}text-critical fw-semibold{% endif %}">{{ t.current|floatformat:0 }}°C{% if t.high %} <span class="muted small">/ {{ t.high|floatformat:0 }}°C high</span>{% endif %}</dd>{% endfor %}
+        {% for g in inv.gpus %}<dt>{{ g.name }}</dt><dd>{{ g.util|floatformat:0 }}% · {{ g.mem_used|filesizeformat }} of {{ g.mem_total|filesizeformat }} · {{ g.temp|floatformat:0 }}°C</dd>{% endfor %}
+        </dl>
+      </div></div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}{% endwith %}
 </div>
 {% endpartialdef %}
 
@@ -187,15 +233,22 @@
   </div></div></div>
 
   <div class="col-12 col-xl-6"><div class="card h-100"><div class="card-header">{% icon "file" 17 %} Logs</div><div class="card-body d-flex flex-column">
-    {% if server.log_names %}
+    {% if server.log_names or server.can_follow_logs and server.journal_services %}
     <form class="d-flex flex-wrap gap-2" hx-post="{% url 'operations:job_create' %}" hx-target="#log-output">
-      <input type="hidden" name="servers" value="{{ server.pk }}"><input type="hidden" name="action" value="tail_log">
-      <select class="form-select flex-grow-1" style="flex-basis: 12rem; width: auto" name="name" aria-label="Log">{% for n in server.log_names %}<option>{{ n }}</option>{% endfor %}</select>
+      <input type="hidden" name="servers" value="{{ server.pk }}">
+      <select class="form-select flex-grow-1" style="flex-basis: 12rem; width: auto" name="name" aria-label="Log">
+        {% if server.log_names %}<optgroup label="Log files">{% for n in server.log_names %}<option>{{ n }}</option>{% endfor %}</optgroup>{% endif %}
+        {% if server.can_follow_logs and server.journal_services %}<optgroup label="Service journals (Follow)">{% for n in server.journal_services %}<option value="journal:{{ n }}">{{ n }}</option>{% endfor %}</optgroup>{% endif %}
+      </select>
       <div class="input-suffix"><input class="form-control" style="width: 7.5rem" type="number" name="lines" value="200" min="1" max="2000" aria-label="Lines"><span>lines</span></div>
-      <button class="btn btn-outline-primary">Tail</button>
+      <button class="btn btn-outline-primary" name="action" value="tail_log">Tail</button>
+      {% if server.can_follow_logs %}
+      <input class="form-control flex-grow-1" style="flex-basis: 10rem; width: auto" type="search" name="filter" maxlength="200" placeholder="Only lines containing…" aria-label="Filter">
+      <button class="btn btn-outline-primary" name="action" value="tail_follow" title="Stream new lines for up to 10 minutes">{% icon "play" %} Follow</button>
+      {% endif %}
     </form>
     <div id="log-output" class="mt-3 flex-grow-1">
-      <div class="terminal-empty">{% icon "file" 22 %}<span>Pick a log and tail it. Output streams here.</span></div>
+      <div class="terminal-empty">{% icon "file" 22 %}<span>Pick a log and tail it{% if server.can_follow_logs %}, or follow new lines live{% endif %}. Output streams here.</span></div>
     </div>
     {% else %}<p class="text-body-secondary small mb-0">No logs yet. On the server, run<br><code>sudo smctl log add app /var/log/app.log</code></p>{% endif %}
   </div></div></div>

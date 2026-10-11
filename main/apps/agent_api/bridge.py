@@ -22,15 +22,18 @@ from django.core.exceptions import ValidationError
 from django.db import close_old_connections
 from django.utils import timezone
 
-from apps.alerts import delivery
+from apps.alerts import delivery, forecast
 from apps.alerts.services import sweep
+from apps.core import backup
+from apps.fleet import rollups
 from apps.fleet.models import Server
 from apps.fleet.services import ingest_report, prune_samples
 from apps.monitors.checker import Checker, prune_checks
 from apps.operations import services as ops
 from apps.operations.models import CommandStatus
+from apps.status import publish as status_publish
 
-from . import relay, signing
+from . import relay, signing, usage
 from .schema import PayloadError, clean_report, clean_result
 
 logger = logging.getLogger(__name__)
@@ -82,6 +85,7 @@ def handle(server: Server, message: dict) -> None:
     """Apply one message from `server`'s agent. Never raises on bad input: one confused
     agent must not stop the receiver for the whole fleet."""
     kind = message.get("t")
+    usage.count_agent_message(kind)
     if not signing.verify_from_server(server, message):
         # Forged (written by someone with Redis access but not this server's key) or
         # corrupted. Either way: not from the agent, so it changes nothing.
@@ -93,8 +97,9 @@ def handle(server: Server, message: dict) -> None:
                 return
             raw = message.get("report")
             ingest_report(server, clean_report(raw), _address(raw))
-            if message.get("interval") != server.report_interval:
-                relay.push(server, {"t": "cfg", "report_interval": server.report_interval})
+            cfg = _probe_config(server, raw) or {}
+            if cfg or message.get("interval") != server.report_interval:
+                relay.push(server, {"t": "cfg", "report_interval": server.report_interval, **cfg})
         elif kind == "ack":
             command = ops.acknowledge(server, message.get("id"))
             if command is not None and command.status in STOP_AGENT_STATUSES:
@@ -107,12 +112,56 @@ def handle(server: Server, message: dict) -> None:
             # Output for a command nobody is waiting on any more: tell the agent to stop.
             if command is not None and command.status in STOP_AGENT_STATUSES:
                 relay.push(server, {"t": "cancel", "id": str(command.pk)})
+        elif kind == "ping":
+            _job_ping(server, message)
         else:
             logger.warning("Unknown message type %r from %s", kind, server.name)
     except PayloadError as exc:
         logger.warning("Bad %s message from %s: %s", kind, server.name, exc)
     except (ValueError, TypeError, ValidationError) as exc:  # e.g. a non-UUID command id
         logger.warning("Unusable %s message from %s: %s", kind, server.name, exc)
+
+
+def _probe_config(server: Server, raw: dict) -> dict | None:
+    """Agents as uptime probes (3.4): store the results riding on this heartbeat, and
+    return new assignments if the agent's copy is out of date (it echoes their revision,
+    so assignments are only re-sent when they change or the agent restarted)."""
+    from apps.monitors import checker
+
+    features = server.capabilities.get("features") or []
+    if "probes" not in features or not server.signing_salt or not isinstance(raw, dict):
+        return None  # older or legacy unsigned agents never get probes
+    checker.receive_probe_results(server, raw.get("probe_results"))
+    assignments = checker.probe_assignments(server)
+    rev = checker.assignments_rev(assignments) if assignments else ""
+    if str(raw.get("probes_rev") or "") == rev:
+        return None
+    return {"probes": assignments, "probes_rev": rev}
+
+
+def _job_ping(server: Server, message: dict) -> None:
+    """`smctl ping`/`smctl run` on `server`: feed its Heartbeat monitor with that name.
+    Only signed messages count (a legacy unsigned agent can't vouch for its pings), and
+    a server can only ping its own heartbeats."""
+    from apps.monitors.checker import receive_ping
+    from apps.monitors.models import Kind, Monitor
+
+    if not server.signing_salt:
+        logger.warning("Ignoring job ping from %s: legacy unsigned agent", server.name)
+        return
+    name, status = message.get("name"), message.get("status")
+    if not isinstance(name, str) or status not in ("ok", "fail", "start"):
+        raise PayloadError("ping needs a name and a status of ok, fail or start")
+    exit_code = message.get("exit")
+    if exit_code is not None and not isinstance(exit_code, int):
+        exit_code = None
+    monitor = Monitor.objects.filter(
+        kind=Kind.HEARTBEAT, server=server, target=name[:253], is_enabled=True
+    ).first()
+    if monitor is None:
+        logger.info("Job ping %r from %s matches no enabled Heartbeat monitor", name, server.name)
+        return
+    receive_ping(monitor, status, exit_code)
 
 
 class Bridge:
@@ -146,19 +195,32 @@ class Bridge:
 
     # ---------------------------------------------------------------- scheduler
     def schedule_forever(self) -> None:
-        last_sweep = last_prune = 0.0
+        last_sweep = last_prune = last_usage = last_status = 0.0
         while not self.stop.is_set():
             close_old_connections()
             now = time.monotonic()
             try:
                 ops.dispatch_pending()
+                ops.run_due_schedules()
+                ops.advance_rollouts()
                 if now - last_sweep >= settings.MONITOR_SWEEP_SECONDS:
                     last_sweep = now
                     result = sweep()
                     if any(result.values()):
                         logger.info("Sweep: %s", result)
+                if backup.snapshot_due():
+                    backup.take_snapshot()
+                if now - last_status >= 120 or status_publish.requested():
+                    last_status = now
+                    status_publish.publish_due()
+                if now - last_usage >= 60:
+                    last_usage = now
+                    usage.flush()
                 if now - last_prune >= 3600:
                     last_prune = now
+                    usage.prune()
+                    rollups.build_all()  # before the forecast, which reads them
+                    forecast.update_all()
                     if deleted := prune_samples() + prune_checks():
                         logger.info("Pruned %d samples/checks past retention", deleted)
             except Exception:  # keep scheduling even if one round hits a bug
@@ -180,8 +242,29 @@ class Bridge:
                 logger.exception("Notification round failed")
             self.stop.wait(5)
 
+    def watchdog_forever(self) -> None:
+        """Ping WATCHDOG_URL every minute (see apps/core/system.py)."""
+        from apps.core.system import WATCHDOG_EVERY, ping_watchdog
+
+        while not self.stop.is_set():
+            close_old_connections()
+            try:
+                ping_watchdog()
+            except Exception:
+                logger.exception("Watchdog round failed")
+            self.stop.wait(WATCHDOG_EVERY)
+
     def run(self) -> None:
+        # Before marking ourselves alive again: was monitoring down, and for how long?
+        from apps.core.system import check_downtime
+
+        try:
+            check_downtime(relay.last_alive_at())
+        except Exception:
+            logger.exception("Downtime check failed")
+        relay.mark_alive()
         threads = [
+            threading.Thread(target=self.watchdog_forever, name="watchdog", daemon=True),
             threading.Thread(target=self.notify_forever, name="notify", daemon=True),
             threading.Thread(target=self.receive_forever, name="relay-receive", daemon=True),
             threading.Thread(target=self.schedule_forever, name="relay-schedule", daemon=True),

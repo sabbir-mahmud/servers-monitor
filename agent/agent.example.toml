@@ -22,6 +22,12 @@ max_concurrent_commands = 2
 disk_mounts = []
 # systemd restarts run as `sudo -n systemctl restart <unit>` when the agent isn't root.
 use_sudo_for_restart = true
+# Top processes, temperatures, GPUs and containers (cgroup files, no docker access) in each
+# heartbeat. Read-only; a few KB.
+inventory = true
+# Let dashboard Admins upgrade this agent (release tags only, checksum-verified, done by a
+# root systemd unit that re-checks every request). `sudo smctl remote-upgrade on`.
+remote_upgrade = false
 
 # ---------------------------------------------------------------- services
 # kind: systemd | docker | pm2 | process | http
@@ -83,6 +89,18 @@ timeout = 30
 # description = "Install security updates"
 # command = ["sudo", "-n", "/usr/bin/unattended-upgrade", "-v"]
 # timeout = 1800
+
+# ---------------------------------------------------------------- probes
+# Let the dashboard run HTTP/TCP uptime checks from this server (internal URLs included;
+# cloud metadata never). Results ride on heartbeats. `sudo smctl probes on`.
+# [probes]
+# enabled = true
+
+# ---------------------------------------------------------------- docker
+# Container names and stopped containers via `docker ps`. Needs the docker group, which is
+# root-equivalent: `sudo smctl docker enable` sets both.
+# [docker]
+# names = true
 
 # ---------------------------------------------------------------- shell
 # Free-form commands from the dashboard (Admin role only, every one audited). Off by

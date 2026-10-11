@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}API tokens{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'account' %}">{% icon "arrow-left" 15 %} My account</a>
+<div class="page-head"><div>
+  <h1 class="page-title">API tokens</h1>
+  <p class="page-sub">For scripts and tools that can already reach this dashboard: the <a href="https://github.com/sabbir-mahmud/servers-monitor/blob/main/docs/api.md" target="_blank" rel="noopener noreferrer">REST API</a> under <code>/api/v1/</code> and Prometheus metrics at <code>/metrics</code>. A token acts as you, limited to its scope.</p>
+</div></div>
+
+{% if new_token %}
+<div class="alert alert-success mb-3" role="status">{% icon "key" %}
+  <div class="flex-grow-1"><strong>Copy {{ created.name }} now: it won't be shown again.</strong>
+    <div class="copy-block mt-2"><pre class="output mb-0" id="new-token">{{ new_token }}</pre>
+      <button type="button" class="icon-btn" data-copy="#new-token" title="Copy" aria-label="Copy">{% icon "copy" 15 %}</button></div>
+    <div class="small mt-2 mono">curl -H "Authorization: Bearer {{ new_token|slice:":10" }}…" {{ request.scheme }}://{{ request.get_host }}/api/v1/servers/</div>
+  </div>
+</div>
+{% endif %}
+
+<div class="row g-3 align-items-start">
+  <div class="col-12 col-xl-7"><div class="card"><div class="card-header">{% icon "key" 17 %} Your tokens</div>
+    <div class="table-responsive"><table class="table table-sm align-middle">
+      <thead><tr><th>Name</th><th>Scope</th><th>Last used</th><th>Expires</th><th></th></tr></thead>
+      <tbody>
+      {% for t in tokens %}
+        <tr><td><span class="fw-medium">{{ t.name }}</span> <span class="mono small muted">{{ t.prefix }}…</span></td>
+          <td>{{ t.get_scope_display }}</td>
+          <td class="text-body-secondary text-nowrap">{% if t.last_used_at %}{{ t.last_used_at|ago }}{% else %}never{% endif %}</td>
+          <td class="text-nowrap">{% if not t.expires_at %}never{% elif t.is_active %}{{ t.expires_at|date:"M j, Y" }}{% else %}<span class="text-critical">expired</span>{% endif %}</td>
+          <td class="text-end"><form method="post" action="{% url 'api_token_revoke' t.pk %}" data-confirm="Revoke {{ t.name }}? Anything using it stops working.">{% csrf_token %}
+            <button class="btn btn-sm btn-outline-secondary">Revoke</button></form></td></tr>
+      {% empty %}<tr><td colspan="5" class="empty-small">No tokens yet.</td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+  </div></div>
+  <div class="col-12 col-xl-5">
+    <form method="post" novalidate>{% csrf_token %}
+      <div class="card"><div class="card-header">{% icon "plus" 17 %} New token</div><div class="card-body form-section">
+        {% include "alerts/_field.html" with field=form.name %}
+        {% include "alerts/_field.html" with field=form.scope %}
+        {% include "alerts/_field.html" with field=form.expires %}
+        <div><button class="btn btn-primary">Create token</button></div>
+      </div></div>
+    </form>
+  </div>
+</div>
+{% endblock %}

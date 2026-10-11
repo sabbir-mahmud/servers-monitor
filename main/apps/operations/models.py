@@ -13,9 +13,22 @@ class CommandStatus(models.TextChoices):
     LOST = "lost", "Lost"  # delivered, but the agent never reported back in time
     EXPIRED = "expired", "Expired"  # never picked up within the delivery window
     CANCELLED = "cancelled", "Cancelled"
+    WAITING = "waiting", "Waiting for its batch"  # rolling jobs: later batches
 
 
 ACTIVE_STATUSES = (CommandStatus.PENDING, CommandStatus.RUNNING)
+
+
+class Strategy(models.TextChoices):
+    ALL = "all", "All at once"
+    ROLLING = "rolling", "Rolling, in batches"
+
+
+class JobState(models.TextChoices):
+    RUNNING = "running", "Running"
+    HALTED = "halted", "Halted"
+    COMPLETED = "completed", "Completed"
+    ABORTED = "aborted", "Aborted"
 
 
 class Job(models.Model):
@@ -29,6 +42,23 @@ class Job(models.Model):
         settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+"
     )
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    schedule = models.ForeignKey(
+        "Schedule", null=True, blank=True, on_delete=models.SET_NULL, related_name="jobs"
+    )
+
+    # Rolling rollouts: batches of servers, each released when the previous one finished
+    # (and the health-gate apps are up again).
+    strategy = models.CharField(max_length=8, choices=Strategy.choices, default=Strategy.ALL)
+    batch_size = models.PositiveSmallIntegerField(default=1)
+    pause_seconds = models.PositiveIntegerField(default=0)
+    stop_on_failure = models.BooleanField(default=True)
+    health_gates = models.ManyToManyField("monitors.Monitor", blank=True, related_name="+")
+    gate_timeout_seconds = models.PositiveIntegerField(default=600)
+    state = models.CharField(max_length=10, choices=JobState.choices, default=JobState.RUNNING)
+    current_batch = models.PositiveSmallIntegerField(default=0)
+    batch_done_at = models.DateTimeField(null=True, blank=True)
+    halt_reason = models.CharField(max_length=300, blank=True)
+    accept_failures_through = models.SmallIntegerField(default=-1)  # set by Resume
 
     class Meta:
         ordering = ["-created_at"]
@@ -41,6 +71,16 @@ class Job(models.Model):
     def summary(self) -> str:
         if self.action == "shell":
             return self.args.get("command", "")[:80]
+        if self.action == "_upgrade":
+            return f"upgrade agent to {self.args.get('ref', '?')}"
+        if self.action == "tail_follow":
+            what = (
+                f"journal of {self.args.get('name')}"
+                if self.args.get("source") == "journal"
+                else self.args.get("name")
+            )
+            grep = f" | {self.args['filter']}" if self.args.get("filter") else ""
+            return f"follow {what}{grep}"
         if self.args.get("name"):
             return f"{self.action} {self.args['name']}"
         return self.action
@@ -57,6 +97,7 @@ class Command(models.Model):
     action = models.CharField(max_length=64)
     args = models.JSONField(default=dict, blank=True)
     timeout_seconds = models.PositiveIntegerField(default=300)
+    batch = models.PositiveSmallIntegerField(default=0)
     status = models.CharField(
         max_length=12, choices=CommandStatus.choices, default=CommandStatus.PENDING
     )
@@ -99,3 +140,47 @@ class Command(models.Model):
     @property
     def is_active(self) -> bool:
         return self.status in ACTIVE_STATUSES
+
+
+class Schedule(models.Model):
+    """Run an action on a cron schedule (e.g. renew certificates every night, deploy at 02:00)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    name = models.CharField(max_length=100, unique=True)
+    action = models.CharField(max_length=64)
+    args = models.JSONField(default=dict, blank=True)
+    cron = models.CharField(
+        max_length=100, help_text="minute hour day month weekday, e.g. 0 3 * * *"
+    )
+    servers = models.ManyToManyField("fleet.Server", blank=True, related_name="+")
+    groups = models.ManyToManyField("fleet.ServerGroup", blank=True, related_name="+")
+    environments = models.JSONField(default=list, blank=True)
+    # Rollout options for each run (see Job).
+    strategy = models.CharField(max_length=8, choices=Strategy.choices, default=Strategy.ALL)
+    batch_size = models.PositiveSmallIntegerField(default=1)
+    pause_seconds = models.PositiveIntegerField(default=0)
+    stop_on_failure = models.BooleanField(default=True)
+    health_gates = models.ManyToManyField("monitors.Monitor", blank=True, related_name="+")
+    is_enabled = models.BooleanField(default=True)
+    next_run_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    last_run_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=300, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+    def targets(self):
+        """Servers resolved now: chosen ones plus every member of the groups/environments."""
+        from apps.fleet.models import Server
+
+        q = Q(pk__in=self.servers.values("pk")) | Q(groups__in=self.groups.all())
+        if self.environments:
+            q |= Q(environment__in=self.environments)
+        return Server.objects.filter(q, is_enabled=True).distinct().order_by("name")

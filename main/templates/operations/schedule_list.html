@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Schedules{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Schedules</h1>
+    <p class="page-sub">Actions that run on their own: nightly cleanups, weekly restarts, deploys at quiet hours. Times are in {{ TIME_ZONE_NAME }}.</p>
+  </div>
+  {% if perms.operations.add_schedule %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'operations:schedule_create' %}">{% icon "plus" %} New schedule</a></div>{% endif %}
+</div>
+{% if schedules %}
+<div class="card"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
+  <thead><tr><th>Schedule</th><th>Action</th><th>When</th><th>Next run</th><th>Last run</th></tr></thead>
+  <tbody>
+  {% for s in schedules %}
+    <tr {% if not s.is_enabled %}class="row-muted"{% endif %}>
+      <td>{% if perms.operations.change_schedule %}<a class="row-link" href="{% url 'operations:schedule_update' s.pk %}">{{ s.name }}</a>{% else %}<span class="fw-semibold">{{ s.name }}</span>{% endif %}
+        <div class="row-sub">{% for x in s.servers.all %}{{ x.name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% for g in s.groups.all %} · {{ g.name }}{% endfor %}{% for e in s.environments %} · {{ e }}{% endfor %}{% if s.strategy == "rolling" %} · rolling by {{ s.batch_size }}{% endif %}</div></td>
+      <td class="mono">{{ s.action }}{% if s.args.name %} {{ s.args.name }}{% endif %}</td>
+      <td class="mono">{{ s.cron }}</td>
+      <td>{% if s.is_enabled and s.next_run_at %}{{ s.next_run_at|date:"M j, H:i" }}{% else %}<span class="muted">disabled</span>{% endif %}</td>
+      <td>{% if s.last_error %}<span class="text-critical" title="{{ s.last_error }}">{% icon "alert" 14 %} {{ s.last_run_at|ago }}</span>{% elif s.last_run_at %}{{ s.last_run_at|ago }}{% else %}<span class="muted">never</span>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+{% else %}
+<div class="card"><div class="card-body empty-state">{% icon "clock" 28 %}<h2>No schedules</h2>
+  <p>Run any action on a cron schedule, on fixed servers or on whole groups and environments (resolved at run time), optionally as a rolling rollout.</p>
+  {% if perms.operations.add_schedule %}<a class="btn btn-primary" href="{% url 'operations:schedule_create' %}">{% icon "plus" %} New schedule</a>{% endif %}</div></div>
+{% endif %}
+{% endblock %}

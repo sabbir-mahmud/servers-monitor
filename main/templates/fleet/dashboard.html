@@ -55,7 +55,7 @@
           <td>{% health_badge s.current_health %}</td>
           <td>{% meter s.cpu_percent "CPU" %}</td>
           <td>{% meter s.memory_percent "Memory" %}</td>
-          <td>{% meter s.disk_percent "Disk" %}</td>
+          <td>{% meter s.disk_percent "Disk" %}{% with f=s.disk_full_at|fills_in %}{% if f %}<div class="small text-critical" title="Forecast from the last week's growth">{{ f }}</div>{% endif %}{% endwith %}</td>
           <td class="num">{{ s.load_1|floatformat:2|default:"—" }}</td>
           <td class="num text-body-secondary"><div>↓ {{ s.net_rx_bps|bps }}</div><div class="row-sub mt-0">↑ {{ s.net_tx_bps|bps }}</div></td>
           <td class="num text-body-secondary d-none d-xxl-table-cell">{{ s.uptime_seconds|duration }}</td>

@@ -1,29 +1,36 @@
 {% extends "base.html" %}
 {% load monitor %}
-{% block title %}{% if object %}Edit {{ object }}{% else %}Add application{% endif %}{% endblock %}
+{% block title %}{% if object %}Edit {{ object }}{% else %}Add monitor{% endif %}{% endblock %}
 {% block content %}
 <a class="back-link" href="{% if object %}{% url 'monitors:detail' object.pk %}{% else %}{% url 'monitors:list' %}{% endif %}">{% icon "arrow-left" 15 %} {% if object %}{{ object }}{% else %}Applications{% endif %}</a>
 <div class="page-head">
   <div>
-    <h1 class="page-title">{% if object %}Edit {{ object }}{% else %}Add application{% endif %}</h1>
-    {% if not object %}<p class="page-sub">The dashboard requests this URL on a schedule and alerts you when it stops answering the way it should. Checks start immediately.</p>{% endif %}
+    <h1 class="page-title">{% if object %}Edit {{ object }}{% else %}Add monitor{% endif %}</h1>
+    {% if not object %}<p class="page-sub">Websites, ports, hosts, DNS records and domains are checked from this dashboard on a schedule. Heartbeats wait for your cron jobs to report in.</p>{% endif %}
   </div>
 </div>
-<form method="post" novalidate style="max-width: 46rem">{% csrf_token %}
+<form method="post" novalidate style="max-width: 46rem" data-kind-form>{% csrf_token %}
   {% if form.non_field_errors %}<div class="alert alert-danger" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
   {% for title, names in sections %}
-  <div class="card mb-3"><div class="card-header">{{ title }}</div><div class="card-body form-section">
+  <div class="card mb-3" data-kind-card><div class="card-header">{{ title }}</div><div class="card-body form-section">
     {% for field in form %}{% if field.name in names %}
-      <div>
+      <div class="form-field">
         {% if field.widget_type == "checkbox" %}
           <div class="form-check">{{ field }} <label class="form-check-label fw-medium" for="{{ field.id_for_label }}">{{ field.label }}</label></div>
         {% else %}
-          <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
+          <label class="form-label" for="{{ field.id_for_label }}"{% if field.name == "target" %} data-target-label{% endif %}>{{ field.label }}</label>{{ field }}
         {% endif %}
         {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
         {% for e in field.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
       </div>
     {% endif %}{% endfor %}
+    {% if forloop.first %}
+    <div class="callout small" data-kinds="heartbeat">
+      {% icon "clock" 15 %} <div>On the server, wrap the job so it reports start, success or failure (and its exit code):
+      <pre class="mb-0 mt-1"><code>0 3 * * * root smctl run <span data-target-echo>nightly-backup</span> -- /opt/backup.sh</code></pre>
+      or ping at the end of your own script: <code>sudo smctl ping <span data-target-echo>nightly-backup</span></code> (add <code>--fail</code> on errors). Needs agent 2.2 or later.</div>
+    </div>
+    {% endif %}
   </div></div>
   {% endfor %}
   <div class="d-flex gap-2">

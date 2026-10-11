@@ -10,7 +10,27 @@
   </div>
 </div>
 {% partialdef commands inline %}
-<div id="commands" {% if counts.active %}hx-get="{% url 'operations:job_detail' object.pk %}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+<div id="commands" {% if counts.active or object.strategy == "rolling" and object.state == "running" %}hx-get="{% url 'operations:job_detail' object.pk %}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  {% if object.strategy == "rolling" %}
+  <div class="card mb-3"><div class="card-header">{% icon "layers" 17 %} Rollout · batches of {{ object.batch_size }}
+    <div class="card-actions"><span class="chip">{{ object.get_state_display }}</span></div></div>
+    <div class="card-body">
+      {% if object.state == "halted" %}<div class="alert alert-danger" role="alert">{% icon "alert" %}<div><b>Halted.</b> {{ object.halt_reason }}</div></div>{% endif %}
+      <ol class="batch-list">
+      {% for n, cmds in batches %}
+        <li class="{% if n == object.current_batch and object.state == 'running' %}is-current{% endif %}"><span class="batch-num">Batch {{ n|add:1 }}</span>
+          <span class="d-flex flex-wrap gap-2">{% for c in cmds %}<span class="batch-server">{{ c.server.name }} {% command_badge c.status %}</span>{% endfor %}</span></li>
+      {% endfor %}
+      </ol>
+      {% if object.health_gates.all %}<p class="small text-body-secondary mb-0 mt-2">Each batch waits {{ object.pause_seconds }} s, then for {{ object.health_gates.all|join:", " }} to be up.</p>{% endif %}
+      {% if perms.operations.add_job and object.state == "halted" or perms.operations.add_job and object.state == "running" %}
+      <div class="d-flex gap-2 mt-3">
+        {% if object.state == "halted" %}<form method="post" action="{% url 'operations:job_control' object.pk 'resume' %}">{% csrf_token %}<button class="btn btn-sm btn-primary">{% icon "play" %} Resume</button></form>{% endif %}
+        <form method="post" action="{% url 'operations:job_control' object.pk 'abort' %}" data-confirm="Cancel the batches that haven't started? Servers already running it will finish.">{% csrf_token %}<button class="btn btn-sm btn-outline-danger">Abort</button></form>
+      </div>
+      {% endif %}
+    </div></div>
+  {% endif %}
   <div class="stat-grid">
     <div class="stat"><div class="stat-label">{% icon "server" 15 %} Servers</div><div class="stat-value">{{ counts.total }}</div></div>
     <div class="stat"><div class="stat-label"><span class="dot dot-good"></span> Succeeded</div><div class="stat-value">{{ counts.succeeded }}</div></div>

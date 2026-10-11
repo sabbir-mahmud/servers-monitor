@@ -21,7 +21,7 @@ from functools import cache
 import redis
 from django.conf import settings
 
-from . import signing
+from . import signing, usage
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +35,19 @@ class RelayError(Exception):
     """Redis is unreachable or refused an admin operation."""
 
 
+class _CountingRedis(redis.Redis):
+    """Counts every command for the usage meter (apps/agent_api/usage.py)."""
+
+    def execute_command(self, *args, **options):
+        usage.count_dashboard()
+        return super().execute_command(*args, **options)
+
+
 @cache
 def client() -> redis.Redis:
     if not settings.REDIS_URL:
         raise RelayError("REDIS_URL is not configured")
-    return redis.Redis.from_url(
+    return _CountingRedis.from_url(
         settings.REDIS_URL,
         decode_responses=True,
         socket_connect_timeout=10,
@@ -64,6 +72,16 @@ def mark_alive() -> None:
         _alive_marker().touch()
     except OSError as exc:
         logger.warning("Could not write relay liveness marker: %s", exc)
+
+
+def last_alive_at():
+    """When the relay process last marked itself alive (None if it never has)."""
+    from datetime import UTC, datetime
+
+    try:
+        return datetime.fromtimestamp(_alive_marker().stat().st_mtime, tz=UTC)
+    except OSError:
+        return None
 
 
 def is_alive() -> bool:

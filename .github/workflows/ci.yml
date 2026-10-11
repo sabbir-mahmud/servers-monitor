@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dashboard:
+    name: Dashboard (lint, tests, checks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: main/requirements*.txt
+      - run: make install
+      - run: make lint
+      - run: make test
+      - run: make check
+
+  agent:
+    name: Agent on Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Servers run the agent on their system Python: Debian 12 = 3.11, Ubuntu 24.04 = 3.12.
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -r agent/requirements.txt pytest
+      - run: python -m py_compile agent/server_monitor_agent.py agent/smctl.py
+      - run: python -m pytest agent/tests -q
+
+  installer:
+    name: Installer (shellcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck agent/install.sh
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f main/Dockerfile -t server-monitor:ci .

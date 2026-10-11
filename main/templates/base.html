@@ -9,11 +9,16 @@
   <meta name="theme-color" content="#f3f3f0" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#111113" media="(prefers-color-scheme: dark)">
   <title>{% block title %}{{ SITE_NAME }}{% endblock %} · {{ SITE_NAME }}</title>
+  <link rel="manifest" href="{% url 'manifest' %}">
+  <link rel="icon" href="{% static 'img/icon.svg' %}" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="{% static 'img/apple-touch-icon.png' %}">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="{{ SITE_NAME }}">
   <link rel="stylesheet" href="{% static 'vendor/bootstrap.min.css' %}">
   <link rel="stylesheet" href="{% static 'css/app.css' %}">
   <script src="{% static 'js/app.js' %}"></script>
 </head>
-<body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+<body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-sw="{% url 'service_worker' %}">
 {% if user.is_authenticated and not AUTH_PAGE %}
 {% with ns=request.resolver_match.app_name url_name=request.resolver_match.url_name %}
 <div class="shell">
@@ -28,7 +33,7 @@
 
     <div class="collapse d-lg-flex sidebar-body" id="sidenav">
       <nav class="side-nav" aria-label="Main">
-        <details class="nav-group" data-nav-group="infrastructure" {% if ns == 'fleet' or ns == 'monitors' %}data-active{% endif %} open>
+        <details class="nav-group" data-nav-group="infrastructure" {% if ns == 'fleet' or ns == 'monitors' or ns == 'status' %}data-active{% endif %} open>
           <summary class="nav-group-head"><span>Infrastructure</span>
             {% if NAV.servers_offline or NAV.apps_down %}<span class="nav-group-dot" title="Something needs attention"></span>{% endif %}
             {% icon "chevron" 14 %}</summary>
@@ -37,6 +42,7 @@
               {% if NAV.servers_offline %}<span class="nav-badge is-critical" title="{{ NAV.servers_offline }} offline">{{ NAV.servers_offline }}</span>{% elif NAV.servers %}<span class="nav-badge">{{ NAV.servers }}</span>{% endif %}</a>
             {% if perms.monitors.view_monitor %}<a class="side-link {% if ns == 'monitors' %}active{% endif %}" href="{% url 'monitors:list' %}" {% if ns == 'monitors' %}aria-current="page"{% endif %}>{% icon "globe" %}<span class="side-text">Applications</span>
               {% if NAV.apps_down %}<span class="nav-badge is-critical" title="{{ NAV.apps_down }} down">{{ NAV.apps_down }}</span>{% elif NAV.apps %}<span class="nav-badge">{{ NAV.apps }}</span>{% endif %}</a>{% endif %}
+            {% if perms.status.view_statuspage %}<a class="side-link {% if ns == 'status' %}active{% endif %}" href="{% url 'status:list' %}" {% if ns == 'status' %}aria-current="page"{% endif %}>{% icon "layers" %}<span class="side-text">Status pages</span></a>{% endif %}
           </div>
         </details>
 
@@ -60,17 +66,19 @@
           <summary class="nav-group-head"><span>Operations</span>{% icon "chevron" 14 %}</summary>
           <div class="nav-group-body">
             {% if perms.operations.add_job %}<a class="side-link {% if url_name == 'job_create' %}active{% endif %}" href="{% url 'operations:job_create' %}" {% if url_name == 'job_create' %}aria-current="page"{% endif %}>{% icon "play" %}<span class="side-text">Run on servers</span></a>{% endif %}
-            {% if perms.operations.view_job %}<a class="side-link {% if ns == 'operations' and url_name != 'job_create' %}active{% endif %}" href="{% url 'operations:job_list' %}" {% if ns == 'operations' and url_name != 'job_create' %}aria-current="page"{% endif %}>{% icon "layers" %}<span class="side-text">Jobs</span></a>{% endif %}
+            {% if perms.operations.view_job %}<a class="side-link {% if ns == 'operations' and url_name != 'job_create' and 'schedule' not in url_name %}active{% endif %}" href="{% url 'operations:job_list' %}" {% if ns == 'operations' and url_name != 'job_create' and 'schedule' not in url_name %}aria-current="page"{% endif %}>{% icon "layers" %}<span class="side-text">Jobs</span></a>{% endif %}
+            {% if perms.operations.view_schedule %}<a class="side-link {% if 'schedule' in url_name %}active{% endif %}" href="{% url 'operations:schedule_list' %}" {% if 'schedule' in url_name %}aria-current="page"{% endif %}>{% icon "clock" %}<span class="side-text">Schedules</span></a>{% endif %}
           </div>
         </details>
         {% endif %}
 
         {% if perms.audit.view_auditlog or perms.users.view_user or user.is_superuser %}
-        <details class="nav-group" data-nav-group="administration" {% if ns == 'audit' or ns == 'users' %}data-active{% endif %} open>
+        <details class="nav-group" data-nav-group="administration" {% if ns == 'audit' or ns == 'users' or url_name == 'system' %}data-active{% endif %} open>
           <summary class="nav-group-head"><span>Administration</span>{% icon "chevron" 14 %}</summary>
           <div class="nav-group-body">
             {% if perms.users.view_user %}<a class="side-link {% if ns == 'users' %}active{% endif %}" href="{% url 'users:list' %}" {% if ns == 'users' %}aria-current="page"{% endif %}>{% icon "user" %}<span class="side-text">Users</span>
               {% if NAV.pending_users %}<span class="nav-badge is-info" title="{{ NAV.pending_users }} waiting for approval">{{ NAV.pending_users }}</span>{% endif %}</a>{% endif %}
+            {% if perms.users.view_user %}<a class="side-link {% if url_name == 'system' %}active{% endif %}" href="{% url 'system' %}" {% if url_name == 'system' %}aria-current="page"{% endif %}>{% icon "activity" %}<span class="side-text">System</span>{% if NAV.system_problem %}<span class="nav-group-dot ms-auto" title="Needs attention"></span>{% endif %}</a>{% endif %}
             {% if perms.audit.view_auditlog %}<a class="side-link {% if ns == 'audit' %}active{% endif %}" href="{% url 'audit:list' %}" {% if ns == 'audit' %}aria-current="page"{% endif %}>{% icon "shield" %}<span class="side-text">Audit log</span></a>{% endif %}
             {% if user.is_superuser %}<a class="side-link" href="{% url 'admin:index' %}">{% icon "key" %}<span class="side-text">Django admin</span></a>{% endif %}
           </div>
@@ -94,6 +102,7 @@
             <button class="icon-btn" title="Log out" aria-label="Log out">{% icon "logout" 17 %}</button>
           </form>
         </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary w-100 mt-2" data-install-app hidden>{% icon "download" 15 %} Install app</button>
       </div>
     </div>
   </aside>

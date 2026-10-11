@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}{% if object %}Edit {{ object }}{% else %}New status page{% endif %}{% endblock %}
+{% block content %}
+<a class="back-link" href="{% if object %}{% url 'status:detail' object.pk %}{% else %}{% url 'status:list' %}{% endif %}">{% icon "arrow-left" 15 %} {% if object %}{{ object }}{% else %}Status pages{% endif %}</a>
+<div class="page-head"><div>
+  <h1 class="page-title">{% if object %}Edit {{ object }}{% else %}New status page{% endif %}</h1>
+</div></div>
+<form method="post" novalidate style="max-width: 52rem">{% csrf_token %}
+  {% if form.non_field_errors %}<div class="alert alert-danger" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+  <div class="card mb-3"><div class="card-header">{% icon "globe" 17 %} Page</div><div class="card-body form-section">
+    {% include "alerts/_field.html" with field=form.name %}
+    {% include "alerts/_field.html" with field=form.title %}
+    {% include "alerts/_field.html" with field=form.description %}
+    {% include "alerts/_field.html" with field=form.logo_url %}
+    {% include "alerts/_field.html" with field=form.homepage_url %}
+    {% include "alerts/_field.html" with field=form.show_uptime %}
+  </div></div>
+
+  <div class="card mb-3"><div class="card-header">{% icon "check" 17 %} Components</div><div class="card-body">
+    <p class="small text-body-secondary">Tick the monitors to show, in this order, and the name visitors see. Only the name and its state are published.</p>
+    {% for monitor, pick, label in form.monitor_fields %}
+      <div class="component-row">
+        <div class="form-check">{{ pick }} <label class="form-check-label" for="{{ pick.id_for_label }}">{{ monitor.name }} <span class="muted small">· {{ monitor.get_kind_display }}</span></label></div>
+        {{ label }}
+      </div>
+    {% empty %}<p class="muted mb-0">Add a monitor under Applications first.</p>{% endfor %}
+  </div></div>
+
+  <div class="card mb-3"><div class="card-header">{% icon "send" 17 %} Publishing</div><div class="card-body form-section">
+    {% include "alerts/_field.html" with field=form.publish_kind %}
+    {% include "alerts/_field.html" with field=form.repo %}
+    {% include "alerts/_field.html" with field=form.branch %}
+    {% include "alerts/_field.html" with field=form.path %}
+    {% include "alerts/_field.html" with field=form.domain %}
+    {% include "alerts/_field.html" with field=form.token %}
+    <div class="form-text mt-0">The relay process pushes <code>index.html</code> and <code>status.json</code> when something visible changes (checked every 2 minutes) and right after you post an incident. Cloudflare Pages: connect it to the same repository.</div>
+  </div></div>
+
+  <div class="d-flex gap-2">
+    <button class="btn btn-primary">{% if object %}Save changes{% else %}Create page{% endif %}</button>
+    <a class="btn btn-link" href="{% if object %}{% url 'status:detail' object.pk %}{% else %}{% url 'status:list' %}{% endif %}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

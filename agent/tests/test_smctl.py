@@ -158,3 +158,30 @@ def test_detect_apply_adds_only_new(env, monkeypatch):
     assert (
         data["services"]["nginx"]["unit"] == "nginx" and data["logs"]["syslog"] == "/var/log/syslog"
     )
+
+
+def test_ping_and_run_report_to_the_dashboard(env, monkeypatch):
+    sent = []
+    monkeypatch.setattr(
+        smctl,
+        "_job_ping",
+        lambda name, status, code=None: sent.append((name, status, code)) or (True, ""),
+    )
+    assert smctl.main(["ping", "backup"]) == 0
+    assert smctl.main(["ping", "backup", "--fail", "--exit-code", "4"]) == 0
+    with pytest.raises(SystemExit) as done:
+        smctl.main(["run", "backup", "--", sys.executable, "-c", "raise SystemExit(5)"])
+    assert done.value.code == 5  # cron still sees the job's own exit code
+    with pytest.raises(SystemExit) as done:
+        smctl.main(["run", "backup", "--", sys.executable, "-c", "pass"])
+    assert done.value.code == 0
+    assert sent == [("backup", "ok", None), ("backup", "fail", 4),
+                    ("backup", "start", None), ("backup", "fail", 5),
+                    ("backup", "start", None), ("backup", "ok", None)]  # fmt: skip
+
+
+def test_run_still_exits_with_the_job_code_when_the_ping_fails(env, monkeypatch):
+    monkeypatch.setattr(smctl, "_job_ping", lambda *a: (False, "relay down"))
+    with pytest.raises(SystemExit) as done:
+        smctl.main(["run", "backup", "--", sys.executable, "-c", "pass"])
+    assert done.value.code == 0

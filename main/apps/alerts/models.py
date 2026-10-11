@@ -15,6 +15,10 @@ class AlertKind(models.TextChoices):
     SERVICE = "service", "Service down"
     APP_DOWN = "app_down", "Application down"
     CERT = "cert", "Certificate expiring"
+    DISK_FORECAST = "disk_forecast", "Disk will fill up"
+    DOMAIN = "domain", "Domain expiring"
+    CONTAINER = "container", "Container stopped"
+    TEMPERATURE = "temperature", "Running hot"
 
 
 class Severity(models.TextChoices):
@@ -88,6 +92,14 @@ SEVERITY_RANK = {Severity.WARNING: 1, Severity.CRITICAL: 2}
 class ChannelKind(models.TextChoices):
     TELEGRAM = "telegram", "Telegram"
     WEBHOOK = "webhook", "Webhook (Slack, Discord, Teams)"
+    EMAIL = "email", "Email"
+    NTFY = "ntfy", "ntfy"
+    GOTIFY = "gotify", "Gotify"
+    PUSHOVER = "pushover", "Pushover"
+    PAGERDUTY = "pagerduty", "PagerDuty"
+    SLACK = "slack", "Slack"
+    DISCORD = "discord", "Discord"
+    WEBPUSH = "webpush", "Browser push"
 
 
 class Channel(models.Model):
@@ -105,6 +117,8 @@ class Channel(models.Model):
     telegram_token = EncryptedTextField(blank=True)
     telegram_chat_id = models.CharField(max_length=40, blank=True)
     webhook_url = EncryptedTextField(blank=True)
+    # Every other kind (apps/alerts/channels.py): its settings as encrypted JSON.
+    config = EncryptedTextField(blank=True, default="")
 
     # Routing rules.
     min_severity = models.CharField(
@@ -141,8 +155,21 @@ class Channel(models.Model):
         return self.name
 
     @property
+    def settings(self) -> dict:
+        import json
+
+        try:
+            return json.loads(self.config or "{}")
+        except ValueError:
+            return {}
+
+    @property
     def target_display(self) -> str:
         """Where it sends, without leaking the secret part."""
+        from .channels import KINDS
+
+        if self.kind in KINDS:
+            return KINDS[self.kind].display(self.settings)
         if self.kind == ChannelKind.TELEGRAM:
             return f"chat {self.telegram_chat_id}" if self.telegram_chat_id else "no chat yet"
         from urllib.parse import urlsplit
@@ -169,6 +196,7 @@ class DeliveryEvent(models.TextChoices):
     RESOLVED = "resolved", "Resolved"
     REPEAT = "repeat", "Reminder"
     TEST = "test", "Test"
+    SYSTEM = "system", "System"
 
 
 class Delivery(models.Model):

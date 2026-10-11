@@ -37,6 +37,11 @@
         </button>
       </form>
 
+      {% if SSO_ENABLED %}
+      <div class="login-divider"><span>or</span></div>
+      <a class="btn btn-outline-secondary btn-lg w-100" href="{% url 'oidc_authentication_init' %}{% if next %}?next={{ next|urlencode }}{% endif %}">{% icon "key" %} Sign in with {{ SSO_NAME }}</a>
+      {% if request.GET.sso == "failed" %}<div class="alert alert-danger mt-3 mb-0" role="alert">{% icon "alert" %}<div>Single sign-on didn't let you in. Your account at {{ SSO_NAME }} may not be in a group allowed to use this dashboard, or its email isn't verified there. Ask an administrator.</div></div>{% endif %}
+      {% endif %}
       {% for message in messages %}<div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags }}{% endif %} mt-3 mb-0" role="status">{% icon "check" %}<div>{{ message }}</div></div>{% endfor %}
       <p class="login-note">{% if allow_signup %}New here? <a href="{% url 'signup' %}">Request an account</a>{% else %}No account? Ask an administrator for an invitation.{% endif %}</p>
       <p class="login-note mt-1">{% icon "lock" 13 %} Attempts are rate-limited and audited.</p>

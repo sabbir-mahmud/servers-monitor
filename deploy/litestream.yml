@@ -1,0 +1,15 @@
+# Continuous off-site replication of the dashboard database with Litestream.
+# Used by the `litestream` service in docker-compose.yml (profile "backup").
+# Any S3-compatible store works: Cloudflare R2, Backblaze B2, AWS S3, MinIO.
+dbs:
+  - path: /data/db.sqlite3
+    replicas:
+      - type: s3
+        bucket: ${LITESTREAM_BUCKET}
+        path: server-monitor
+        endpoint: ${LITESTREAM_ENDPOINT}        # e.g. https://<account>.r2.cloudflarestorage.com
+        region: ${LITESTREAM_REGION}            # "auto" for R2
+        access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+        secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+        retention: 720h                          # keep 30 days of point-in-time history
+        sync-interval: 10s

@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}{{ page }}{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'status:list' %}">{% icon "arrow-left" 15 %} Status pages</a>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">{{ page.name }}</h1>
+    <p class="page-sub">{% if page.public_url %}<a href="{{ page.public_url }}" target="_blank" rel="noopener">{{ page.public_url }}</a>{% else %}Not published automatically: download it or set up GitHub publishing.{% endif %}</p>
+  </div>
+  <div class="page-actions d-flex flex-wrap gap-2">
+    <a class="btn btn-outline-secondary" href="{% url 'status:preview' page.pk %}" target="_blank" rel="noopener">{% icon "eye" %} Preview</a>
+    <a class="btn btn-outline-secondary" href="{% url 'status:download' page.pk %}">{% icon "download" %} Download</a>
+    {% if can_edit %}
+      {% if page.publish_kind == "github" %}<form method="post" action="{% url 'status:publish' page.pk %}">{% csrf_token %}<button class="btn btn-outline-primary">{% icon "send" %} Publish now</button></form>{% endif %}
+      <a class="btn btn-outline-secondary" href="{% url 'status:update' page.pk %}">{% icon "edit" %} Edit</a>
+      {% if perms.status.delete_statuspage %}<a class="btn btn-outline-danger" href="{% url 'status:delete' page.pk %}">{% icon "trash" %}</a>{% endif %}
+    {% endif %}
+  </div>
+</div>
+
+{% if page.last_error %}<div class="alert alert-danger" role="alert">{% icon "alert" %}<div><b>Publishing failed:</b> {{ page.last_error }}</div></div>{% endif %}
+
+<div class="row g-3">
+  <div class="col-12 col-xl-7">
+    <div class="card mb-3"><div class="card-header">{% icon "globe" 17 %} What visitors see now
+      <div class="card-actions"><span class="status-pill pill-{{ snap.status.level }}">{{ snap.status.label }}</span></div></div>
+      <div class="card-body p-0">
+      {% for c in snap.components %}
+        <div class="sp-row"><span class="fw-medium">{{ c.name }}</span><span class="sp-state sp-{{ c.state }}">{{ c.label }}{% if c.uptime is not None %} · {{ c.uptime }}%{% endif %}</span></div>
+      {% empty %}<div class="p-3 muted">No components yet. {% if can_edit %}<a href="{% url 'status:update' page.pk %}">Add some</a>.{% endif %}</div>{% endfor %}
+      </div>
+      <div class="card-footer small text-body-secondary">{% if page.last_published_at %}Last published {{ page.last_published_at|ago }}{% elif page.publish_kind == "github" %}Not published yet{% else %}Publishing is off{% endif %}</div>
+    </div>
+
+    {% for i in active %}
+    <div class="card mb-3 incident-card impact-{{ i.impact }}"><div class="card-header">{% icon "alert" 17 %} {{ i.title }}
+      <div class="card-actions"><span class="chip">{{ i.get_impact_display }}</span> <span class="chip">{{ i.get_status_display }}</span></div></div>
+      <div class="card-body">
+        {% if i.affected.all %}<p class="small text-body-secondary">Affects {{ i.affected.all|join:", " }}</p>{% endif %}
+        <ul class="incident-log">{% for u in i.updates.all %}<li><b>{{ u.get_status_display }}</b> · {{ u.message }} <span class="muted small">· {{ u.created_at|ago }}</span></li>{% endfor %}</ul>
+        {% if can_incident %}
+        <form method="post" action="{% url 'status:incident_update' page.pk i.pk %}" class="form-section mt-3" novalidate>{% csrf_token %}
+          <div class="d-flex gap-2 flex-wrap">{{ update_form.status }}</div>
+          {{ update_form.message }}
+          <div><button class="btn btn-sm btn-primary">Post update</button></div>
+        </form>
+        {% endif %}
+      </div></div>
+    {% endfor %}
+
+    {% if past %}
+    <div class="card"><div class="card-header">{% icon "clock" 17 %} Resolved incidents</div><ul class="list-group list-group-flush">
+      {% for i in past %}<li class="list-group-item"><b>{{ i.title }}</b> <span class="muted small">· resolved {{ i.resolved_at|ago }}</span></li>{% endfor %}
+    </ul></div>
+    {% endif %}
+  </div>
+
+  <div class="col-12 col-xl-5">
+    {% if can_incident %}
+    <div class="card"><div class="card-header">{% icon "plus" 17 %} Report an incident</div><div class="card-body">
+      <form method="post" action="{% url 'status:incident_create' page.pk %}" class="form-section" novalidate>{% csrf_token %}
+        {% include "alerts/_field.html" with field=incident_form.title %}
+        <div class="row g-2"><div class="col">{% include "alerts/_field.html" with field=incident_form.impact %}</div><div class="col">{% include "alerts/_field.html" with field=incident_form.status %}</div></div>
+        {% if incident_form.affected.field.queryset %}<div><span class="form-label d-block">{{ incident_form.affected.label }}</span>{% for cb in incident_form.affected %}<label class="check-tile py-2 me-1 mb-1">{{ cb.tag }} <span class="check-tile-name">{{ cb.choice_label }}</span></label>{% endfor %}</div>{% endif %}
+        {% include "alerts/_field.html" with field=incident_form.message %}
+        <div><button class="btn btn-primary">Post incident</button></div>
+      </form>
+      <p class="small text-body-secondary mt-3 mb-0">Published within seconds. Use Maintenance impact for planned work.</p>
+    </div></div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

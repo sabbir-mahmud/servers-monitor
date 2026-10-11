@@ -175,3 +175,100 @@ document.addEventListener("click", (e) => {
   input.focus();
   btn.closest("[data-chat-list]")?.querySelectorAll("[data-fill]").forEach((b) => b.classList.toggle("active", b === btn));
 });
+
+// Monitor form: show only the fields for the chosen type, and relabel the target field.
+(function () {
+  function apply(form) {
+    const select = form.querySelector("[data-kind-select]");
+    if (!select) return;
+    const kind = select.value;
+    form.querySelectorAll("[data-kinds]").forEach((el) => {
+      const show = el.dataset.kinds.split(" ").includes(kind);
+      const box = el.matches("input, select, textarea") ? el.closest(".form-field") : el;
+      if (box) box.hidden = !show;
+    });
+    form.querySelectorAll("[data-kind-card]").forEach((card) => {
+      card.hidden = !card.querySelector(".form-field:not([hidden])");
+    });
+    const target = form.querySelector("[name=target]");
+    const label = form.querySelector("[data-target-label]");
+    if (target && label) {
+      label.textContent = target.dataset["label" + kind[0].toUpperCase() + kind.slice(1)] || "Host";
+      target.placeholder = target.dataset["placeholder" + kind[0].toUpperCase() + kind.slice(1)] || "";
+    }
+    const echo = (target && target.value) || "nightly-backup";
+    form.querySelectorAll("[data-target-echo]").forEach((el) => { el.textContent = echo; });
+  }
+  document.addEventListener("DOMContentLoaded", () => {
+    document.querySelectorAll("[data-kind-form]").forEach((form) => {
+      apply(form);
+      form.addEventListener("change", () => apply(form));
+      form.addEventListener("input", (e) => { if (e.target.name === "target") apply(form); });
+    });
+  });
+})();
+
+// Rollout options only matter for rolling jobs.
+(function () {
+  const sync = () => document.querySelectorAll("[data-rollout]").forEach((box) => {
+    const on = box.querySelector("[data-rolling-toggle]")?.checked;
+    box.querySelectorAll("[data-rolling-only]").forEach((el) => { el.hidden = !on; });
+  });
+  document.addEventListener("DOMContentLoaded", sync);
+  document.addEventListener("change", (e) => { if (e.target.matches("[data-rolling-toggle]")) sync(); });
+})();
+
+// Installable app: register the service worker (offline page + push alerts) and offer
+// "Install app" where the browser supports it. Service workers need HTTPS (or localhost).
+(function () {
+  if (!("serviceWorker" in navigator) || !window.isSecureContext) return;
+  window.addEventListener("load", () => {
+    const url = document.body.dataset.sw;
+    if (url) navigator.serviceWorker.register(url, { scope: "/" }).catch(() => { /* optional */ });
+  });
+  let deferred = null;
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferred = e;
+    document.querySelectorAll("[data-install-app]").forEach((b) => { b.hidden = false; });
+  });
+  document.addEventListener("click", async (e) => {
+    const btn = e.target.closest("[data-install-app]");
+    if (!btn || !deferred) return;
+    deferred.prompt();
+    await deferred.userChoice;
+    deferred = null;
+    btn.hidden = true;
+  });
+})();
+
+// Browser push channel: subscribe this browser and fill the form's hidden fields.
+document.addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-push-subscribe]");
+  if (!btn) return;
+  const status = document.querySelector("[data-push-status]");
+  const say = (text, ok) => { if (status) { status.textContent = text; status.className = ok ? "text-good small" : "text-critical small"; } };
+  if (!window.isSecureContext || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+    say("This browser can't receive push here. Push needs HTTPS (or localhost) and a supporting browser.", false);
+    return;
+  }
+  if ((await Notification.requestPermission()) !== "granted") {
+    say("Notifications are blocked for this site. Allow them in the browser's site settings.", false);
+    return;
+  }
+  try {
+    const reg = await navigator.serviceWorker.register(document.body.dataset.sw, { scope: "/" });
+    await navigator.serviceWorker.ready;
+    const raw = atob(btn.dataset.vapid.replace(/-/g, "+").replace(/_/g, "/"));
+    const key = Uint8Array.from(raw, (c) => c.charCodeAt(0));
+    const sub = (await reg.pushManager.getSubscription())
+      || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key }));
+    const json = sub.toJSON();
+    document.getElementById("id_cfg_endpoint").value = json.endpoint;
+    document.getElementById("id_cfg_p256dh").value = json.keys.p256dh;
+    document.getElementById("id_cfg_auth").value = json.keys.auth;
+    say("This browser is subscribed. Save the channel, then send a test.", true);
+  } catch (err) {
+    say("Couldn't subscribe: " + err.message, false);
+  }
+});

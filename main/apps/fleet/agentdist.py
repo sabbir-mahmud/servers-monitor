@@ -15,7 +15,11 @@ FILES = {
     "agent": "server_monitor_agent.py",
     "smctl": "smctl.py",
     "unit": "server-monitor-agent.service",
+    "upath": "server-monitor-upgrade.path",
+    "uservice": "server-monitor-upgrade.service",
 }
+# Files checked by the installer itself (install.sh is checked before it runs).
+INSTALLED = ("agent", "smctl", "unit", "upath", "uservice")
 
 
 class AgentFilesMissing(Exception):
@@ -44,7 +48,7 @@ def sums() -> dict[str, str]:
 
 def sums_arg() -> str:
     s = sums()
-    return ",".join(f"{k}={s[k]}" for k in ("agent", "smctl", "unit"))
+    return ",".join(f"{k}={s[k]}" for k in INSTALLED)
 
 
 def install_command(ref: str | None = None) -> str:
@@ -64,3 +68,31 @@ def upgrade_command() -> str:
     return (
         f"sudo smctl upgrade --ref {settings.AGENT_REF} --sums install={s['install']},{sums_arg()}"
     )
+
+
+def agent_version() -> str:
+    """The agent version this dashboard ships (what "outdated" is measured against)."""
+    import re
+
+    try:
+        text = (settings.AGENT_DIST_DIR / FILES["agent"]).read_text()
+    except OSError:
+        return ""
+    found = re.search(r'^VERSION = "([^"]+)"', text, re.M)
+    return found.group(1) if found else ""
+
+
+RELEASE_TAG = r"^v\d{1,4}\.\d{1,4}\.\d{1,4}$"
+
+
+def upgrade_args() -> dict | None:
+    """Arguments of the built-in `_upgrade` command, or None when remote upgrades can't be
+    offered: they only ever install a release tag (pin AGENT_REF to one)."""
+    import re
+
+    if not re.match(RELEASE_TAG, settings.AGENT_REF):
+        return None
+    try:
+        return {"ref": settings.AGENT_REF, "sums": dict(sums())}
+    except AgentFilesMissing:
+        return None

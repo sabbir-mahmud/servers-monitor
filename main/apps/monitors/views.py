@@ -72,7 +72,18 @@ class MonitorDetailView(StaffViewMixin, DetailView):
         if range_key not in stats.RANGES:
             range_key = "24h"
         ids = [m.pk]
+        locations = _locations(m)
+        recent = m.checks.all()
+        if locations:
+            recent = recent.exclude(location="")  # each location's own results
+        recent = list(recent[:15])
+        names = dict(
+            zip([r["key"] for r in locations], [r["name"] for r in locations], strict=True)
+        )
+        for c in recent:
+            c.location_name = names.get(c.location, "removed server") if c.location else ""
         ctx.update(
+            locations=locations,
             uptime={
                 label: stats.uptime_by_monitor(ids, h).get(m.pk)
                 for label, h in (("24h", 24), ("7d", 168), ("14d", 336))
@@ -83,7 +94,7 @@ class MonitorDetailView(StaffViewMixin, DetailView):
             ranges=list(stats.RANGES),
             series=stats.response_series(m, range_key),
             incidents=stats.incidents(m),
-            recent=m.checks.all()[:15],
+            recent=recent,
             open_alerts=Alert.objects.filter(monitor=m, resolved_at__isnull=True),
             can_change=self.request.user.has_perm("monitors.change_monitor"),
             maintenance_window=maintenance.coverage().window_for_monitor(m.pk, m.server_id),
@@ -92,12 +103,48 @@ class MonitorDetailView(StaffViewMixin, DetailView):
         return ctx
 
 
+def _locations(monitor) -> list[dict]:
+    """Each location's latest result for a monitor checked from several places, or []."""
+    from datetime import datetime
+
+    if not monitor.supports_locations:
+        return []
+    servers = list(
+        monitor.probe_servers.only(
+            "name", "capabilities", "last_seen_at", "report_interval", "is_enabled"
+        )
+    )
+    if not servers:
+        return []
+    now = timezone.now()
+    states = monitor.location_states or {}
+    rows = []
+    entries = (
+        [(checker.DASHBOARD, "This dashboard", None)] if monitor.check_from_dashboard else []
+    ) + [(str(s.pk), s.name, s) for s in servers]
+    for key, name, server in entries:
+        st = states.get(key)
+        at = datetime.fromisoformat(st["at"]) if st else None
+        stale = at is None or (now - at).total_seconds() > checker._stale_after(monitor)
+        note = ""
+        if server is not None and "probes" not in (server.capabilities.get("features") or []):
+            note = "probes are off on this server (sudo smctl probes on)"
+        rows.append({"key": key, "name": name, "server": server, "state": st, "at": at,
+                     "stale": stale, "detail": note or (st or {}).get("error", ""),
+                     "down": bool(st) and not st["ok"] and st["failures"] >= monitor.failure_threshold})  # fmt: skip
+    return rows
+
+
 FORM_SECTIONS = [
-    ("Endpoint", ["name", "url", "method"]),
+    ("What to check", ["kind", "name", "url", "method", "target", "port", "tls", "record_type",
+                       "expected", "resolver", "period_seconds", "grace_seconds"]),
     ("Schedule", ["interval_seconds", "timeout_seconds", "failure_threshold"]),
-    ("What counts as up", ["expected_status", "keyword", "verify_tls"]),
+    ("What counts as up", ["expected_status", "keyword", "keyword_absent", "slow_ms",
+                           "verify_tls", "follow_redirects"]),
+    ("Request", ["body", "headers", "clear_headers"]),
+    ("Where from", ["probe_servers", "agents_only", "quorum"]),
     ("Organise", ["server", "is_enabled"]),
-]
+]  # fmt: skip
 
 
 class MonitorCreateView(StaffViewMixin, CreateView):
@@ -110,8 +157,14 @@ class MonitorCreateView(StaffViewMixin, CreateView):
         form.instance.created_by = self.request.user
         form.instance.next_check_at = timezone.now()  # first check right away
         response = super().form_valid(form)
-        record(self.request, "monitor.create", target=self.object.name, url=self.object.url)
-        messages.success(self.request, f"Monitoring {self.object.name}. First check runs now.")
+        record(self.request, "monitor.create", target=self.object.name, kind=self.object.kind,
+               where=self.object.where)  # fmt: skip
+        messages.success(
+            self.request,
+            f"Waiting for the first ping from {self.object.name}."
+            if self.object.is_heartbeat
+            else f"Monitoring {self.object.name}. First check runs now.",
+        )
         return response
 
     def get_success_url(self):
@@ -126,7 +179,11 @@ class MonitorUpdateView(StaffViewMixin, UpdateView):
     extra_context = {"sections": FORM_SECTIONS}
 
     def form_valid(self, form):
-        if {"url", "method", "expected_status", "keyword", "verify_tls"} & set(form.changed_data):
+        if not form.instance.is_heartbeat and set(form.changed_data) - {
+            "name",
+            "server",
+            "is_enabled",
+        }:
             form.instance.next_check_at = timezone.now()
             form.instance.tls_checked_at = None
         if "is_enabled" in form.changed_data and not form.instance.is_enabled:
@@ -166,7 +223,13 @@ class MonitorCheckNowView(StaffViewMixin, View):
     http_method_names = ["post"]
 
     def post(self, request, pk):
-        monitor = checker.check(get_object_or_404(Monitor, pk=pk))
+        monitor = get_object_or_404(Monitor, pk=pk)
+        if monitor.is_heartbeat:
+            messages.info(
+                request, f"{monitor.name} is checked when its job pings: run it on the server."
+            )
+            return redirect(safe_next(request, reverse("monitors:detail", args=[pk])))
+        monitor = checker.check(monitor)
         verdict = "up" if monitor.last_error == "" else f"failing: {monitor.last_error}"
         (messages.success if not monitor.last_error else messages.warning)(
             request, f"{monitor.name} is {verdict}."

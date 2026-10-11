@@ -88,6 +88,18 @@ class _ChannelFormMixin:
         ctx = super().get_context_data(**kwargs)
         ctx["kind"] = ctx["form"].kind
         ctx["kinds"] = ChannelKind.choices
+        if ctx["kind"] == ChannelKind.WEBPUSH:
+            from .webpush import vapid_keys
+
+            ctx["vapid_public_key"] = vapid_keys()[1]
+        from .channels import KINDS
+
+        # Email only appears when this dashboard can send it.
+        ctx["kind_choices"] = [
+            (v, "Other webhook (Teams, Mattermost…)" if v == ChannelKind.WEBHOOK else label)
+            for v, label in ChannelKind.choices
+            if v not in KINDS or KINDS[v].available()
+        ]
         return ctx
 
 

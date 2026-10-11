@@ -1,7 +1,10 @@
 # Build from the repo root:  docker build -f main/Dockerfile .
 # One image, two processes (see docker-compose.yml): the web UI and the relay bridge.
 FROM python:3.14-slim
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 SQLITE_PATH=/data/db.sqlite3 AGENT_DIST_DIR=/app/agent
+# Releases build with AGENT_REF=<tag>, so install commands only fetch that release's agent.
+ARG AGENT_REF=main
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 SQLITE_PATH=/data/db.sqlite3 AGENT_DIST_DIR=/app/agent \
+    AGENT_REF=${AGENT_REF}
 WORKDIR /app
 RUN useradd --system --create-home app && install -d -o app -g app /data
 COPY main/requirements.txt .
@@ -10,6 +13,7 @@ COPY main/ .
 # Not served to anyone: the dashboard hashes these so install/upgrade commands only accept
 # exactly this agent code from GitHub.
 COPY agent/ /app/agent/
+COPY VERSION /VERSION
 RUN SECRET_KEY=build DEBUG=True python manage.py collectstatic --noinput
 USER app
 VOLUME /data

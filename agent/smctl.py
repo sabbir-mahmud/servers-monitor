@@ -30,6 +30,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -51,7 +52,15 @@ NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 # read as syntax (`,` separates commands, spaces add arguments, `!` negates, `*` globs).
 UNIT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
 SERVICE_KINDS = ("systemd", "docker", "pm2", "process", "http")
-RESERVED = {"tail_log", "restart_service", "shell"}
+RESERVED = {"tail_log", "tail_follow", "restart_service", "shell", "_upgrade"}
+STATE_DIR = Path(os.environ.get("SMCTL_STATE", "/var/lib/server-monitor-agent"))
+UPGRADE_REQUEST = STATE_DIR / "upgrade-request.json"
+UPGRADE_UNITS = ("server-monitor-upgrade.path", "server-monitor-upgrade.service")
+# What a dashboard-requested upgrade may contain (checked again here, as root).
+REF_RE = re.compile(r"^v\d{1,4}\.\d{1,4}\.\d{1,4}$")
+SUM_RE = re.compile(r"^[0-9a-f]{64}$")
+COMMAND_ID_RE = re.compile(r"^[0-9a-f-]{36}$")
+UPGRADE_FILES = ("install", "agent", "smctl", "unit", "upath", "uservice")
 
 HEADER = """\
 # Server Monitor agent: the allowlist for this server. Managed by `smctl`.
@@ -624,6 +633,19 @@ def cmd_shell(opts) -> None:
     ok(f"free-form shell {opts.state}")
 
 
+def cmd_probes(opts) -> None:
+    """Let the dashboard assign HTTP/TCP checks to run from this server."""
+    data = load()
+    data.setdefault("probes", {})["enabled"] = opts.state == "on"
+    if opts.state == "on":
+        warn(
+            "dashboard Admins can now have this server fetch URLs and open TCP connections, "
+            "including internal ones (cloud metadata addresses are always refused)"
+        )
+    save(data)
+    ok(f"uptime probes {opts.state}")
+
+
 def cmd_docker(opts) -> None:
     need_root()
     if opts.state == "enable":
@@ -633,6 +655,10 @@ def cmd_docker(opts) -> None:
     else:
         run(["gpasswd", "-d", AGENT_USER, "docker"])
         ok(f"{AGENT_USER} removed from the docker group")
+    # Container names (and stopped containers) on the dashboard need `docker ps`.
+    data = load()
+    data.setdefault("docker", {})["names"] = opts.state == "enable"
+    save(data, restart=False)
     restart_agent()
 
 
@@ -680,6 +706,46 @@ def _heartbeat() -> tuple[bool, str]:
     code, out = run([python, str(AGENT_PY), "-c", str(CONF), "--once"], timeout=30, user=AGENT_USER)
     last = out.splitlines()[-1] if out else ""
     return code == 0, last
+
+
+def _job_ping(name: str, status: str, exit_code: int | None = None) -> tuple[bool, str]:
+    if not AGENT_PY.exists():
+        return False, "agent not installed"
+    python = str(AGENT_PYTHON) if AGENT_PYTHON.exists() else sys.executable
+    argv = [python, str(AGENT_PY), "-c", str(CONF), "--job-ping", name, "--job-status", status]
+    if exit_code is not None:
+        argv += ["--job-exit-code", str(exit_code)]
+    code, out = run(argv, timeout=30, user=AGENT_USER)
+    return code == 0, out
+
+
+def cmd_ping(opts) -> None:
+    """Tell the dashboard a cron job ran (a Heartbeat monitor with the same name)."""
+    need_root()
+    status = "fail" if opts.fail else "start" if opts.start else "ok"
+    sent, out = _job_ping(opts.name, status, opts.exit_code)
+    if not sent:
+        raise Fail(f"ping not sent: {out}")
+    if not opts.quiet:
+        ok(f"{opts.name}: {status} sent")
+
+
+def cmd_run(opts) -> None:
+    """Run a command and report start, then success or failure with its exit code.
+    Exits with the command's own exit code, so cron still sees failures."""
+    need_root()
+    if not opts.command:
+        raise Fail("usage: smctl run NAME -- COMMAND [ARGS...]")
+    _job_ping(opts.name, "start")
+    try:
+        code = subprocess.run(opts.command).returncode
+    except FileNotFoundError:
+        code = 127
+        bad(f"{opts.command[0]}: not found")
+    sent, out = _job_ping(opts.name, "ok" if code == 0 else "fail", None if code == 0 else code)
+    if not sent:
+        warn(f"the job finished (exit {code}) but the dashboard wasn't told: {out}")
+    sys.exit(code)
 
 
 def cmd_status(opts) -> None:
@@ -836,11 +902,8 @@ def cmd_restart(opts) -> None:
     restart_agent()
 
 
-def cmd_upgrade(opts) -> None:
-    """Re-run the installer from GitHub, verified against checksums from the dashboard
-    (server page → Install / upgrade). Without them, refuse unless --unverified: an
-    unverified upgrade runs whatever is on GitHub right now, as root."""
-    need_root()
+def _source() -> dict:
+    """Where this agent was installed from (written by the installer, root-owned)."""
     source = {"SM_REPO": "sabbir-mahmud/servers-monitor", "SM_REF": "main"}
     try:
         for line in (PREFIX / "source").read_text().splitlines():
@@ -849,32 +912,149 @@ def cmd_upgrade(opts) -> None:
                 source[key] = value
     except OSError:
         pass
-    if opts.ref:
-        source["SM_REF"] = opts.ref
+    return source
+
+
+def _upgrade(ref: str | None, sums: str | None, capture: bool = False) -> tuple[int, str]:
+    """Run install.sh for `ref` from the recorded repository, verified against `sums`
+    (None = unverified). Returns (exit code, output if captured)."""
+    source = _source()
+    if ref:
+        source["SM_REF"] = ref
+    url = (
+        f"https://raw.githubusercontent.com/{source['SM_REPO']}/{source['SM_REF']}/agent/install.sh"
+    )
+    print(dim(f"  fetching installer from {url}"))
+    try:
+        script = urllib.request.urlopen(url, timeout=30).read()
+    except OSError as exc:
+        raise Fail(f"could not download the installer: {exc}") from None
+    env = {**os.environ, **source}
+    if sums:
+        import hashlib
+
+        parsed = dict(part.split("=", 1) for part in sums.split(",") if "=" in part)
+        if hashlib.sha256(script).hexdigest() != parsed.get("install"):
+            raise Fail(
+                "install.sh from GitHub doesn't match the dashboard's checksum; refusing to run it"
+            )
+        env["SM_SUMS"] = sums
+    else:
+        env["SM_ALLOW_UNVERIFIED"] = "1"
+    if not capture:
+        return subprocess.run(["bash", "-s"], input=script, env=env).returncode, ""
+    try:
+        p = subprocess.run(["bash", "-s"], input=script, env=env, capture_output=True, timeout=1100)
+    except subprocess.TimeoutExpired:
+        return 124, "the installer timed out\n"
+    return p.returncode, (p.stdout + p.stderr).decode("utf-8", errors="replace")
+
+
+def read_upgrade_request(path: Path | None = None) -> dict:
+    """Read and delete the request the agent wrote. The agent user owns that directory, so
+    the file is untrusted: never follow a link (it could point root at /etc/shadow), refuse
+    anything but a small single-linked regular file, never echo its content, and validate
+    every field."""
+    path = path or UPGRADE_REQUEST
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        raise Fail("no upgrade request waiting") from None
+    except OSError:
+        path.unlink(missing_ok=True)
+        raise Fail("the upgrade request is not a regular file; ignored") from None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_size > 4096:
+            raise Fail("the upgrade request is not a small regular file; ignored")
+        raw = os.read(fd, 4097)
+    finally:
+        os.close(fd)
+        path.unlink(missing_ok=True)  # handled (or refused) once; the path unit re-arms
+    try:
+        req = json.loads(raw)
+    except ValueError:
+        raise Fail("the upgrade request is not valid JSON; ignored") from None
+    if not isinstance(req, dict):
+        raise Fail("the upgrade request is not a JSON object; ignored")
+    cid, ref, sums = req.get("id"), req.get("ref"), req.get("sums")
+    if not isinstance(cid, str) or not COMMAND_ID_RE.match(cid):
+        raise Fail("the upgrade request has no valid command id; ignored")
+    if not isinstance(ref, str) or not REF_RE.match(ref):
+        raise Fail("upgrades from the dashboard must name a release tag like v2.3.0")
+    if not isinstance(sums, dict) or set(sums) != set(UPGRADE_FILES):
+        raise Fail(f"the upgrade request needs checksums for {', '.join(UPGRADE_FILES)}")
+    if not all(isinstance(v, str) and SUM_RE.match(v) for v in sums.values()):
+        raise Fail("the upgrade request's checksums are not SHA-256 digests")
+    return {"id": cid, "ref": ref, "sums": sums}
+
+
+def report_result(cid: str, code: int, output: str) -> bool:
+    """Send the upgrade's outcome as the dashboard job's result, signed by the agent."""
+    python = str(AGENT_PYTHON) if AGENT_PYTHON.exists() else sys.executable
+    argv = [python, str(AGENT_PY), "-c", str(CONF), "--command-result", cid,
+            "--result-status", "succeeded" if code == 0 else "failed",
+            "--result-exit-code", str(code)]  # fmt: skip
+    if os.geteuid() == 0 and shutil.which("runuser"):
+        argv = ["runuser", "-u", AGENT_USER, "--", *argv]
+    try:
+        p = subprocess.run(argv, input=output.encode(), capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return p.returncode == 0
+
+
+def upgrade_from_request() -> int:
+    """The root side of a dashboard-requested upgrade (server-monitor-upgrade.service)."""
+    need_root()
+    req = read_upgrade_request()
+    if not load().get("agent", {}).get("remote_upgrade", False):
+        report_result(req["id"], 1, "rejected: remote upgrades are off on this server\n")
+        raise Fail("remote upgrades are off (sudo smctl remote-upgrade on); request ignored")
+    sums = ",".join(f"{k}={req['sums'][k]}" for k in UPGRADE_FILES)
+    try:
+        code, output = _upgrade(req["ref"], sums, capture=True)
+    except Fail as exc:
+        code, output = 1, f"{exc}\n"
+    output = re.sub(r"\x1b\[[0-9;]*m", "", output)  # no colour codes in the job output
+    if not report_result(req["id"], code, output):
+        warn("upgrade finished but the dashboard could not be told; it will show the job as lost")
+    return code
+
+
+def cmd_upgrade(opts) -> None:
+    """Re-run the installer from GitHub, verified against checksums from the dashboard
+    (server page → Install / upgrade). Without them, refuse unless --unverified: an
+    unverified upgrade runs whatever is on GitHub right now, as root."""
+    need_root()
+    if opts.from_request:
+        raise SystemExit(upgrade_from_request())
     if not opts.sums and not opts.unverified:
         raise Fail(
             "copy the upgrade command from the server's page in the dashboard (it includes "
             "--sums), or pass --unverified to trust GitHub as-is"
         )
-    url = (
-        f"https://raw.githubusercontent.com/{source['SM_REPO']}/{source['SM_REF']}/agent/install.sh"
-    )
-    print(dim(f"  fetching installer from {url}"))
-    script = urllib.request.urlopen(url, timeout=30).read()
-    env = {**os.environ, **source}
-    if opts.sums:
-        import hashlib
+    raise SystemExit(_upgrade(opts.ref, opts.sums)[0])
 
-        sums = dict(part.split("=", 1) for part in opts.sums.split(",") if "=" in part)
-        if hashlib.sha256(script).hexdigest() != sums.get("install"):
-            raise Fail(
-                "install.sh from GitHub doesn't match the dashboard's checksum; refusing to run it"
-            )
-        env["SM_SUMS"] = opts.sums
-    else:
-        env["SM_ALLOW_UNVERIFIED"] = "1"
-    p = subprocess.run(["bash", "-s"], input=script, env=env)
-    raise SystemExit(p.returncode)
+
+def cmd_remote_upgrade(opts) -> None:
+    """Opt in to (or out of) upgrades requested from the dashboard."""
+    need_root()
+    data = load()
+    data.setdefault("agent", {})["remote_upgrade"] = opts.state == "on"
+    if opts.state == "on":
+        warn(
+            "dashboard Admins can now install any release tag of "
+            f"{_source()['SM_REPO']} here (verified against the dashboard's checksums)"
+        )
+    save(data, restart=False)
+    if shutil.which("systemctl"):
+        verb = ["enable", "--now"] if opts.state == "on" else ["disable", "--now"]
+        code, out = run(["systemctl", *verb, UPGRADE_UNITS[0]])
+        if code != 0:
+            warn(f"could not {verb[0]} {UPGRADE_UNITS[0]}: {out} (upgrade the agent once first)")
+    restart_agent()
+    ok(f"remote upgrades {opts.state}")
 
 
 def cmd_uninstall(opts) -> None:
@@ -885,7 +1065,12 @@ def cmd_uninstall(opts) -> None:
     ):
         raise Fail("aborted")
     run(["systemctl", "disable", "--now", UNIT])
-    for path in (Path(f"/etc/systemd/system/{UNIT}.service"), SUDOERS):
+    run(["systemctl", "disable", "--now", UPGRADE_UNITS[0]])
+    for path in (
+        Path(f"/etc/systemd/system/{UNIT}.service"),
+        *(Path(f"/etc/systemd/system/{u}") for u in UPGRADE_UNITS),
+        SUDOERS,
+    ):
         path.unlink(missing_ok=True)
     run(["systemctl", "daemon-reload"])
     shutil.rmtree(PREFIX, ignore_errors=True)
@@ -966,6 +1151,9 @@ def build_parser() -> argparse.ArgumentParser:
     sh = sub.add_parser("shell", help="allow or forbid free-form shell from the dashboard")
     sh.add_argument("state", choices=["on", "off"])
     sh.set_defaults(fn=cmd_shell)
+    pr = sub.add_parser("probes", help="run uptime checks for the dashboard from this server")
+    pr.add_argument("state", choices=["on", "off"])
+    pr.set_defaults(fn=cmd_probes)
     dk = sub.add_parser("docker", help="let the agent see docker containers (root-equivalent)")
     dk.add_argument("state", choices=["enable", "disable"])
     dk.set_defaults(fn=cmd_docker)
@@ -989,11 +1177,32 @@ def build_parser() -> argparse.ArgumentParser:
     lo.add_argument("-f", "--follow", action="store_true")
     lo.add_argument("-n", "--lines", type=int, default=50)
     lo.set_defaults(fn=cmd_logs)
+    pg = sub.add_parser("ping", help="report that a cron job ran (Heartbeat monitors)")
+    pg.add_argument("name")
+    pg_state = pg.add_mutually_exclusive_group()
+    pg_state.add_argument("--fail", action="store_true", help="the job failed")
+    pg_state.add_argument(
+        "--start", action="store_true", help="the job is starting (measures runtime)"
+    )
+    pg.add_argument("--exit-code", type=int, help="the job's exit code (with --fail)")
+    pg.add_argument("-q", "--quiet", action="store_true")
+    pg.set_defaults(fn=cmd_ping)
+    rn = sub.add_parser(
+        "run",
+        help="run a job and report it (Heartbeat monitors)",
+        usage="smctl run NAME -- COMMAND [ARGS...]",
+    )
+    rn.add_argument("name")
+    rn.set_defaults(fn=cmd_run)
     up = sub.add_parser("upgrade", help="install the latest agent from GitHub")
     up.add_argument("--ref", help="branch or tag to install (default: the one installed from)")
     up.add_argument("--sums", help="checksums from the dashboard's upgrade command")
     up.add_argument("--unverified", action="store_true", help="skip checksum verification")
+    up.add_argument("--from-request", action="store_true", help=argparse.SUPPRESS)
     up.set_defaults(fn=cmd_upgrade)
+    ru = sub.add_parser("remote-upgrade", help="allow upgrades requested from the dashboard")
+    ru.add_argument("state", choices=["on", "off"])
+    ru.set_defaults(fn=cmd_remote_upgrade)
     u = sub.add_parser("uninstall", help="remove the agent from this server")
     u.add_argument("--purge", action="store_true", help="also delete config and the agent user")
     u.add_argument("-y", "--yes", action="store_true")

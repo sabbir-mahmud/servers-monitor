@@ -16,6 +16,12 @@ def _clean_cache():
     cache.clear()
 
 
+@pytest.fixture(autouse=True)
+def _no_forced_2fa(settings):
+    """Most tests sign in as an Admin; 2FA enforcement has its own tests (test_two_factor)."""
+    settings.REQUIRE_2FA_FOR_ADMINS = False
+
+
 @pytest.fixture
 def roles(db):
     sync_roles()
@@ -52,6 +58,11 @@ def make_server(name="web-01", **kwargs):
 @pytest.fixture
 def server_and_token(db):
     return make_server()
+
+
+@pytest.fixture
+def server(db):
+    return make_server()[0]
 
 
 def report(**overrides):

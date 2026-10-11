@@ -179,6 +179,53 @@ def test_agent_code_runs_on_python_311():
 def test_report_shape_matches_main_schema(cfg):
     report = sma.Collector(cfg).report()
     json.dumps(report)
-    assert set(report) == {"agent_version", "host", "metrics", "disks", "services", "capabilities"}
+    assert set(report) == {
+        "agent_version",
+        "host",
+        "metrics",
+        "disks",
+        "services",
+        "capabilities",
+        "inventory",
+    }
     assert report["capabilities"]["logs"] == ["app"]
     assert 0 <= report["metrics"]["memory_percent"] <= 100
+
+
+def test_containers_from_cgroup_files_without_docker(cfg, tmp_path, monkeypatch):
+    cid = "ab" * 32
+    scope = tmp_path / f"docker-{cid}.scope"
+    scope.mkdir()
+    (scope / "cpu.stat").write_text("usage_usec 1000000\nuser_usec 1\n")
+    (scope / "memory.current").write_text(str(64 * 2**20))
+    monkeypatch.setattr(sma, "CGROUP_GLOBS", (str(tmp_path / "docker-*.scope"),))
+    clock = iter([100.0, 102.0])
+    monkeypatch.setattr(sma.time, "monotonic", lambda: next(clock))
+    col = sma.Collector(cfg)
+    (first,) = col.containers()
+    assert first == {"id": cid[:12], "name": cid[:12], "image": "", "state": "running", "cpu": None,
+                     "memory": 64 * 2**20}  # fmt: skip
+    (scope / "cpu.stat").write_text("usage_usec 2000000\n")  # 1 CPU-second over 2 s
+    assert col.containers()[0]["cpu"] == 50.0
+
+
+def test_temperatures_and_processes(cfg, monkeypatch):
+    from types import SimpleNamespace as NS
+
+    monkeypatch.setattr(sma.psutil, "sensors_temperatures", lambda: {
+        "coretemp": [NS(label="Package id 0", current=71.0, high=80.0, critical=100.0),
+                     NS(label="Core 0", current=0.0, high=None, critical=None)]}, raising=False)  # fmt: skip
+    col = sma.Collector(cfg)
+    assert col.temperatures() == [{"sensor": "coretemp Package id 0", "current": 71.0, "high": 80.0,
+                                   "critical": 100.0}]  # fmt: skip
+    procs = col.processes()
+    assert (
+        procs["count"] > 0
+        and len(procs["cpu"]) <= 10
+        and {"pid", "name", "cpu", "rss"} <= set(procs["cpu"][0])
+    )
+
+
+def test_inventory_can_be_turned_off(tmp_path):
+    cfg = sma.load_config(write_config(tmp_path, "[agent]\ninventory = false\n"))
+    assert sma.Collector(cfg).report()["inventory"] == {}

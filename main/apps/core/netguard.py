@@ -50,13 +50,23 @@ def describe_block(ip: str) -> str:
 def create_connection(
     address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None, *args, **kwargs
 ):
-    """socket.create_connection, refusing (before any data is sent) internal peers."""
-    sock = socket.create_connection(address, timeout, source_address, *args, **kwargs)
-    peer = sock.getpeername()[0]
-    if not is_allowed(peer):
-        sock.close()
-        raise BlockedAddress(describe_block(peer))
-    return sock
+    """socket.create_connection, but internal addresses are refused before any connection
+    is attempted (so "refused" vs "blocked" can't map which internal ports are open), and
+    we connect to the exact address that was checked (no DNS rebinding in between)."""
+    host, port = address[0], address[1]
+    blocked, last_error = None, None
+    for *_, sockaddr in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM):
+        ip = sockaddr[0]
+        if not is_allowed(ip):
+            blocked = ip
+            continue
+        try:
+            return socket.create_connection((ip, port), timeout, source_address, *args, **kwargs)
+        except OSError as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    raise BlockedAddress(describe_block(blocked)) if blocked else OSError(f"cannot resolve {host}")
 
 
 class _GuardedHTTPConnection(http.client.HTTPConnection):
@@ -90,24 +100,31 @@ class _RedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def opener(context: ssl.SSLContext | None = None) -> urllib.request.OpenerDirector:
+def opener(
+    context: ssl.SSLContext | None = None, follow_redirects: bool = True
+) -> urllib.request.OpenerDirector:
     """An opener with only guarded http/https, redirects and error handling: no proxy,
-    ftp, file or data handlers (build_opener would add those)."""
+    ftp, file or data handlers (build_opener would add those). Without redirects, a 3xx
+    surfaces as an HTTPError carrying its status."""
     director = urllib.request.OpenerDirector()
-    for handler in (
+    handlers = [
         urllib.request.UnknownHandler(),
         urllib.request.HTTPDefaultErrorHandler(),
         urllib.request.HTTPErrorProcessor(),
-        _RedirectHandler(),
         _HTTPHandler(),
         _HTTPSHandler(context=context),
-    ):
+    ]
+    if follow_redirects:
+        handlers.append(_RedirectHandler())
+    for handler in handlers:
         director.add_handler(handler)
     return director
 
 
-def urlopen(request, *, timeout: float, context: ssl.SSLContext | None = None):
-    return opener(context).open(request, timeout=timeout)
+def urlopen(
+    request, *, timeout: float, context: ssl.SSLContext | None = None, follow_redirects: bool = True
+):
+    return opener(context, follow_redirects).open(request, timeout=timeout)
 
 
 def check_url_host(url: str) -> str | None:

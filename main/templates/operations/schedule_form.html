@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}{% if object %}Edit {{ object }}{% else %}New schedule{% endif %}{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'operations:schedule_list' %}">{% icon "arrow-left" 15 %} Schedules</a>
+<div class="page-head"><div><h1 class="page-title">{% if object %}Edit {{ object }}{% else %}New schedule{% endif %}</h1></div>
+  {% if object and perms.operations.delete_schedule %}<div class="page-actions"><a class="btn btn-outline-danger" href="{% url 'operations:schedule_delete' object.pk %}">{% icon "trash" %} Delete</a></div>{% endif %}</div>
+<form method="post" novalidate>{% csrf_token %}
+  {% if form.non_field_errors %}<div class="alert alert-danger" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+  <div class="row g-3 align-items-start">
+    <div class="col-12 col-lg-5 col-xxl-4">
+      <div class="card"><div class="card-header">{% icon "clock" 17 %} Schedule</div><div class="card-body form-section">
+        {% include "alerts/_field.html" with field=form.sched_name %}
+        {% include "alerts/_field.html" with field=form.cron %}
+        <div><label class="form-label" for="id_action">Action</label>{{ form.action }}{% for e in form.action.errors %}<div class="field-error">{{ e }}</div>{% endfor %}</div>
+        <div data-arg="name"><label class="form-label" for="id_name">{{ form.name.label }}</label>{{ form.name }}</div>
+        <div data-arg="lines"><label class="form-label" for="id_lines">Lines</label>{{ form.lines }}</div>
+        <div data-arg="command"><label class="form-label" for="id_command">Command</label>{{ form.command }}<div class="form-text">Runs with the permissions of whoever saved the schedule.</div></div>
+        {% include "alerts/_field.html" with field=form.is_enabled %}
+        <button class="btn btn-primary w-100">{% if object %}Save schedule{% else %}{% icon "plus" %} Create schedule{% endif %}</button>
+      </div></div>
+      {% include "operations/_rollout.html" %}
+    </div>
+    <div class="col-12 col-lg-7 col-xxl-8">
+      <div class="card"><div class="card-header">{% icon "server" 17 %} Servers</div><div class="card-body">
+        <div class="server-check check-grid">
+        {% for server in form.fields.servers.queryset %}
+          <label class="check-tile"><input class="form-check-input" type="checkbox" name="servers" value="{{ server.pk }}" {% if server.pk|stringformat:"s" in form.servers.value or server in form.servers.value %}checked{% endif %}>
+            <span><span class="check-tile-name d-block">{{ server.name }}</span><span class="check-tile-meta">{{ server.environment }}{% for g in server.groups.all %} · {{ g.name }}{% endfor %}</span></span></label>
+        {% endfor %}
+        </div>
+        {% if form.groups.field.queryset %}<div class="mt-3"><span class="form-label d-block">{{ form.groups.label }}</span><div class="d-flex flex-wrap gap-1">{% for cb in form.groups %}<label class="check-tile py-2">{{ cb.tag }} <span class="check-tile-name">{{ cb.choice_label }}</span></label>{% endfor %}</div></div>{% endif %}
+        <div class="mt-3"><span class="form-label d-block">{{ form.environments.label }}</span><div class="d-flex flex-wrap gap-1">{% for cb in form.environments %}<label class="check-tile py-2">{{ cb.tag }} <span class="check-tile-name">{{ cb.choice_label }}</span></label>{% endfor %}</div>
+          <div class="form-text">Groups and environments are resolved each time it runs, so new servers join automatically.</div></div>
+      </div></div>
+    </div>
+  </div>
+</form>
+{% endblock %}
