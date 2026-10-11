@@ -659,6 +659,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--print", action="store_true", dest="print_only", help="Print the report JSON and exit"
     )
+    parser.add_argument(
+        "--check", action="store_true", help="Validate the config and exit (used by smctl)"
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     opts = parser.parse_args(argv)
     logging.basicConfig(
@@ -670,6 +673,9 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ConfigError, tomllib.TOMLDecodeError) as exc:
         log.error("Config error in %s: %s", opts.config, exc)
         return 2
+    if opts.check:
+        print(f"ok: {len(cfg.services)} services, {len(cfg.logs)} logs, {len(cfg.actions)} actions")
+        return 0
     if opts.print_only:
         collector = Collector(cfg)
         time.sleep(0.5)  # let cpu_percent measure something

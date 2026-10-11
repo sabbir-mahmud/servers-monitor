@@ -117,24 +117,51 @@ prints the report the agent would send.
 
 ## Installing the agent on a real server
 
-The "Add server" page gives you the exact command:
+No SSH details are needed, ever. The agent on each server dials **out** to the dashboard
+over HTTPS, polls for queued jobs every few seconds, runs them locally and streams the
+output back. "Add server" just creates an identity and a one-time token.
+
+The "Add server" page gives you one command; it then shows **Connected** by itself when
+the first heartbeat lands:
 
 ```bash
 curl -fsSL https://monitor.example.com/agent/files/install.sh \
   | sudo SM_URL=https://monitor.example.com SM_TOKEN=smk_… bash
 ```
 
-The installer creates a `server-monitor` system user, a venv in
-`/opt/server-monitor-agent`, `/etc/server-monitor-agent/agent.toml` (mode 640) and a
-systemd unit. Then declare the server's services, logs and deploy scripts in
-`agent.toml`. [`agent/agent.example.toml`](agent/agent.example.toml) documents every
-option. For restart buttons, grant only those units in sudoers:
+It installs Python's venv if missing, checks the dashboard is reachable and the token is
+accepted *before* changing anything, creates a `server-monitor` system user, installs the
+agent in `/opt/server-monitor-agent` with the systemd unit, installs the `smctl` command,
+detects running services (nginx, Postgres, Redis, gunicorn, your own units…) and log files,
+and confirms a real heartbeat. Re-running it upgrades and keeps the config.
+`SM_DETECT=0` skips detection.
 
-```
-server-monitor ALL=(root) NOPASSWD: /usr/bin/systemctl restart nginx, /usr/bin/systemctl restart gunicorn-api
+### `smctl`: everything after install
+
+The server's `agent.toml` is the allowlist: the dashboard can only run what it declares.
+`smctl` edits it for you, validates every change with the agent itself, keeps exact-command
+sudo rules in step, and restarts the agent; the dashboard updates on the next heartbeat.
+
+```bash
+sudo smctl status                                      # running? connected?
+sudo smctl doctor                                      # config, network, token, permissions
+sudo smctl detect --apply                              # add newly found services and logs
+sudo smctl list                                        # what the dashboard can see and run
+sudo smctl action add deploy -d "Pull and restart" -- /opt/deploy/deploy.sh
+sudo smctl action add upgrade --sudo -- /usr/bin/apt-get -y upgrade   # as root, exact sudo rule
+sudo smctl action test deploy                          # run it here as the agent user
+sudo smctl service add api --unit gunicorn-api --restartable
+sudo smctl service restartable nginx on                # Restart button + sudo rule
+sudo smctl log add api /var/www/api/logs/app.log
+sudo smctl token smk_…                                 # after rotating it in the dashboard
+sudo smctl shell on|off                                # free-form shell (Admin role, audited)
+sudo smctl edit | logs -f | upgrade | uninstall [--purge]
 ```
 
-Re-running the installer upgrades the agent and keeps the config.
+`--sudo` actions and restartable systemd units get one `NOPASSWD` line each in
+`/etc/sudoers.d/server-monitor`, naming the full command, validated with `visudo`. Docker
+containers are only monitored after `sudo smctl docker enable`, because the docker group is
+root-equivalent. [`agent/agent.example.toml`](agent/agent.example.toml) documents every option.
 
 ## Production
 
@@ -152,7 +179,7 @@ Prometheus and keep this app as the control plane.
 ## Checks
 
 ```bash
-make test    # 42 main tests + 12 agent tests
+make test    # 42 main tests + 21 agent/smctl tests
 make lint    # ruff
 make check   # system checks, migrations up to date, check --deploy
 ```
@@ -174,6 +201,7 @@ main/
   templates/         Bootstrap 5 + HTMX, Django 6 template partials for live regions
 agent/
   server_monitor_agent.py   the whole agent (stdlib + psutil)
+  smctl.py                  the on-server management command (stdlib only)
   agent.example.toml        annotated allowlist config
   install.sh                installer / upgrader
   server-monitor-agent.service

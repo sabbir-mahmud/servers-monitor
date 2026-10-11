@@ -106,7 +106,7 @@
               </form>{% endif %}</td>
           </tr>
         {% empty %}
-          <tr><td colspan="4" class="empty-small">No services declared in the agent config.</td></tr>
+          <tr><td colspan="4" class="empty-small">No services yet. On the server, run <code>sudo smctl detect --apply</code></td></tr>
         {% endfor %}
         </tbody>
       </table></div>
@@ -162,7 +162,7 @@
         </form>
       {% endfor %}
       </div>
-    {% else %}<p class="text-body-secondary small mb-0">The agent advertises no custom actions. Add <code>[actions.deploy]</code> entries to its agent.toml.</p>{% endif %}
+    {% else %}<p class="text-body-secondary small mb-0">No actions yet. On the server, add one with<br><code>sudo smctl action add deploy -- /opt/deploy/deploy.sh</code></p>{% endif %}
     {% if can_shell and server.shell_enabled %}
       <form class="shell-form" hx-post="{% url 'operations:job_create' %}" hx-target="#action-output">
         <input type="hidden" name="servers" value="{{ server.pk }}"><input type="hidden" name="action" value="shell">
@@ -186,7 +186,7 @@
     <div id="log-output" class="mt-3 flex-grow-1">
       <div class="terminal-empty">{% icon "file" 22 %}<span>Pick a log and tail it. Output streams here.</span></div>
     </div>
-    {% else %}<p class="text-body-secondary small mb-0">No logs declared. Add them under <code>[logs]</code> in the agent config.</p>{% endif %}
+    {% else %}<p class="text-body-secondary small mb-0">No logs yet. On the server, run<br><code>sudo smctl log add app /var/log/app.log</code></p>{% endif %}
   </div></div></div>
 </div>
 {% endif %}

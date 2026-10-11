@@ -77,12 +77,21 @@ class ServerEnrollView(StaffViewMixin, TemplateView):
     permission_required = "fleet.add_server"
     template_name = "fleet/server_enroll.html"
 
+    def get_template_names(self):
+        # The page polls its connection status until the agent's first heartbeat lands.
+        if self.request.htmx and self.request.GET.get("part") == "status":
+            return [f"{self.template_name}#status"]
+        return [self.template_name]
+
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         server = get_object_or_404(Server, pk=kwargs["pk"])
+        token = None
+        if self.request.GET.get("part") != "status":  # don't burn the one-time token on a poll
+            token = self.request.session.pop(ENROLL_SESSION_KEY.format(server.pk), None)
         ctx.update(
             server=server,
-            token=self.request.session.pop(ENROLL_SESSION_KEY.format(server.pk), None),
+            token=token,
             public_url=settings.MONITOR_PUBLIC_URL.rstrip("/"),
         )
         return ctx
@@ -172,6 +181,7 @@ class ServerRotateTokenView(StaffViewMixin, View):
 AGENT_FILES = {
     "install.sh": "text/x-shellscript",
     "server_monitor_agent.py": "text/x-python",
+    "smctl.py": "text/x-python",
     "agent.example.toml": "text/plain",
     "server-monitor-agent.service": "text/plain",
 }
