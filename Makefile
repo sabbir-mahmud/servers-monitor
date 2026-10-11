@@ -2,7 +2,7 @@
 PY := $(CURDIR)/venv/bin/python
 MANAGE := cd main && $(PY) manage.py
 
-.PHONY: help install run relay test lint format check migrate superuser agent-dev docker-up
+.PHONY: help install run relay dev test lint format check migrate superuser agent-dev docker-up
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -22,6 +22,9 @@ run: ## Dashboard on :8000 (development server)
 
 relay: ## Relay bridge: agent messages, job retries, offline sweep (needs REDIS_URL)
 	$(MANAGE) relay
+
+dev: ## Dashboard on :8000 AND the relay bridge, in one terminal (Ctrl-C stops both)
+	@trap 'kill 0' INT TERM EXIT; cd main && $(PY) manage.py relay & cd main && $(PY) manage.py runserver
 
 agent-dev: ## Run the agent locally (needs agent/dev.toml with a redis_url)
 	$(PY) agent/server_monitor_agent.py -c agent/dev.toml -v

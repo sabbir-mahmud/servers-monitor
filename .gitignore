@@ -7,3 +7,4 @@ data/
 main/staticfiles/
 .pytest_cache/
 .ruff_cache/
+.relay-alive

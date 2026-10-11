@@ -118,6 +118,7 @@ class Bridge:
                         logger.info("Pruned %d metric samples past retention", deleted)
             except Exception:  # keep scheduling even if one round hits a bug
                 logger.exception("Scheduler round failed")
+            relay.mark_alive()
             self.stop.wait(5)
 
     def run(self) -> None:

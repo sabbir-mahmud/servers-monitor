@@ -44,6 +44,30 @@ def client() -> redis.Redis:
     )
 
 
+# The relay process touches this file every few seconds; the web process reads its age to
+# warn when nobody is receiving agent messages. A file next to the SQLite database works
+# across both processes (and both containers, which share that volume) with no extra I/O.
+STALE_AFTER_SECONDS = 30
+
+
+def _alive_marker():
+    return settings.SQLITE_PATH.parent / ".relay-alive"
+
+
+def mark_alive() -> None:
+    try:
+        _alive_marker().touch()
+    except OSError as exc:
+        logger.warning("Could not write relay liveness marker: %s", exc)
+
+
+def is_alive() -> bool:
+    try:
+        return time.time() - _alive_marker().stat().st_mtime < STALE_AFTER_SECONDS
+    except OSError:
+        return False
+
+
 def username(server) -> str:
     return f"sm-{server.pk}"
 

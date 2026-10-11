@@ -64,6 +64,12 @@
 
   <div class="main-col">
     <main class="content">
+      {% if RELAY_DOWN %}
+        <div class="alert alert-warning" role="alert">{% icon "alert" %}
+          <div><strong>The relay process isn't running.</strong> Agents keep reporting, but their heartbeats and job output wait in Redis until it starts: servers look offline and jobs don't finish here.
+            Start it with <code>make relay</code> (or <code>make dev</code>), <code>docker compose up -d relay</code>, or <code>systemctl start server-monitor-relay</code>.</div>
+        </div>
+      {% endif %}
       {% for message in messages %}
         <div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags }}{% endif %} alert-dismissible fade show" role="alert">
           {% if message.tags == 'success' %}{% icon "check" %}{% elif message.tags == 'error' or message.tags == 'warning' %}{% icon "alert" %}{% else %}{% icon "bell" %}{% endif %}

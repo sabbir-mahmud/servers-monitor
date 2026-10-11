@@ -146,3 +146,13 @@ def test_no_agent_facing_http_endpoints(client):
         client.post("/api/agent/v1/heartbeat/", "{}", content_type="application/json").status_code
         == 404
     )
+
+
+def test_banner_warns_when_relay_process_is_not_running(client, viewer, settings, tmp_path):
+    from apps.agent_api import relay
+
+    settings.SQLITE_PATH = tmp_path / "db.sqlite3"
+    client.force_login(viewer)
+    assert b"relay process isn" in client.get(reverse("fleet:dashboard")).content
+    relay.mark_alive()
+    assert b"relay process isn" not in client.get(reverse("fleet:dashboard")).content
