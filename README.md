@@ -1,251 +1,168 @@
+<div align="center">
+
 # Server Monitor
 
-One Django dashboard for many servers: live health, services and versions, logs, and
-running the same deploy or update on many servers at once. **No public API, no SSH, no
-open ports**: the dashboard can run on your laptop or a Raspberry Pi at home, and the
-servers can be anywhere.
+**Monitor, operate and deploy to all your servers from one calm dashboard,
+without opening a single inbound port.**
 
-| Part | Where it runs | What it is |
-|---|---|---|
-| **main/** | any machine you own (laptop, home server, Pi, VPS) | Django 6.1 + HTMX, SQLite, two processes: `web` and `relay` |
-| **relay** | Upstash Redis (or any TLS Redis) | a mailbox both sides dial out to |
-| **agent/** | every monitored server | one Python file + `psutil`, systemd, managed with `smctl` |
+Live health · services and versions · application uptime · one-click deploys across the fleet ·
+Telegram alerts · maintenance windows · teams and roles · full audit trail
 
-```
-   your machine (no inbound ports)        Upstash Redis (TLS)          your servers (no inbound ports)
- ┌────────────────────────────────┐     ┌────────────────────┐       ┌──────────────────────────┐
- │ web    : Django UI 127.0.0.1   │     │ sm:a:<id>:cmd  ◀───┼─push──│                          │
- │ relay  : BLPOP all inboxes ────┼────▶│ sm:a:<id>:in   ────┼─BLPOP─│ agent (ACL user sm-<id>: │
- │ SQLite : servers, jobs, audit  │     │   ...one pair per  │       │  only its own two keys)  │
- └────────────────────────────────┘     │   server           │       └──────────────────────────┘
-          dials out ──────────────────▶ └────────────────────┘ ◀────────────────── dials out
-```
+[Quick start](#quick-start) · [Features](#features) · [How it works](#how-it-works) ·
+[Docs](#documentation) · [Security](docs/security.md) · [Contributing](CONTRIBUTING.md)
 
-## How it works
+![License](https://img.shields.io/badge/license-Apache%202.0-blue)
+![Python](https://img.shields.io/badge/dashboard-Python%203.14%20%C2%B7%20Django%206.1-3b62d9)
+![Agent](https://img.shields.io/badge/agent-Python%203.11%2B%20%C2%B7%20stdlib%20%2B%20psutil-2f9e5b)
 
-1. **Nobody connects in.** The dashboard and every agent open outbound TLS connections
-   to Redis. Jobs go into `sm:a:<id>:cmd`; the agent is blocked on `BLPOP` there, so a
-   queued deploy starts in under a second. Heartbeats, acks and streamed output go into
-   `sm:a:<id>:in`, which the dashboard's `relay` process `BLPOP`s for the whole fleet.
-2. **Each server is fenced off.** "Add server" creates a Redis ACL user `sm-<id>` that may
-   only `RPUSH`/`BLPOP`/`LTRIM`/`PING` on its own two keys: no other server's keys, no
-   `GET`/`KEYS`/`DEL`/`FLUSH`/`ACL`. The admin `REDIS_URL` never leaves your machine.
-   Deleting a server deletes its Redis user; disabling it turns the user off.
-3. **The agent's config is the security boundary.** The dashboard sends an action *name*;
-   the agent runs it only if its local allowlist declares it, as a fixed argv with no
-   shell. Free-form shell is off by default and also needs the Admin role. Even someone
-   with your Redis admin password can only trigger what each server already allows.
-4. **At-most-once jobs.** A job is popped by exactly one `BLPOP`. If a running job goes
-   silent past its timeout it becomes **Lost** and is never re-sent. Jobs queued for an
-   offline server wait in its mailbox for 5 minutes, then **expire** (the agent also
-   refuses stale ones). Cancelling a queued job removes it from the mailbox (`LREM`),
-   which proves the agent never saw it. If Redis is unreachable when you click, the job
-   waits in a database outbox and the relay process retries it.
-5. **Health needs nothing to fire.** It's derived from `last_seen_at`: Online ≤ 2 intervals
-   + 10 s, Late ≤ 6 intervals + 10 s, otherwise Offline. Interval changes in the dashboard
-   are pushed to the agent immediately.
-6. **Alerts** are deduplicated in the database (one open alert per server/kind/subject),
-   CPU uses a 3-sample average, thresholds have 5 % hysteresis, offline fires on the
-   state change. Webhook notifications (Slack/Discord/Teams) go out from a background
-   thread with retries.
-7. **Audit everything.** Logins, server changes, credential rotations, every job (targets
-   and skipped servers) and cancellations, append-only.
+</div>
 
-### Redis usage and cost
+---
 
-An idle agent costs about two Redis commands per heartbeat (one `RPUSH`, one `BLPOP` that
-waits up to 120 s), and the dashboard pops each heartbeat once. At the default 2-minute
-interval that's **~65K commands per server per month**, plus ~45K/month for the idle relay
-process. Upstash's free tier (500K/month) covers about 6 servers; beyond that,
-pay-as-you-go is $0.20 per 100K commands (10 servers ≈ $1.40/month, 50 ≈ $6.60/month, even billed from zero). Jobs and
-streamed output add a few commands each. Raise the interval on quiet servers to save more.
+## Why Server Monitor?
+
+Most self-hosted monitoring makes you choose: either your dashboard is reachable from the
+internet, or every server needs SSH keys, VPNs and open ports. Server Monitor needs neither.
+
+- **No inbound access, anywhere.** The dashboard and every agent dial *out* to a Redis relay
+  (Upstash's free tier works) and meet there. Run the dashboard on a laptop, a Raspberry Pi
+  at home, or a VPS; servers behind NAT and firewalls just work.
+- **The server decides what it allows.** Each agent has a local allowlist of services, logs
+  and deploy actions. The dashboard can only *ask*; a compromised dashboard can't turn into
+  root on your fleet.
+- **Lightweight by design.** Django + SQLite + one small background process. Five runtime
+  dependencies on the dashboard; the agent is one Python file plus `psutil`.
+- **Secure by default.** Signed commands, verified installs, invite-only accounts, encrypted
+  secrets, SSRF guards and an append-only audit log. See the [security model](docs/security.md).
 
 ## Features
 
-- **Dashboard:** every server with health, CPU, memory, fullest disk, load, network,
-  uptime and last report. Filter by environment, group, health or name. Refreshes every 10 s.
-- **Server page:** live tiles, services with state and version (systemd, docker, pm2,
-  process, http), disks, open alerts, and 1h/6h/24h/7d history charts with hover. Gaps
-  in the charts mean the server was down.
-- **Actions:** one-click custom actions (deploy, update…), restart buttons for services
-  marked restartable, and a log tail viewer. Optional audited shell for admins.
-- **Run on servers:** pick an action, tick servers (or select all), queue it, then watch
-  per-server status and output live. Servers that can't run the action are skipped and
-  the reason is shown.
-- **Applications:** HTTP(S) health checks for your apps (`/apps/`). Each one has a URL,
-  an interval (30 s to 1 h), the status codes that count as up, an optional keyword the
-  body must contain, and an optional link to the server it runs on. You get a 24-hour
-  uptime bar, uptime over 24 h, 7 d and 14 d, a response-time chart, incidents, and TLS
-  certificate expiry (warning under 14 days). A failed check is retried after 15 s and it
-  only counts as down after N failures in a row, so a blip never pages you. Checks run
-  from the relay process over plain HTTPS, so they cost no Redis commands. For URLs only
-  reachable from inside a server (`localhost:8000/health`), use
-  `smctl service add --kind http` on that server instead.
-- **Alerts:** offline, CPU, memory, disk, service down, application down, certificate expiring.
-- **Notifications** (Incidents → Notifications): Telegram and webhooks (Slack, Discord,
-  Mattermost, Teams). Each channel has routing rules (minimum severity, environments, server
-  and/or application alerts, resolved messages) and optional reminders every 15 min to 4 h
-  until someone acknowledges. Sent by the relay process from a database outbox: retried
-  with backoff, never duplicated, logged. Telegram setup needs no inbound access: create a
-  bot with @BotFather, message it, press **Find my chats**.
-- **Maintenance windows** (Incidents → Maintenance): schedule a window, or press **Mute**
-  on any server or application page (1 h / 4 h / 24 h). Alerts are still recorded but
-  nobody is notified; anything still broken when the window ends is sent then, marked
-  "held during maintenance". Muting a server also mutes the applications on it. Acknowledge, resolve
-  automatically, notify via webhook.
-- **Roles:** Viewer (read), Operator (run actions, ack alerts, mute, edit apps), Admin
-  (servers, credentials, users, notifications, shell, audit log). Defined in
-  `apps/users/roles.py` and synced on every migrate.
-- **Users** (Administration → Users): invite people by email with a role. They get a
-  single-use link (7 days) to pick a username and password; the link is emailed if SMTP is
-  set, and always shown to the Admin to copy. Change roles, deactivate (signs them out
-  everywhere at once), create password-reset links. You can't demote or deactivate
-  yourself or the last Admin. Optional public sign-up (`ALLOW_SIGNUP=True`) puts new
-  accounts in an approval queue with no access.
-- **Passwords:** sign in with username or email. "Forgot password" emails a single-use
-  link (2 h) when SMTP is configured, and never reveals whether an address has an
-  account (same page, same timing; mail goes out in the background). Without SMTP, an Admin
-  creates the link. Minimum 10 characters plus Django's common-password checks; changing
-  your password signs out your other devices. Resets, sign-ups and invitation links are
-  rate-limited per IP and per address, and every account event is in the audit log.
+| | |
+|---|---|
+| **Fleet dashboard** | CPU, memory, disk, load, network and uptime for every server, refreshed live. Filter by environment, group or health. |
+| **Server pages** | Ring gauges, services with state and version (systemd, Docker, pm2, process, HTTP), disks, 1h–7d history charts. |
+| **One-click operations** | Run allowlisted actions (deploy, update, clear cache…) on one server or many at once and watch the output stream in. Restart services, tail logs, optional audited shell. |
+| **Application monitors** | HTTP(S) health checks with expected status codes, keyword matching, 24-hour uptime bars, response-time charts, incidents and TLS-certificate expiry. |
+| **Alerts** | Offline, CPU, memory, disk, service down, app down and certificate expiring. Deduplicated, with hysteresis so nothing flaps. |
+| **Notifications** | Telegram and webhooks (Slack, Discord, Teams, Mattermost) with routing rules, reminders until acknowledged, retries and a delivery log. |
+| **Maintenance windows** | Schedule a window or press **Mute** on any server or app: alerts are still recorded, nobody gets paged. |
+| **Teams** | Invite-only accounts with Viewer / Operator / Admin roles, optional sign-up with approval, self-service or admin password resets. |
+| **`smctl`** | One command on each server to detect services, add deploy actions, manage sudo rules, diagnose problems and upgrade. |
 
-## Security model
+## How it works
 
-- **No inbound access anywhere.** The dashboard and agents dial out to the relay; agents
-  install from GitHub; notifications go out over HTTPS.
-- **Signed commands.** Every relay message is HMAC-signed with a per-server key derived from
-  `SECRET_KEY` (never stored, never sent to Redis). Holding the Redis admin password or the
-  Upstash account lets someone drop messages, not run commands or forge results. Agents keep
-  a replay list on disk. Servers enrolled before signing are flagged on their page: rotate
-  their credentials and run `sudo smctl connect`. Changing `SECRET_KEY` re-keys every agent.
-- **Verified installs.** Install and upgrade commands carry SHA-256 checksums of the agent
-  files this dashboard was deployed with; the installer refuses anything else from GitHub.
-  So after changing `agent/`, push it before installing (or pin `AGENT_REF` to a tag).
-  Connection strings are typed at hidden prompts, never on the command line.
-- **Least privilege on servers.** Allowlisted argv commands only, per-server Redis ACL users,
-  exact-command sudo rules with validated unit names.
-- **Accounts.** Invite-only by default, superusers manageable only by superusers, Django
-  admin login behind the same throttle (per account, per account+IP, per IP), password
-  needed to change your email (old address notified), safe redirects only.
-- **Data.** Telegram tokens, webhook URLs and pending enrolment credentials are encrypted at
-  rest (Fernet, key from `SECRET_KEY`; `SECRET_KEY_FALLBACKS` for rotation).
-- **Transport.** HTTPS is on by default in production; `HTTPS=False` is an explicit choice
-  and Admins are warned when the dashboard is served that way to another machine.
-- **SSRF.** Health checks and webhooks can't reach private, loopback or metadata addresses
-  (checked on the connected socket, every redirect) unless `MONITOR_ALLOW_PRIVATE_TARGETS`.
-- **Flooding.** Per-server message budgets, one stored heartbeat per half interval, and a
-  256 KB message cap protect the database from a compromised server.
+```
+   your machine (no open ports)          Redis relay (TLS)            your servers (no open ports)
+ ┌──────────────────────────────┐     ┌───────────────────┐      ┌───────────────────────────┐
+ │ web    Django UI             │     │ sm:a:<id>:cmd  ◀──┼─push─│                           │
+ │ relay  receives heartbeats,  │────▶│ sm:a:<id>:in   ───┼─pop──│ agent  (Redis user that   │
+ │        sends jobs, checks    │     │   one pair of     │      │         can only touch    │
+ │        apps, notifies        │     │   keys per server │      │         its own two keys) │
+ │ SQLite servers, jobs, audit  │     └───────────────────┘      └───────────────────────────┘
+ └──────────────────────────────┘
+        dials out ─────────────▶         ◀───────────────── dials out
+```
 
-## Deploying the dashboard
+1. **Add a server** in the dashboard. It creates a Redis user that can only reach that server's
+   two mailbox keys, plus a signing key that never touches Redis.
+2. **Run one verified command** on the server. It installs the agent from this repository,
+   checks every file against checksums from your dashboard, and connects.
+3. **The agent reports** every two minutes and waits on its mailbox, so a deploy you click
+   starts within a second. Output streams back as it runs.
 
-Everything below runs on **your** machine; nothing needs a public address.
+Deep dive: [docs/architecture.md](docs/architecture.md).
 
-**1. Configure**: `cp main/.env.example main/.env`, then set `SECRET_KEY`
-(`python3 -c 'import secrets; print(secrets.token_urlsafe(50))'`) and `REDIS_URL` (Upstash:
-the `rediss://default:…@….upstash.io:6379` URL). Keep `HTTPS=False` unless you put TLS in
-front.
+## Quick start
 
-**2a. Docker** (laptop, home server, Pi):
+You need **Docker** and a **Redis with TLS and ACL support**. A free
+[Upstash](https://upstash.com) database is the easiest option.
+
+```bash
+git clone https://github.com/sabbir-mahmud/servers-monitor.git
+cd servers-monitor
+cp main/.env.example main/.env
+```
+
+Edit `main/.env` and set at least:
+
+```ini
+SECRET_KEY=<python3 -c 'import secrets; print(secrets.token_urlsafe(50))'>
+REDIS_URL=rediss://default:<password>@<name>.upstash.io:6379
+HTTPS=False          # serving on this machine over plain HTTP; see docs/deployment.md
+TIME_ZONE=UTC        # e.g. Asia/Dhaka, Europe/London
+```
+
+Start it and create the first administrator:
+
 ```bash
 docker compose up -d --build
 docker compose exec web python manage.py createsuperuser
-open http://127.0.0.1:8000
-```
-Two containers from one image: `web` (Gunicorn, 1 worker × 8 threads, ≤256 MB) and `relay`
-(≤128 MB), sharing a SQLite volume. The UI binds to 127.0.0.1; change the port mapping to
-`8000:8000` and add your LAN IP to `ALLOWED_HOSTS` to reach it from other devices.
-
-**2b. Without Docker** (systemd): clone to `/opt/server-monitor`, `make install`, set
-`SQLITE_PATH=/opt/server-monitor/data/db.sqlite3` in `.env`, then install
-[`deploy/server-monitor-web.service`](deploy/server-monitor-web.service) and
-[`deploy/server-monitor-relay.service`](deploy/server-monitor-relay.service).
-
-**Reaching the UI from elsewhere** without opening ports: [Tailscale](https://tailscale.com)
-(`tailscale serve 8000`, then `HTTPS=True`) or a Cloudflare Tunnel with Cloudflare Access in
-front. Run exactly **one** `relay` process.
-
-**Backups**: the whole state is one SQLite file (`sqlite3 db.sqlite3 ".backup b.sqlite3"`).
-The relay holds only in-flight messages.
-
-## Adding a server
-
-The agent installs from **this GitHub repo** (it must be public, or set `AGENT_REPO` to a
-public fork). "Add server" prints one command with that server's own Redis credentials:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/sabbir-mahmud/servers-monitor/main/agent/install.sh -o sm-install.sh \
-  && echo "<sha256>  sm-install.sh" | sha256sum -c --quiet - \
-  && sudo SM_REF=main SM_SUMS=agent=<sha256>,smctl=<sha256>,unit=<sha256> bash sm-install.sh
-# then paste the connection string at the hidden prompt
 ```
 
-It installs python3-venv if missing, downloads the agent and `smctl` from GitHub, logs in
-to the relay **before** touching any config, installs the systemd service, detects running
-services (nginx, Postgres, Redis, gunicorn, your own units…) and log files, and confirms a
-real heartbeat. The page flips to **Connected** by itself. Pin `AGENT_REF` (and so
-`SM_REF`) to a release tag for reproducible installs. Re-running upgrades in place.
+Open **http://127.0.0.1:8000**, go to **Servers → Add server**, and follow the two-step
+instructions on the page. The server appears as **Connected** within seconds.
 
-### `smctl`: managing a server afterwards
+Not using Docker, running on a Raspberry Pi, or putting HTTPS in front? See
+[docs/deployment.md](docs/deployment.md).
+
+## Managing a server with `smctl`
+
+The installer adds `smctl` to every server. The server's allowlist lives in
+`/etc/server-monitor-agent/agent.toml`; `smctl` edits it safely, validates every change
+with the agent itself, and applies it immediately.
 
 ```bash
-sudo smctl status | doctor | list | detect --apply
+sudo smctl status                                  # running? connected?
+sudo smctl doctor                                  # diagnose config, relay, permissions
+sudo smctl detect --apply                          # add services and logs found on this host
 sudo smctl action add deploy -d "Pull and restart" -- /opt/deploy/deploy.sh
-sudo smctl action add upgrade --sudo -- /usr/bin/apt-get -y upgrade   # root, exact sudo rule
-sudo smctl action test deploy                          # run it here as the agent user
-sudo smctl service restartable nginx on                # Restart button + sudo rule
-sudo smctl log add api /var/www/api/logs/app.log
-sudo smctl connect                                     # after rotating: paste at the prompt
-sudo smctl shell on|off                                # free-form shell (Admin role, audited)
-sudo smctl edit | logs -f | uninstall [--purge]
-sudo smctl upgrade --ref … --sums …                    # copy from the server's page
+sudo smctl service restartable nginx on            # Restart button, with an exact sudo rule
+sudo smctl log add app /var/www/app/logs/app.log   # make a log tail-able from the dashboard
 ```
 
-Every change is validated by the agent itself before it's written, sudo rules are one
-exact command per line (checked with `visudo`), and the agent restarts in well under a
-second. Docker containers are only monitored after `sudo smctl docker enable`, because the
-docker group is root-equivalent. [`agent/agent.example.toml`](agent/agent.example.toml)
-documents every option.
+Full reference: [docs/agent.md](docs/agent.md).
+
+## Documentation
+
+| Guide | What's inside |
+|---|---|
+| [Deployment](docs/deployment.md) | Docker, systemd and Raspberry Pi installs, HTTPS options, backups, upgrades, Redis cost |
+| [Agent & smctl](docs/agent.md) | Installing on servers, the allowlist, every `smctl` command, upgrades, troubleshooting |
+| [Configuration](docs/configuration.md) | Every environment variable with its default |
+| [Architecture](docs/architecture.md) | The relay protocol, job lifecycle, health model, alerting and notifications |
+| [Security model](docs/security.md) | Threat model, signed commands, verified installs, hardening checklist |
+
+## Requirements
+
+| Component | Needs |
+|---|---|
+| Dashboard | Docker, or Python 3.14 on any Linux/macOS box (≈ 200 MB RAM) |
+| Relay | Redis 6+ with TLS and `ACL SETUSER` (Upstash, self-hosted Redis or Valkey) |
+| Monitored servers | Linux with systemd and Python 3.11+ (Ubuntu 22.04+, Debian 12+, RHEL 9+) |
 
 ## Development
 
 ```bash
-make install
-cp main/.env.example main/.env     # DEBUG=True, SECRET_KEY, REDIS_URL
+make install          # virtualenv + dependencies
+cp main/.env.example main/.env   # set DEBUG=True, SECRET_KEY and REDIS_URL
 make migrate superuser
-make run                           # http://127.0.0.1:8000
-make relay                         # second terminal
+make dev              # dashboard on :8000 + the relay process, in one terminal
+make test             # dashboard and agent test suites
+make lint             # ruff (the agent is held to Python 3.11 syntax)
+make check            # Django system checks, migrations, production deployment audit
 ```
 
-For a local agent, create `agent/dev.toml` with the `redis_url` from "Add server" and run
-`make agent-dev`. `python agent/server_monitor_agent.py -c agent/dev.toml --print` prints
-the report the agent would send; `--ping` checks the relay login.
+The tests run without Redis or network access: the relay is exercised through an
+in-memory fake, and HTTP checks, Telegram and Redis wire formats against local test servers.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the project layout and conventions.
 
-## Checks
+## Contributing
 
-```bash
-make test    # dashboard + agent/smctl tests (relay driven by an in-memory Redis)
-make lint    # ruff; agent code is held to Python 3.11 syntax (servers' system Python)
-make check   # system checks, migrations up to date, check --deploy
-```
+Bug reports, ideas and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md)
+first. **Found a security issue? Please don't open a public issue:** follow
+[SECURITY.md](SECURITY.md).
 
-## Layout
+## License
 
-```
-main/
-  config/            settings (env-driven), urls
-  apps/fleet/        Server, ServerGroup, MetricSample · ingestion · dashboard + server views
-  apps/agent_api/    Redis relay: per-server ACL users, the bridge (`manage.py relay`),
-                     payload validation
-  apps/operations/   Job (fan-out) + Command (per server) lifecycle
-  apps/alerts/       rules, offline sweep, webhook notifications (thread + retries)
-  apps/monitors/     application health checks: checker (runs in the relay), stats, UI
-  apps/audit/        append-only audit trail
-  apps/users/        custom User, roles matrix, throttled login
-  templates/         Bootstrap 5 + HTMX, Django 6 template partials for live regions
-agent/
-  server_monitor_agent.py   the whole agent (stdlib + psutil)
-  smctl.py                  the on-server management command (stdlib only)
-  agent.example.toml        annotated allowlist config
-  install.sh                installer / upgrader (fetched from GitHub)
-  server-monitor-agent.service
-```
+Licensed under the [Apache License, Version 2.0](LICENSE).
+Copyright © 2026 Sabbir Mahmud and contributors.

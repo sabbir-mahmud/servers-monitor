@@ -691,6 +691,19 @@ def cmd_status(opts) -> None:
         f"service {state}{dim('  since ' + since) if since and state == 'active' else ''}"
     )
     print(f"    relay      {relay_host(data)}")
+    version = (
+        next(
+            (
+                ln.split('"')[1]
+                for ln in AGENT_PY.read_text().splitlines()
+                if ln.startswith("VERSION")
+            ),
+            "?",
+        )
+        if AGENT_PY.exists()
+        else "not installed"
+    )
+    print(f"    agent      {version}")
     print(f"    config     {CONF}")
     n = {k: len(data.get(k, {})) for k in ("services", "logs", "actions")}
     print(
