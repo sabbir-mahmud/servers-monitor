@@ -109,6 +109,33 @@ streamed output add a few commands each. Raise the interval on quiet servers to 
   your password signs out your other devices. Resets, sign-ups and invitation links are
   rate-limited per IP and per address, and every account event is in the audit log.
 
+## Security model
+
+- **No inbound access anywhere.** The dashboard and agents dial out to the relay; agents
+  install from GitHub; notifications go out over HTTPS.
+- **Signed commands.** Every relay message is HMAC-signed with a per-server key derived from
+  `SECRET_KEY` (never stored, never sent to Redis). Holding the Redis admin password or the
+  Upstash account lets someone drop messages, not run commands or forge results. Agents keep
+  a replay list on disk. Servers enrolled before signing are flagged on their page: rotate
+  their credentials and run `sudo smctl connect`. Changing `SECRET_KEY` re-keys every agent.
+- **Verified installs.** Install and upgrade commands carry SHA-256 checksums of the agent
+  files this dashboard was deployed with; the installer refuses anything else from GitHub.
+  So after changing `agent/`, push it before installing (or pin `AGENT_REF` to a tag).
+  Connection strings are typed at hidden prompts, never on the command line.
+- **Least privilege on servers.** Allowlisted argv commands only, per-server Redis ACL users,
+  exact-command sudo rules with validated unit names.
+- **Accounts.** Invite-only by default, superusers manageable only by superusers, Django
+  admin login behind the same throttle (per account, per account+IP, per IP), password
+  needed to change your email (old address notified), safe redirects only.
+- **Data.** Telegram tokens, webhook URLs and pending enrolment credentials are encrypted at
+  rest (Fernet, key from `SECRET_KEY`; `SECRET_KEY_FALLBACKS` for rotation).
+- **Transport.** HTTPS is on by default in production; `HTTPS=False` is an explicit choice
+  and Admins are warned when the dashboard is served that way to another machine.
+- **SSRF.** Health checks and webhooks can't reach private, loopback or metadata addresses
+  (checked on the connected socket, every redirect) unless `MONITOR_ALLOW_PRIVATE_TARGETS`.
+- **Flooding.** Per-server message budgets, one stored heartbeat per half interval, and a
+  256 KB message cap protect the database from a compromised server.
+
 ## Deploying the dashboard
 
 Everything below runs on **your** machine; nothing needs a public address.
@@ -146,8 +173,10 @@ The agent installs from **this GitHub repo** (it must be public, or set `AGENT_R
 public fork). "Add server" prints one command with that server's own Redis credentials:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sabbir-mahmud/servers-monitor/main/agent/install.sh \
-  | sudo SM_REF=main SM_REDIS='rediss://sm-<id>:<password>@<name>.upstash.io:6379' bash
+curl -fsSL https://raw.githubusercontent.com/sabbir-mahmud/servers-monitor/main/agent/install.sh -o sm-install.sh \
+  && echo "<sha256>  sm-install.sh" | sha256sum -c --quiet - \
+  && sudo SM_REF=main SM_SUMS=agent=<sha256>,smctl=<sha256>,unit=<sha256> bash sm-install.sh
+# then paste the connection string at the hidden prompt
 ```
 
 It installs python3-venv if missing, downloads the agent and `smctl` from GitHub, logs in
@@ -165,9 +194,10 @@ sudo smctl action add upgrade --sudo -- /usr/bin/apt-get -y upgrade   # root, ex
 sudo smctl action test deploy                          # run it here as the agent user
 sudo smctl service restartable nginx on                # Restart button + sudo rule
 sudo smctl log add api /var/www/api/logs/app.log
-sudo smctl connect 'rediss://sm-…'                     # after rotating credentials
+sudo smctl connect                                     # after rotating: paste at the prompt
 sudo smctl shell on|off                                # free-form shell (Admin role, audited)
-sudo smctl edit | logs -f | upgrade [--ref v1.2] | uninstall [--purge]
+sudo smctl edit | logs -f | uninstall [--purge]
+sudo smctl upgrade --ref … --sums …                    # copy from the server's page
 ```
 
 Every change is validated by the agent itself before it's written, sudo rules are one

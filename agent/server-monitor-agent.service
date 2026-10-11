@@ -18,6 +18,9 @@ KillMode=mixed
 # are deliberately NOT set: they are inherited by child processes and would break
 # `sudo -n systemctl restart …` and deploys that write outside /var/www.
 PrivateTmp=true
+# /var/lib/server-monitor-agent, owned by the agent user: the replay-protection list.
+StateDirectory=server-monitor-agent
+StateDirectoryMode=0700
 ProtectHome=read-only
 
 [Install]

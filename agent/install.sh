@@ -1,24 +1,29 @@
 #!/usr/bin/env bash
-# Install or upgrade the Server Monitor agent: one command, fully connected.
+# Install or upgrade the Server Monitor agent: verified, then fully connected.
 #
-#   curl -fsSL https://raw.githubusercontent.com/sabbir-mahmud/servers-monitor/main/agent/install.sh \
-#     | sudo SM_REDIS='rediss://sm-<id>:<password>@<host>:6379' bash
+# Copy the exact command from the dashboard (Add server, or a server's Install / upgrade
+# page). It downloads this script, checks its SHA-256, and runs it with SM_SUMS: the
+# checksums of the agent files the dashboard was deployed with. Every file downloaded below
+# is checked against them, so a tampered GitHub repo can't run code on your servers.
 #
-# The dashboard's "Add server" page prints this command with the server's own credentials.
-# Nothing connects in: the agent dials out to the Redis relay over TLS, and the dashboard
-# does the same from wherever it runs (even a laptop with no public address).
+# The connection string is asked for at a hidden prompt (never on the command line, where
+# `ps` and shell history would show it). For automation: SM_REDIS_FILE=/path/to/file.
 #
 #   1. installs python3 + venv if missing (apt, dnf or yum)
-#   2. downloads the agent and `smctl` from GitHub (SM_REPO, SM_REF)
-#   3. logs in to the relay with SM_REDIS before touching the config
+#   2. downloads the agent and `smctl` from GitHub (SM_REPO, SM_REF), verified by SM_SUMS
+#   3. logs in to the relay before touching the config
 #   4. detects services and logs on this host and adds them (monitor-only)
 #   5. starts the systemd service and confirms a real heartbeat
 #
 # Re-running upgrades the agent and smctl and keeps the existing config.
-# Env: SM_REDIS (first install), SM_REF (branch/tag, default main), SM_REPO, SM_DETECT=0.
+# Env: SM_SUMS (required), SM_REF, SM_REPO, SM_REDIS_FILE, SM_DETECT=0,
+#      SM_ALLOW_UNVERIFIED=1 (skip checksums: trusts whatever GitHub serves, as root).
 set -euo pipefail
 
 SM_REDIS="${SM_REDIS:-}"
+SM_REDIS_FILE="${SM_REDIS_FILE:-}"
+SM_SUMS="${SM_SUMS:-}"
+SM_ALLOW_UNVERIFIED="${SM_ALLOW_UNVERIFIED:-0}"
 SM_REPO="${SM_REPO:-sabbir-mahmud/servers-monitor}"
 SM_REF="${SM_REF:-main}"
 SM_DETECT="${SM_DETECT:-1}"
@@ -37,8 +42,20 @@ die()  { printf '\n  %s✗ %s%s\n\n' "$R" "$*" "$N" >&2; exit 1; }
 command -v systemctl >/dev/null || die "systemd is required"
 command -v curl >/dev/null || die "curl is required"
 FIRST_INSTALL=0; [ -f "$CONF" ] || FIRST_INSTALL=1
-if [ "$FIRST_INSTALL" = 1 ] && [ -z "$SM_REDIS" ]; then
-  die "SM_REDIS is required: copy the full command from the dashboard's Add server page"
+if [ -z "$SM_SUMS" ] && [ "$SM_ALLOW_UNVERIFIED" != 1 ]; then
+  die "SM_SUMS is missing: copy the full command from the dashboard (it verifies what gets installed)"
+fi
+command -v sha256sum >/dev/null || die "sha256sum is required (coreutils)"
+if [ "$FIRST_INSTALL" = 1 ]; then
+  if [ -n "$SM_REDIS_FILE" ]; then
+    SM_REDIS=$(head -n1 "$SM_REDIS_FILE")
+  elif [ -z "$SM_REDIS" ]; then
+    [ -r /dev/tty ] || die "no terminal to ask for the connection string: use SM_REDIS_FILE=/path"
+    printf '%s' "Paste the connection string from the dashboard (input hidden): " > /dev/tty
+    IFS= read -rs SM_REDIS < /dev/tty
+    printf '\n' > /dev/tty
+  fi
+  [ -n "$SM_REDIS" ] || die "no connection string given"
 fi
 
 # ------------------------------------------------------------------ 1. prerequisites
@@ -74,13 +91,26 @@ fi
 # Read /var/log/* on Debian/Ubuntu; harmless where the group doesn't exist.
 getent group adm >/dev/null && usermod -aG adm "$AGENT_USER" || true
 install -d -m 755 "$PREFIX"
-fetch() {  # fetch NAME DEST: download, syntax-check Python, then swap in atomically
-  curl -fsSL --retry 3 "$SRC/$1" -o "$2.new" || die "could not download $1 from $SRC (is the repo public and the ref right?)"
-  case "$1" in *.py) python3 -m py_compile "$2.new" || die "$1 failed to compile on $(python3 -V 2>&1)" ;; esac
-  mv "$2.new" "$2"
+verify() {  # verify KEY FILE: SHA-256 must match the dashboard's SM_SUMS entry
+  [ "$SM_ALLOW_UNVERIFIED" = 1 ] && [ -z "$SM_SUMS" ] && return 0
+  want=$(printf '%s' "$SM_SUMS" | tr ',' '\n' | sed -n "s/^$1=//p")
+  [ -n "$want" ] || die "no checksum for $1 in SM_SUMS"
+  got=$(sha256sum "$2" | cut -d' ' -f1)
+  if [ "$got" != "$want" ]; then
+    rm -f "$2"
+    die "$1 from GitHub ($SM_REF) doesn't match what the dashboard expects. Either the repo
+    changed after the dashboard was deployed (redeploy it, or pin AGENT_REF to a tag) or the
+    download was tampered with. Nothing was installed."
+  fi
 }
-fetch server_monitor_agent.py "$PREFIX/server_monitor_agent.py"
-fetch smctl.py "$PREFIX/smctl.py"
+fetch() {  # fetch NAME KEY DEST: download, verify, syntax-check Python, swap in atomically
+  curl -fsSL --retry 3 "$SRC/$1" -o "$3.new" || die "could not download $1 from $SRC (is the repo public and the ref right?)"
+  verify "$2" "$3.new"
+  case "$1" in *.py) python3 -m py_compile "$3.new" || die "$1 failed to compile on $(python3 -V 2>&1)" ;; esac
+  mv "$3.new" "$3"
+}
+fetch server_monitor_agent.py agent "$PREFIX/server_monitor_agent.py"
+fetch smctl.py smctl "$PREFIX/smctl.py"
 rm -rf "$PREFIX/__pycache__"
 [ -x "$PREFIX/venv/bin/python" ] || python3 -m venv "$PREFIX/venv"
 "$PREFIX/venv/bin/pip" install --quiet --disable-pip-version-check --upgrade "psutil>=6,<8"
@@ -133,7 +163,7 @@ fi
 
 # ------------------------------------------------------------------ 4. start + verify
 step "Starting"
-fetch server-monitor-agent.service /etc/systemd/system/server-monitor-agent.service
+fetch server-monitor-agent.service unit /etc/systemd/system/server-monitor-agent.service
 systemctl daemon-reload
 systemctl enable server-monitor-agent >/dev/null 2>&1
 systemctl restart server-monitor-agent

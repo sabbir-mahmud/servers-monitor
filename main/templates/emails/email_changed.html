@@ -1,0 +1,5 @@
+{% include "emails/_layout_top.html" %}
+<h1 style="font-size:20px;margin:0 0 12px">Your email address was changed</h1>
+<p>Hi {{ user.display_name }}, the email for <b>{{ user.get_username }}</b> on {{ SITE_NAME }} is now <b>{{ new_email }}</b>.</p>
+<p style="color:#55555b;font-size:13px">If that was you, there's nothing to do. If it wasn't, someone has access to your account: contact your administrator right away.</p>
+{% include "emails/_layout_bottom.html" %}

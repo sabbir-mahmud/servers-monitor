@@ -9,6 +9,7 @@ from apps.alerts import maintenance
 from apps.alerts.models import Alert
 from apps.audit.services import record
 from apps.core.mixins import HtmxTemplateMixin, StaffViewMixin
+from apps.core.utils import safe_next
 from apps.fleet.views import MUTE_CHOICES
 
 from . import checker, stats
@@ -149,6 +150,11 @@ class MonitorDeleteView(StaffViewMixin, DeleteView):
         "delete_label": "Delete monitor",
     }
 
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(
+            cancel_url=reverse("monitors:detail", args=[self.object.pk]), **kwargs
+        )
+
     def form_valid(self, form):
         record(self.request, "monitor.delete", target=self.object.name)
         messages.success(self.request, f"Stopped monitoring {self.object.name}.")
@@ -165,7 +171,7 @@ class MonitorCheckNowView(StaffViewMixin, View):
         (messages.success if not monitor.last_error else messages.warning)(
             request, f"{monitor.name} is {verdict}."
         )
-        return redirect(request.POST.get("next") or reverse("monitors:detail", args=[pk]))
+        return redirect(safe_next(request, reverse("monitors:detail", args=[pk])))
 
 
 class MonitorToggleView(StaffViewMixin, View):
@@ -185,4 +191,4 @@ class MonitorToggleView(StaffViewMixin, View):
         messages.success(
             request, f"{monitor.name} {'resumed' if monitor.is_enabled else 'paused'}."
         )
-        return redirect(request.POST.get("next") or reverse("monitors:detail", args=[pk]))
+        return redirect(safe_next(request, reverse("monitors:detail", args=[pk])))

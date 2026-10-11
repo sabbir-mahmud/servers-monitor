@@ -21,9 +21,14 @@ from functools import cache
 import redis
 from django.conf import settings
 
+from . import signing
+
 logger = logging.getLogger(__name__)
 
 AGENT_COMMANDS = ("+rpush", "+blpop", "+ltrim", "+ping")
+# Anything bigger is dropped unread: a single agent must not be able to make the bridge
+# parse megabytes (output chunks are at most 64 KiB; heartbeats a few KiB).
+MAX_MESSAGE_BYTES = 256 * 1024
 
 
 class RelayError(Exception):
@@ -97,8 +102,10 @@ def _new_password(user: str) -> str:
 
 
 def provision(server) -> str:
-    """Create (or reset) the server's ACL user with a fresh password. Returns the agent's
-    connection URL. It contains the password, which is never stored by the dashboard."""
+    """Create (or reset) the server's ACL user with a fresh password and a fresh signing
+    key. Returns the agent's connection URL; it contains both secrets, neither of which the
+    dashboard stores. The caller saves `server.signing_salt`."""
+    server.signing_salt = signing.new_salt()
     user = username(server)
     cmd_key, in_key = keys(server)
     try:
@@ -109,15 +116,17 @@ def provision(server) -> str:
         )  # fmt: skip
     except redis.RedisError as exc:
         raise RelayError(f"could not create the agent's Redis user: {exc}") from exc
-    return agent_url(user, password)
+    return agent_url(user, password, signing.server_key(server))
 
 
-def agent_url(user: str, password: str) -> str:
+def agent_url(user: str, password: str, key: bytes | None = None) -> str:
     admin = urllib.parse.urlsplit(settings.REDIS_URL)
     host = settings.RELAY_PUBLIC_HOST or admin.hostname
     port = admin.port or 6379
     scheme = "rediss" if admin.scheme == "rediss" else "redis"
-    return f"{scheme}://{user}:{urllib.parse.quote(password, safe='')}@{host}:{port}"
+    url = f"{scheme}://{user}:{urllib.parse.quote(password, safe='')}@{host}:{port}"
+    # The signing key rides in the query string: the agent strips it before talking to Redis.
+    return f"{url}/?key={key.hex()}" if key else url
 
 
 def set_enabled(server) -> None:
@@ -140,9 +149,16 @@ def deprovision(server) -> None:
 # --------------------------------------------------------------------------- messages
 
 
+def _seal(server, message: dict) -> dict:
+    key = signing.server_key(server)
+    return signing.sign(message, key) if key else message
+
+
 def command_message(command) -> str:
-    """Deterministic JSON for a command, so a queued copy can be found again with LREM."""
-    return json.dumps(
+    """Deterministic, signed JSON for a command, so a queued copy can be found again with
+    LREM (HMAC is deterministic, so re-signing gives the same bytes)."""
+    message = _seal(
+        command.server,
         {
             "t": "cmd",
             "id": str(command.pk),
@@ -151,13 +167,13 @@ def command_message(command) -> str:
             "timeout": command.timeout_seconds,
             "exp": int(command.deliver_by.timestamp()),
         },
-        sort_keys=True,
-        separators=(",", ":"),
     )
+    return json.dumps(message, sort_keys=True, separators=(",", ":"))
 
 
 def push(server, message: dict) -> None:
-    client().rpush(keys(server)[0], json.dumps(message, separators=(",", ":")))
+    sealed = _seal(server, message)
+    client().rpush(keys(server)[0], json.dumps(sealed, sort_keys=True, separators=(",", ":")))
 
 
 def push_command(command) -> None:
@@ -180,6 +196,9 @@ def receive(server_ids, timeout: int) -> tuple[str, dict] | None:
     if not reply:
         return None
     key, raw = reply
+    if len(raw) > MAX_MESSAGE_BYTES:
+        logger.warning("Dropping oversized relay message (%d bytes) from %s", len(raw), key)
+        return None
     try:
         message = json.loads(raw)
     except ValueError:

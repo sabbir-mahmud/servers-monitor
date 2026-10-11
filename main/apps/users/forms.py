@@ -182,6 +182,14 @@ class UserEditForm(forms.ModelForm):
 
 
 class ProfileForm(forms.ModelForm):
+    current_password = forms.CharField(
+        label="Current password",
+        required=False,
+        strip=False,
+        widget=forms.PasswordInput(attrs={"autocomplete": "current-password"}),
+        help_text="Needed only when you change your email.",
+    )
+
     class Meta:
         model = User
         fields = ["first_name", "last_name", "email"]
@@ -189,7 +197,19 @@ class ProfileForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.original_email = self.instance.email
         _style(self)
+
+    def clean(self):
+        data = super().clean()
+        # Changing where reset links go is as sensitive as changing the password: a stolen
+        # session alone must not be enough to take the account over for good.
+        if (data.get("email") or "").lower() != (self.original_email or "").lower():
+            if not self.instance.check_password(data.get("current_password") or ""):
+                self.add_error(
+                    "current_password", "Enter your current password to change your email."
+                )
+        return data
 
     def clean_email(self):
         email = self.cleaned_data["email"].strip()

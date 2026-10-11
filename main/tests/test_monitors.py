@@ -18,6 +18,12 @@ from apps.monitors.models import Monitor, MonitorCheck, MonitorStatus, validate_
 pytestmark = pytest.mark.django_db
 
 
+@pytest.fixture(autouse=True)
+def _local_targets_allowed(settings):
+    """These tests probe a server on 127.0.0.1; test_netguard covers the default block."""
+    settings.MONITOR_ALLOW_PRIVATE_TARGETS = True
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/slow":

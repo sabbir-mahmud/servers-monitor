@@ -37,17 +37,22 @@
 <div class="card mb-3"><div class="card-body p-4"><div class="steps">
   <div class="step"><span class="step-num"></span><div>
     <h2>Run this on the server</h2>
-    {% if agent_url %}
-    <p>As root, on Ubuntu, Debian or RHEL with systemd and Python 3.11+. It downloads the agent from GitHub, checks the credentials against the relay, installs the agent and the <code>smctl</code> command, finds the services and logs already on the machine, and confirms the connection.</p>
-    <div class="copy-block"><pre class="output" id="install">curl -fsSL {{ install_url }} | sudo SM_REF={{ agent_ref }} SM_REDIS='{{ agent_url }}' bash</pre>
+    {% if dist_error %}
+    <div class="alert alert-danger" role="alert">{% icon "alert" %}<div><b>Can't build a verified install command.</b> {{ dist_error }}. The dashboard needs the repo's <code>agent/</code> folder (set <code>AGENT_DIST_DIR</code>).</div></div>
+    {% elif agent_url %}
+    <p>As root, on Ubuntu, Debian or RHEL with systemd and Python 3.11+. The command checks the installer's fingerprint before running it, and the installer refuses any file that doesn't match what this dashboard was deployed with.</p>
+    <div class="copy-block"><pre class="output" id="install">{{ install_command }}</pre>
       <button type="button" class="btn btn-sm copy-btn" data-copy="#install">{% icon "copy" %} <span data-copy-label>Copy</span></button></div>
-    <details class="token-details"><summary>Show the connection string on its own</summary>
-      <p class="small text-body-secondary mt-2 mb-1">For an existing agent: <code>sudo smctl connect '&lt;string&gt;'</code></p>
-      <div class="token-box"><code id="token" class="fs-6 text-break">{{ agent_url }}</code>
-        <button type="button" class="btn btn-sm btn-outline-secondary" data-copy="#token">{% icon "copy" %} <span data-copy-label>Copy</span></button></div>
-    </details>
+    <h3 class="h6 mt-4 mb-2">When it asks, paste this connection string</h3>
+    <p class="small text-body-secondary mb-2">It's typed at a hidden prompt so it never lands in shell history or <code>ps</code>. It holds this server's Redis password and its command-signing key.</p>
+    <div class="token-box"><code id="token" class="fs-6 text-break">{{ agent_url }}</code>
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-copy="#token">{% icon "copy" %} <span data-copy-label>Copy</span></button></div>
+    <p class="small muted mt-2 mb-0">Already installed? Run <code>sudo smctl connect</code> on the server and paste it there instead.</p>
     {% else %}
-    <p class="mb-2">The install command was already shown. Rotate the credentials to get a fresh one; the old password stops working immediately.</p>
+    <p class="mb-2">The connection string was already shown. To <b>upgrade or repair</b> the agent (keeps its config):</p>
+    <div class="copy-block"><pre class="output" id="upgrade">{{ upgrade_command }}</pre>
+      <button type="button" class="btn btn-sm copy-btn" data-copy="#upgrade">{% icon "copy" %} <span data-copy-label>Copy</span></button></div>
+    <p class="mt-3 mb-2">Lost the connection string? Rotate the credentials for a new one; the old password stops working immediately.</p>
     {% if perms.fleet.change_server %}
     <form method="post" action="{% url 'fleet:server_rotate_token' server.pk %}" data-confirm="Rotate credentials for {{ server.name }}? An agent using the current ones will be disconnected.">{% csrf_token %}<button class="btn btn-warning btn-sm">{% icon "key" %} Rotate credentials</button></form>
     {% endif %}

@@ -1,0 +1,6 @@
+Hi {{ user.display_name }},
+
+The email address for "{{ user.get_username }}" on {{ SITE_NAME }} was just changed to {{ new_email }}.
+
+If that was you, nothing else to do. If it wasn't, someone has access to your account:
+contact your administrator right away so they can deactivate it and reset your password.

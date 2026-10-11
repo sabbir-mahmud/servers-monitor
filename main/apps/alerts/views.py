@@ -3,13 +3,14 @@ from datetime import timedelta
 from django.contrib import messages
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse_lazy
+from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.views import View
 from django.views.generic import CreateView, DeleteView, ListView, UpdateView
 
 from apps.audit.services import record
 from apps.core.mixins import HtmxTemplateMixin, StaffViewMixin
+from apps.core.utils import safe_next
 
 from . import delivery, maintenance
 from .forms import ChannelForm, MaintenanceForm
@@ -53,7 +54,7 @@ class AlertAcknowledgeView(StaffViewMixin, View):
             alert.save(update_fields=["acknowledged_by", "acknowledged_at"])
             record(request, "alert.acknowledge", target=str(alert), server=alert.server)
             messages.success(request, "Alert acknowledged.")
-        return redirect(request.POST.get("next") or "alerts:list")
+        return redirect(safe_next(request, reverse("alerts:list")))
 
 
 # --------------------------------------------------------------------------- notifications
@@ -120,6 +121,9 @@ class ChannelDeleteView(StaffViewMixin, DeleteView):
         "delete_note": "Alerts stop going to this channel. Its delivery history is removed too.",
         "delete_label": "Delete channel",
     }
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(cancel_url=reverse("alerts:channels"), **kwargs)
 
     def form_valid(self, form):
         record(self.request, "channel.delete", target=self.object.name)
@@ -230,7 +234,7 @@ class MaintenanceEndView(StaffViewMixin, View):
         messages.success(
             request, f"“{window.title}” ended. Held alerts that are still open are sent now."
         )
-        return redirect(request.POST.get("next") or "alerts:maintenance")
+        return redirect(safe_next(request, reverse("alerts:maintenance")))
 
 
 class MaintenanceDeleteView(StaffViewMixin, DeleteView):
@@ -242,6 +246,9 @@ class MaintenanceDeleteView(StaffViewMixin, DeleteView):
         "delete_note": "Removes this window from the schedule.",
         "delete_label": "Delete window",
     }
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(cancel_url=reverse("alerts:maintenance"), **kwargs)
 
     def form_valid(self, form):
         record(self.request, "maintenance.delete", target=self.object.title)
@@ -276,4 +283,4 @@ class QuickMuteView(StaffViewMixin, View):
             f"{(server or monitor).name} muted until {timezone.localtime(window.ends_at):%H:%M}. "
             "Alerts are still recorded; notifications wait.",
         )
-        return redirect(request.POST.get("next") or "alerts:maintenance")
+        return redirect(safe_next(request, reverse("alerts:maintenance")))

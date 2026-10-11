@@ -237,10 +237,19 @@ class AccountView(LoginRequiredMixin, TemplateView):
             return self.render_to_response(self.get_context_data(password_form=form))
         form = ProfileForm(request.POST, instance=user)
         if form.is_valid():
+            old_email = form.original_email
             form.save()
             record(
                 request, "user.profile_update", target=user.get_username(), fields=form.changed_data
             )
+            if "email" in form.changed_data and old_email and settings.EMAIL_ENABLED:
+                # Tell the previous address, so a hijacked account doesn't change hands quietly.
+                accounts.send_async(
+                    "your email address was changed",
+                    "email_changed",
+                    {"user": user, "new_email": user.email},
+                    old_email,
+                )
             messages.success(request, "Profile saved.")
             return redirect("account")
         return self.render_to_response(self.get_context_data(profile_form=form))
@@ -326,6 +335,7 @@ class UserDetailView(StaffViewMixin, View):
             "is_last_admin": accounts.is_last_admin(person),
             "email_enabled": settings.EMAIL_ENABLED,
             "role_help": accounts.ROLE_HELP,
+            "can_manage": not (person.is_superuser and not request.user.is_superuser),
             **extra,
         }
 
@@ -337,6 +347,7 @@ class UserDetailView(StaffViewMixin, View):
         person = get_object_or_404(User, pk=pk)
         action = request.POST.get("action", "save")
         try:
+            accounts.check_can_manage(request.user, person)
             if action == "save":
                 form = UserEditForm(request.POST, instance=person)
                 if not form.is_valid():

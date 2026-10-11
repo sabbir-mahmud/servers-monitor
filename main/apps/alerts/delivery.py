@@ -25,6 +25,8 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 from django.utils.timesince import timesince
 
+from apps.core import netguard
+
 from .maintenance import coverage, was_covered
 from .models import Alert, Channel, ChannelKind, Delivery, DeliveryEvent, Severity
 
@@ -42,7 +44,7 @@ class SendError(Exception):
 # --------------------------------------------------------------------------- transports
 
 
-def _post_json(url: str, payload: dict) -> dict:
+def _post_json(url: str, payload: dict, guarded: bool = False) -> dict:
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode(),
@@ -50,7 +52,9 @@ def _post_json(url: str, payload: dict) -> dict:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        # Webhook URLs are typed in by Admins: never let them reach internal addresses.
+        open_ = netguard.urlopen if guarded else urllib.request.urlopen
+        with open_(req, timeout=TIMEOUT) as resp:
             body = resp.read(65536)
     except urllib.error.HTTPError as exc:
         detail = ""
@@ -116,7 +120,7 @@ def telegram_chats(token: str) -> list[dict]:
 
 def webhook_send(url: str, text: str) -> None:
     # `text` for Slack, Mattermost and Teams workflows; `content` for Discord.
-    _post_json(url, {"text": text, "content": text})
+    _post_json(url, {"text": text, "content": text}, guarded=True)
 
 
 # --------------------------------------------------------------------------- messages

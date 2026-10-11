@@ -68,6 +68,11 @@ class ChannelForm(forms.ModelForm):
             "telegram_token": forms.PasswordInput(render_value=False),
             "webhook_url": forms.PasswordInput(render_value=False),
         }
+        # Encrypted text columns would default to a textarea and no length limit.
+        field_classes = {
+            "telegram_token": forms.CharField,
+            "webhook_url": forms.CharField,
+        }
 
     def __init__(self, *args, kind=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -104,8 +109,19 @@ class ChannelForm(forms.ModelForm):
             if secret in self.fields and not data.get(secret) and not self.instance._state.adding:
                 data[secret] = getattr(self.instance, secret)  # keep the saved secret
         if self.kind == ChannelKind.WEBHOOK and data.get("webhook_url"):
+            from django.core.validators import URLValidator
+
+            from apps.core.netguard import check_url_host
+
+            try:
+                URLValidator(schemes=["https"])(data["webhook_url"])
+            except forms.ValidationError:
+                self.add_error("webhook_url", "Enter the full https:// webhook URL.")
+                return data
             if not data["webhook_url"].startswith("https://"):
                 self.add_error("webhook_url", "Use the https:// URL your chat service gave you.")
+            elif problem := check_url_host(data["webhook_url"]):
+                self.add_error("webhook_url", problem)
         if not data.get("include_servers") and not data.get("include_apps"):
             raise forms.ValidationError("Choose server alerts, application alerts or both.")
         return data

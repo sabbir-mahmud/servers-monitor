@@ -30,6 +30,14 @@ class AccountError(Exception):
     """A refused account change, with a message fit to show the person who tried."""
 
 
+def check_can_manage(actor, person) -> None:
+    """Admins manage ordinary accounts; only a superuser may touch a superuser. Without
+    this, an Admin could reset a superuser's password (or swap their email and use
+    "forgot password") and gain Django admin, i.e. the whole database."""
+    if person.is_superuser and not actor.is_superuser:
+        raise AccountError("Only a superuser can change a superuser's account.")
+
+
 def role_of(user) -> str | None:
     if user.is_superuser:
         return "Admin"

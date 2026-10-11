@@ -4,6 +4,8 @@ from django.conf import settings
 from django.db import models
 from django.db.models import Q
 
+from apps.core.fields import EncryptedTextField
+
 
 class AlertKind(models.TextChoices):
     OFFLINE = "offline", "Server offline"
@@ -98,10 +100,11 @@ class Channel(models.Model):
     is_enabled = models.BooleanField(default=True)
 
     # Telegram: a bot from @BotFather and the chat (person or group) it writes to.
-    telegram_token = models.CharField(max_length=100, blank=True)
+    # The token and the webhook URL are secrets (whoever has them can post as you), so
+    # they're encrypted at rest.
+    telegram_token = EncryptedTextField(blank=True)
     telegram_chat_id = models.CharField(max_length=40, blank=True)
-    # Webhook: an incoming-webhook URL. Secret too (whoever has it can post).
-    webhook_url = models.URLField(max_length=500, blank=True)
+    webhook_url = EncryptedTextField(blank=True)
 
     # Routing rules.
     min_severity = models.CharField(

@@ -100,6 +100,11 @@
 
   <div class="main-col">
     <main class="content">
+      {% if INSECURE_TRANSPORT %}
+        <div class="alert alert-warning" role="alert">{% icon "lock" %}
+          <div><strong>This dashboard is served over plain HTTP.</strong> Sign-in cookies cross the network unencrypted, so anyone on it could take over a session. Put HTTPS in front (Caddy, <code>tailscale serve</code> or a Cloudflare Tunnel), then set <code>HTTPS=True</code>.</div>
+        </div>
+      {% endif %}
       {% if RELAY_DOWN %}
         <div class="alert alert-warning" role="alert">{% icon "alert" %}
           <div><strong>The relay process isn't running.</strong> Agents keep reporting, but their heartbeats and job output wait in Redis until it starts: servers look offline and jobs don't finish here.

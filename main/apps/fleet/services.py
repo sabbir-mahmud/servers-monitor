@@ -40,7 +40,7 @@ def create_server(request, form) -> tuple[Server, str]:
     server.save()  # the pk names the ACL user and its keys
     agent_url = _relay().provision(server)  # RelayError rolls the whole create back
     _remember_credential(server, agent_url)
-    server.save(update_fields=["token_hash", "token_prefix"])
+    server.save(update_fields=["token_hash", "token_prefix", "signing_salt"])
     form.save_m2m()
     record(request, "server.create", target=server.name, server=server)
     return server, agent_url
@@ -51,7 +51,7 @@ def rotate_token(request, server: Server) -> str:
     """Issue a new relay password; the old one stops working immediately."""
     agent_url = _relay().provision(server)
     _remember_credential(server, agent_url)
-    server.save(update_fields=["token_hash", "token_prefix", "updated_at"])
+    server.save(update_fields=["token_hash", "token_prefix", "signing_salt", "updated_at"])
     record(request, "server.rotate_token", target=server.name, server=server)
     return agent_url
 

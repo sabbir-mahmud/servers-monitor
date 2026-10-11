@@ -22,6 +22,8 @@ Dependencies: Python 3.11+ (tomllib) and psutil. The Redis client is built in.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -45,7 +47,7 @@ from pathlib import Path
 
 import psutil
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 NET_TIMEOUT = 20  # seconds for a single non-blocking Redis round trip
 MAX_BLOCK = 120  # longest BLPOP wait (Upstash holds 110 s+); heartbeats go between waits
 MAX_CHUNK = 60 * 1024  # main accepts 64 KiB per progress message
@@ -90,6 +92,8 @@ class ActionSpec:
 class Config:
     redis_url: str
     server_id: str
+    # Per-server HMAC key (from the connection string). None = legacy, unsigned traffic.
+    signing_key: bytes | None = None
     key_prefix: str = "sm"
     verify_tls: bool = True
     ca_file: str | None = None
@@ -138,11 +142,19 @@ def load_config(path: str | Path) -> Config:
         raise ConfigError(
             "cannot tell this server's id: user must be sm-<id> or set main.server_id"
         )
+    key_hex = (urllib.parse.parse_qs(parsed.query).get("key") or [main.get("signing_key", "")])[0]
+    try:
+        signing_key = bytes.fromhex(key_hex) if key_hex else None
+    except ValueError:
+        raise ConfigError("the signing key in redis_url is not valid hex") from None
+    if signing_key is not None and len(signing_key) != 32:
+        raise ConfigError("the signing key in redis_url must be 32 bytes")
 
     agent = raw.get("agent", {})
     cfg = Config(
         redis_url=redis_url,
         server_id=server_id,
+        signing_key=signing_key,
         key_prefix=str(main.get("key_prefix", "sm")),
         verify_tls=bool(main.get("verify_tls", True)),
         ca_file=main.get("ca_file"),
@@ -453,6 +465,51 @@ def plan_command(cfg: Config, action: str, args: dict) -> Plan:
     return Plan(argv=spec.command, timeout=spec.timeout, cwd=spec.cwd, env=env)
 
 
+def _canonical(message: dict) -> bytes:
+    body = {k: v for k, v in message.items() if k != "sig"}
+    return json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+
+
+def sign(message: dict, key: bytes) -> dict:
+    return {**message, "sig": hmac.new(key, _canonical(message), hashlib.sha256).hexdigest()}
+
+
+def verify(message: dict, key: bytes) -> bool:
+    """Only the dashboard (and this agent) know the key; Redis merely carries messages, so
+    anything unsigned or mis-signed was not written by the dashboard."""
+    sig = message.get("sig")
+    if not isinstance(sig, str):
+        return False
+    return hmac.compare_digest(sig, hmac.new(key, _canonical(message), hashlib.sha256).hexdigest())
+
+
+class SeenCommands:
+    """IDs of commands already run, kept on disk (systemd StateDirectory) so a captured,
+    validly signed command can't be replayed to this agent, even across a restart."""
+
+    def __init__(self, path: str | None, keep: int = 1000):
+        self.path = Path(path) / "seen-commands.json" if path else None
+        self.ids: deque[str] = deque(maxlen=keep)
+        if self.path and self.path.exists():
+            try:
+                self.ids.extend(json.loads(self.path.read_text())[-keep:])
+            except (OSError, ValueError):
+                log.warning("Could not read %s; starting with an empty replay list", self.path)
+
+    def __contains__(self, cid: str) -> bool:
+        return cid in self.ids
+
+    def add(self, cid: str) -> None:
+        self.ids.append(cid)
+        if self.path:
+            tmp = self.path.with_suffix(".tmp")
+            try:
+                tmp.write_text(json.dumps(list(self.ids)))
+                os.replace(tmp, self.path)
+            except OSError as exc:
+                log.warning("Could not save replay list: %s", exc)
+
+
 class RedisError(Exception):
     """An error reply from Redis (wrong credentials, ACL denial, ...)."""
 
@@ -552,6 +609,7 @@ class Relay:
     jobs use separate connections so streaming output never waits behind a BLPOP."""
 
     def __init__(self, cfg: Config):
+        self.key = cfg.signing_key
         base = f"{cfg.key_prefix}:a:{cfg.server_id}"
         self.inbox, self.outbox = f"{base}:cmd", f"{base}:in"
         self.writer = Redis(cfg.redis_url, cfg.verify_tls, cfg.ca_file)
@@ -560,7 +618,9 @@ class Relay:
         self.sent = 0
 
     def send(self, message: dict) -> None:
-        payload = json.dumps(message, separators=(",", ":"))
+        if self.key:
+            message = sign(message, self.key)
+        payload = json.dumps(message, sort_keys=True, separators=(",", ":"))
         with self.lock:
             self.writer.call("RPUSH", self.outbox, payload)
             self.sent += 1
@@ -598,7 +658,7 @@ class Executor:
         self.pool = ThreadPoolExecutor(
             max_workers=cfg.max_concurrent_commands, thread_name_prefix="cmd"
         )
-        self._seen: deque[str] = deque(maxlen=500)
+        self._seen = SeenCommands(os.environ.get("STATE_DIRECTORY"))
         self._cancelled: set[str] = set()
         self._lock = threading.Lock()
 
@@ -607,8 +667,9 @@ class Executor:
         with self._lock:
             # Each job is popped once; this guards against a message pushed twice.
             if not cid or cid in self._seen:
+                log.warning("Ignoring command %s: already run (replay?)", cid)
                 return
-            self._seen.append(cid)
+            self._seen.add(cid)
         self.pool.submit(self._run_safely, command)
 
     def cancel(self, cid: str) -> None:
@@ -786,6 +847,10 @@ class Agent:
 
     def handle(self, message: dict) -> None:
         kind = message.get("t")
+        if self.cfg.signing_key and not verify(message, self.cfg.signing_key):
+            # Written by someone with Redis access, not by the dashboard: never act on it.
+            log.error("Rejected an unsigned or forged %r message from the relay", kind)
+            return
         if kind == "cmd":
             if float(message.get("exp") or 0) < time.time():
                 # Queued while this agent was offline and nobody is waiting any more.
@@ -814,6 +879,11 @@ class Agent:
             self.cfg.server_id,
             urllib.parse.urlsplit(self.cfg.redis_url).hostname,
         )
+        if not self.cfg.signing_key:
+            log.warning(
+                "Running WITHOUT message signing (legacy credentials). Rotate this server's "
+                "credentials in the dashboard, then: sudo smctl connect"
+            )
         next_report = time.monotonic()
         while not self.stop.is_set():
             now = time.monotonic()

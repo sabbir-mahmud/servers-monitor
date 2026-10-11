@@ -44,4 +44,8 @@ class MonitorForm(forms.ModelForm):
         url = self.cleaned_data["url"]
         if not url.lower().startswith(("http://", "https://")):
             raise forms.ValidationError("Only http:// and https:// URLs can be monitored.")
+        from apps.core.netguard import check_url_host
+
+        if problem := check_url_host(url):
+            raise forms.ValidationError(problem)
         return url

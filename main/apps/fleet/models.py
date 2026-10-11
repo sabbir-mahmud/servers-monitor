@@ -64,6 +64,9 @@ class Server(models.Model):
     # Only the SHA-256 of the agent token is stored. The token is 256 bits of randomness,
     # so a fast hash is sufficient (no dictionary to attack) and lookup stays one index hit.
     token_hash = models.CharField(max_length=64, unique=True, editable=False)
+    # Salt for this server's message-signing key (see agent_api/signing.py). Blank only
+    # for servers enrolled before signing existed: their traffic is unsigned (legacy).
+    signing_salt = models.CharField(max_length=32, blank=True, editable=False)
     token_prefix = models.CharField(max_length=8, editable=False)
 
     # Reported by the agent.

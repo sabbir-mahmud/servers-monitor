@@ -22,8 +22,21 @@ def site(request):
 
     # Without the relay process, agents' heartbeats and job output pile up in Redis unread.
     ctx["RELAY_DOWN"] = not relay.is_alive()
+    ctx["INSECURE_TRANSPORT"] = _insecure_transport(request, user)
     ctx["NAV"] = _nav_counts(user)
     return ctx
+
+
+def _insecure_transport(request, user) -> bool:
+    """Plain HTTP from another machine: the session cookie is readable on the network."""
+    import ipaddress
+
+    if request.is_secure() or not user.has_perm("users.view_user"):
+        return False
+    try:
+        return not ipaddress.ip_address(request.META.get("REMOTE_ADDR", "")).is_loopback
+    except ValueError:
+        return True
 
 
 def _nav_counts(user) -> dict:

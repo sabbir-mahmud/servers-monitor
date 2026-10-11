@@ -7,7 +7,7 @@ import pytest
 from django.test import RequestFactory
 from django.utils import timezone
 
-from apps.agent_api import relay
+from apps.agent_api import relay, signing
 from apps.alerts.models import Alert, AlertKind
 from apps.fleet.models import Health, MetricSample
 from apps.operations import services
@@ -226,8 +226,9 @@ def test_each_agent_user_is_confined_to_its_own_two_keys(fake_relay, server_and_
     cmd_key, in_key = relay.keys(server)
     assert {r for r in rules if str(r).startswith("~")} == {f"~{cmd_key}", f"~{in_key}"}
     assert "-@all" in rules and set(relay.AGENT_COMMANDS) <= set(rules)
-    assert url.startswith(f"rediss://sm-{server.pk}:tok_") and url.endswith("@relay.test:6379")
+    assert url.startswith(f"rediss://sm-{server.pk}:tok_") and "@relay.test:6379/?key=" in url
     assert "admin-secret" not in url
+    assert url.endswith(signing.server_key(server).hex())  # salt set on the instance
 
 
 def test_delete_revokes_relay_user(fake_relay, server_and_token):
@@ -264,3 +265,117 @@ def test_plain_redis_without_gentoken_gets_a_random_password(
     password = url.split(":")[2].split("@")[0]
     assert password.startswith("smk_") and len(password) > 40
     assert f">{password}" in fake_relay.users[f"sm-{server_and_token[0].pk}"]
+
+
+# ---------------------------------------------------------------- signing (finding 3)
+
+
+@pytest.fixture
+def keyed(server_and_token, fake_relay):
+    """A server enrolled with signing (every new or rotated server)."""
+    server = server_and_token[0]
+    relay.provision(server)
+    server.save(update_fields=["signing_salt"])
+    return server
+
+
+def test_forged_messages_from_redis_are_ignored(keyed, fake_relay):
+    """Someone with the Redis admin password but not the server's key can't forge data."""
+    from apps.agent_api.bridge import handle
+
+    handle(keyed, {"t": "hb", "interval": 120, "report": report()})  # unsigned
+    handle(keyed, {"t": "hb", "interval": 120, "report": report(), "sig": "0" * 64})  # forged
+    assert MetricSample.objects.count() == 0
+    AgentClient(keyed, fake_relay).heartbeat()  # properly signed by the agent
+    assert MetricSample.objects.count() == 1
+
+
+def test_commands_to_keyed_agents_are_signed_and_still_cancellable(
+    keyed, fake_relay, operator, django_capture_on_commit_callbacks
+):
+    keyed.capabilities = {"actions": [{"name": "deploy_api"}]}
+    keyed.save()
+    with django_capture_on_commit_callbacks(execute=True):
+        job, _ = services.create_job(_request(operator), "deploy_api", {}, [keyed])
+    cmd = job.commands.get()
+    (raw,) = fake_relay.lists[relay.keys(keyed)[0]]
+    import json
+
+    message = json.loads(raw)
+    assert signing.verify(message, signing.server_key(keyed))
+    tampered = {**message, "action": "shell", "args": {"command": "rm -rf /"}}
+    assert not signing.verify(tampered, signing.server_key(keyed))
+    cmd.refresh_from_db()
+    assert services.cancel_command(_request(operator), cmd)  # LREM still finds it
+
+
+def test_rotating_credentials_rotates_the_signing_key(keyed):
+    old = signing.server_key(keyed)
+    relay.provision(keyed)
+    assert signing.server_key(keyed) != old
+
+
+def test_legacy_unkeyed_servers_still_work(agent, server_and_token):
+    assert server_and_token[0].signing_salt == ""
+    agent.heartbeat()
+    assert MetricSample.objects.count() == 1
+
+
+# ---------------------------------------------------------------- flooding (finding 12)
+
+
+def test_heartbeats_faster_than_half_the_interval_are_dropped(agent, server_and_token):
+    from apps.agent_api.bridge import handle
+
+    agent.heartbeat()
+    for _ in range(50):
+        handle(server_and_token[0], {"t": "hb", "interval": 120, "report": report()})
+    assert MetricSample.objects.count() == 1
+
+
+def test_per_server_rate_limit():
+    from apps.agent_api.bridge import RateLimiter
+
+    limiter = RateLimiter(capacity=10, rate=1.0)
+    assert sum(limiter.allow("s1", now=100.0) for _ in range(50)) == 10
+    assert limiter.allow("s2", now=100.0)  # other servers unaffected
+    assert limiter.allow("s1", now=102.0)  # refills over time
+
+
+def test_oversized_messages_are_dropped_unread(fake_relay, server_and_token):
+    server = server_and_token[0]
+    fake_relay.rpush(relay.keys(server)[1], "x" * (relay.MAX_MESSAGE_BYTES + 1))
+    assert relay.receive([server.pk], 1) is None
+
+
+def _agent_module():
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "agent"))
+    import server_monitor_agent
+
+    return server_monitor_agent
+
+
+def test_dashboard_and_agent_signing_interoperate(
+    keyed, operator, fake_relay, django_capture_on_commit_callbacks
+):
+    """Two implementations of one protocol: each side must accept the other's signatures,
+    and a command the agent hands back on shutdown must be byte-identical (LREM-able)."""
+    import json
+
+    sma = _agent_module()
+    key = signing.server_key(keyed)
+    keyed.capabilities = {"actions": [{"name": "deploy_api"}]}
+    keyed.save()
+    with django_capture_on_commit_callbacks(execute=True):
+        job, _ = services.create_job(_request(operator), "deploy_api", {}, [keyed])
+    (raw,) = fake_relay.lists[relay.keys(keyed)[0]]
+    received = json.loads(raw)
+    assert sma.verify(received, key)  # agent accepts the dashboard's command
+    assert json.dumps(received, sort_keys=True, separators=(",", ":")) == raw  # requeue == original
+    assert not sma.verify({**received, "action": "shell"}, key)
+    from_agent = sma.sign({"t": "ack", "id": str(job.commands.get().pk)}, key)
+    assert signing.verify_from_server(keyed, from_agent)  # dashboard accepts the agent's
+    assert not signing.verify_from_server(keyed, {**from_agent, "id": "other"})

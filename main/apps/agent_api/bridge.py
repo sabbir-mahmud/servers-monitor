@@ -20,6 +20,7 @@ import redis
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections
+from django.utils import timezone
 
 from apps.alerts import delivery
 from apps.alerts.services import sweep
@@ -29,7 +30,7 @@ from apps.monitors.checker import Checker, prune_checks
 from apps.operations import services as ops
 from apps.operations.models import CommandStatus
 
-from . import relay
+from . import relay, signing
 from .schema import PayloadError, clean_report, clean_result
 
 logger = logging.getLogger(__name__)
@@ -45,13 +46,50 @@ def _address(report: dict) -> str | None:
         return None
 
 
+class RateLimiter:
+    """Per-server token bucket: a burst of `capacity` messages, refilled at `rate`/s.
+    Enough for streamed output from several commands; a flooding agent just loses the
+    excess instead of filling the database (and your Redis bill)."""
+
+    def __init__(self, capacity: int = 120, rate: float = 2.0):
+        self.capacity, self.rate = capacity, rate
+        self.buckets: dict[str, tuple[float, float]] = {}
+        self.warned: dict[str, float] = {}
+
+    def allow(self, server_id: str, now: float | None = None) -> bool:
+        now = time.monotonic() if now is None else now
+        tokens, last = self.buckets.get(server_id, (self.capacity, now))
+        tokens = min(self.capacity, tokens + (now - last) * self.rate)
+        if tokens < 1:
+            self.buckets[server_id] = (tokens, now)
+            if now - self.warned.get(server_id, -1e9) > 60:
+                self.warned[server_id] = now
+                logger.warning("Server %s is over its message budget; dropping messages", server_id)
+            return False
+        self.buckets[server_id] = (tokens - 1, now)
+        return True
+
+
+def _heartbeat_too_soon(server: Server) -> bool:
+    """At most one stored heartbeat per half interval (5 s floor), however fast it sends."""
+    if server.last_seen_at is None:
+        return False
+    gap = (timezone.now() - server.last_seen_at).total_seconds()
+    return gap < max(5, server.report_interval / 2)
+
+
 def handle(server: Server, message: dict) -> None:
     """Apply one message from `server`'s agent. Never raises on bad input: one confused
     agent must not stop the receiver for the whole fleet."""
     kind = message.get("t")
+    if not signing.verify_from_server(server, message):
+        # Forged (written by someone with Redis access but not this server's key) or
+        # corrupted. Either way: not from the agent, so it changes nothing.
+        logger.warning("Rejected unsigned or forged %r message for %s", kind, server.name)
+        return
     try:
         if kind == "hb":
-            if not server.is_enabled:
+            if not server.is_enabled or _heartbeat_too_soon(server):
                 return
             raw = message.get("report")
             ingest_report(server, clean_report(raw), _address(raw))
@@ -81,6 +119,7 @@ class Bridge:
     def __init__(self, block_seconds: int | None = None):
         self.block = block_seconds or settings.RELAY_BLOCK_SECONDS
         self.stop = threading.Event()
+        self.limiter = RateLimiter()
 
     # ---------------------------------------------------------------- receiver
     def receive_forever(self) -> None:
@@ -99,6 +138,8 @@ class Bridge:
             if got is None:
                 continue
             server_id, message = got
+            if not self.limiter.allow(server_id):
+                continue
             server = Server.objects.filter(pk=server_id).first()
             if server is not None:
                 handle(server, message)

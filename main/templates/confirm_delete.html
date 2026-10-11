@@ -9,7 +9,7 @@
     <p class="fw-medium mb-4">This can't be undone.</p>
     <form method="post" class="d-flex gap-2">{% csrf_token %}
       <button class="btn btn-danger">{% icon "trash" %} {{ delete_label|default:"Delete server" }}</button>
-      <a class="btn btn-outline-secondary" href="{{ request.META.HTTP_REFERER|default:'/' }}">Cancel</a>
+      <a class="btn btn-outline-secondary" href="{{ cancel_url|default:'/' }}">Cancel</a>
     </form>
   </div>
 </div>

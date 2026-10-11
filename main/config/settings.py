@@ -177,6 +177,8 @@ DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="Server Monitor <norep
 SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
 LOGIN_FAILURE_LIMIT = config("LOGIN_FAILURE_LIMIT", default=6, cast=int)
+LOGIN_ACCOUNT_FAILURE_LIMIT = config("LOGIN_ACCOUNT_FAILURE_LIMIT", default=20, cast=int)
+LOGIN_IP_FAILURE_LIMIT = config("LOGIN_IP_FAILURE_LIMIT", default=50, cast=int)
 LOGIN_FAILURE_TIMEOUT = config("LOGIN_FAILURE_TIMEOUT", default=900, cast=int)
 # Only honour X-Forwarded-For when a trusted proxy overwrites it.
 TRUST_PROXY_HEADERS = config("TRUST_PROXY_HEADERS", default=False, cast=bool)
@@ -230,6 +232,9 @@ RELAY_BLOCK_SECONDS = config("RELAY_BLOCK_SECONDS", default=60, cast=int)
 AGENT_REPO = config("AGENT_REPO", default="sabbir-mahmud/servers-monitor")
 AGENT_REF = config("AGENT_REF", default="main")  # pin to a release tag in production
 AGENT_INSTALL_URL = f"https://raw.githubusercontent.com/{AGENT_REPO}/{AGENT_REF}/agent/install.sh"
+# The agent files this dashboard ships with: their checksums go into every install and
+# upgrade command, so servers only run code matching this deployment (see agentdist.py).
+AGENT_DIST_DIR = Path(config("AGENT_DIST_DIR", default=str(BASE_DIR.parent / "agent")))
 
 # ---------------------------------------------------------------------------#
 # Monitoring behaviour
@@ -246,6 +251,9 @@ MONITOR_METRIC_RETENTION_DAYS = config("MONITOR_METRIC_RETENTION_DAYS", default=
 # a deploy that runs an hour after someone clicked it is worse than one that never ran.
 MONITOR_COMMAND_DELIVERY_SECONDS = config("MONITOR_COMMAND_DELIVERY_SECONDS", default=300, cast=int)
 MONITOR_COMMAND_OUTPUT_LIMIT = config("MONITOR_COMMAND_OUTPUT_LIMIT", default=256 * 1024, cast=int)
+# Health checks and webhooks may not reach private/loopback addresses unless you allow it
+# (e.g. to monitor services on your LAN). Cloud metadata (link-local) is always blocked.
+MONITOR_ALLOW_PRIVATE_TARGETS = config("MONITOR_ALLOW_PRIVATE_TARGETS", default=False, cast=bool)
 # Application health checks run concurrently from the relay process.
 MONITOR_CHECK_WORKERS = config("MONITOR_CHECK_WORKERS", default=8, cast=int)
 MONITOR_SWEEP_SECONDS = 15  # offline detection + command expiry, run by the relay bridge
@@ -279,18 +287,21 @@ SECURE_CSP = {
     "base-uri": [CSP.SELF],
 }
 
-# HTTPS=True when the dashboard sits behind TLS (Caddy, nginx, Tailscale Serve, Cloudflare).
-# Left False, it runs over plain HTTP on a local device or LAN: secure-only cookies would
-# make login impossible there.
-HTTPS = config("HTTPS", default=False, cast=bool)
+# Secure by default: in production (DEBUG=False) cookies are HTTPS-only, HSTS is on and
+# plain HTTP redirects to HTTPS. Serving over plain HTTP (a laptop, a trusted LAN) is an
+# explicit choice: HTTPS=False. Then session cookies cross the network unencrypted, and
+# Admins see a warning whenever the dashboard is opened from another machine that way.
+HTTPS = config("HTTPS", default=not DEBUG, cast=bool)
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
 if HTTPS and not DEBUG:
     SECURE_SSL_REDIRECT = config("SECURE_SSL_REDIRECT", default=True, cast=bool)
-    # Only behind a proxy that OVERWRITES X-Forwarded-Proto.
-    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    if TRUST_PROXY_HEADERS:
+        # Only behind a proxy that OVERWRITES X-Forwarded-Proto; without one, any client
+        # could claim "this is HTTPS" with a header.
+        SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SECURE_HSTS_SECONDS = config("SECURE_HSTS_SECONDS", default=31536000, cast=int)
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     # Preload is a months-long, browser-shipped commitment for EVERY subdomain: opt in

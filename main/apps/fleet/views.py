@@ -12,9 +12,10 @@ from apps.alerts import maintenance
 from apps.alerts.models import Alert
 from apps.alerts.services import resolve_all
 from apps.audit.services import record
+from apps.core import crypto
 from apps.core.mixins import HtmxTemplateMixin, StaffViewMixin
 
-from . import services
+from . import agentdist, services
 from .forms import ServerForm
 from .models import Environment, Health, Server, ServerGroup
 
@@ -74,8 +75,9 @@ class ServerCreateView(StaffViewMixin, CreateView):
         except RelayError as exc:
             form.add_error(None, f"Could not reach the relay (Redis): {exc}")
             return self.form_invalid(form)
-        # The connection URL lives only in this session until the enrolment page shows it.
-        self.request.session[ENROLL_SESSION_KEY.format(server.pk)] = agent_url
+        # The connection URL waits (encrypted) in this session until the enrolment page
+        # shows it once.
+        self.request.session[ENROLL_SESSION_KEY.format(server.pk)] = crypto.encrypt(agent_url)
         return redirect("fleet:server_enroll", pk=server.pk)
 
 
@@ -94,11 +96,23 @@ class ServerEnrollView(StaffViewMixin, TemplateView):
         server = get_object_or_404(Server, pk=kwargs["pk"])
         token = None
         if self.request.GET.get("part") != "status":  # don't burn the one-time token on a poll
-            token = self.request.session.pop(ENROLL_SESSION_KEY.format(server.pk), None)
+            stored = self.request.session.pop(ENROLL_SESSION_KEY.format(server.pk), None)
+            token = crypto.decrypt(stored) if stored else None
+        try:
+            install, upgrade, dist_error = (
+                agentdist.install_command(),
+                agentdist.upgrade_command(),
+                "",
+            )
+        except agentdist.AgentFilesMissing as exc:
+            install = upgrade = ""
+            dist_error = str(exc)
         ctx.update(
             server=server,
             agent_url=token,
-            install_url=settings.AGENT_INSTALL_URL,
+            install_command=install,
+            upgrade_command=upgrade,
+            dist_error=dist_error,
             agent_ref=settings.AGENT_REF,
         )
         return ctx
@@ -165,6 +179,11 @@ class ServerDeleteView(StaffViewMixin, DeleteView):
     model = Server
     success_url = reverse_lazy("fleet:dashboard")
 
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(
+            cancel_url=reverse("fleet:server_detail", args=[self.object.pk]), **kwargs
+        )
+
     def form_valid(self, form):
         record(self.request, "server.delete", target=self.object.name)
         services.delete_server(self.object)  # also revokes its relay user
@@ -183,7 +202,7 @@ class ServerRotateTokenView(StaffViewMixin, View):
         except RelayError as exc:
             messages.error(request, f"Could not reach the relay (Redis): {exc}")
             return redirect("fleet:server_detail", pk=server.pk)
-        request.session[ENROLL_SESSION_KEY.format(server.pk)] = agent_url
+        request.session[ENROLL_SESSION_KEY.format(server.pk)] = crypto.encrypt(agent_url)
         messages.warning(
             request, "Credentials rotated. The old ones no longer work: update the agent."
         )

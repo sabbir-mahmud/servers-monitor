@@ -22,6 +22,7 @@ from django.db import IntegrityError, close_old_connections, transaction
 from django.utils import timezone
 
 from apps.alerts.models import Alert, AlertKind, Severity
+from apps.core import netguard
 
 from .models import Method, Monitor, MonitorCheck, MonitorStatus
 
@@ -53,6 +54,8 @@ def _context(verify: bool) -> ssl.SSLContext:
 
 def _describe(exc: BaseException) -> str:
     reason = getattr(exc, "reason", exc)
+    if isinstance(reason, netguard.BlockedAddress):
+        return str(reason)
     if isinstance(reason, ssl.SSLCertVerificationError):
         return f"TLS certificate invalid: {reason.verify_message}"
     if isinstance(reason, (TimeoutError, socket.timeout)):
@@ -73,7 +76,7 @@ def probe(monitor: Monitor) -> Result:
     started = time.perf_counter()
     code, body, error = None, b"", ""
     try:
-        with urllib.request.urlopen(
+        with netguard.urlopen(
             request, timeout=monitor.timeout_seconds, context=_context(monitor.verify_tls)
         ) as resp:
             code = resp.status
@@ -110,7 +113,7 @@ def cert_expiry(monitor: Monitor) -> datetime | None:
     if parts.scheme != "https" or not parts.hostname or not monitor.verify_tls:
         return None
     try:
-        with socket.create_connection((parts.hostname, parts.port or 443), timeout=10) as raw:
+        with netguard.create_connection((parts.hostname, parts.port or 443), timeout=10) as raw:
             with _context(True).wrap_socket(raw, server_hostname=parts.hostname) as tls:
                 not_after = (tls.getpeercert() or {}).get("notAfter")
     except OSError, ssl.SSLError:

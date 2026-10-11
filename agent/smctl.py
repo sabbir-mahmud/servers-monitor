@@ -47,6 +47,9 @@ AGENT_PYTHON = PREFIX / "venv" / "bin" / "python"
 UNIT = "server-monitor-agent"
 AGENT_USER = "server-monitor"
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+# What a systemd unit / container / pm2 app may be called here. Nothing that sudoers could
+# read as syntax (`,` separates commands, spaces add arguments, `!` negates, `*` globs).
+UNIT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
 SERVICE_KINDS = ("systemd", "docker", "pm2", "process", "http")
 RESERVED = {"tail_log", "restart_service", "shell"}
 
@@ -234,10 +237,15 @@ def sudo_rules(data: dict) -> list[str]:
     rule names one full command line, so the agent user gains nothing beyond it."""
     systemctl = shutil.which("systemctl") or "/usr/bin/systemctl"
     cmds = []
-    for svc in data.get("services", {}).values():
+    for name, svc in data.get("services", {}).items():
         if svc.get("restartable") and svc.get("kind", "systemd") == "systemd":
             if not svc.get("restart_command"):
-                cmds.append(f"{systemctl} restart {svc.get('unit')}")
+                unit = str(svc.get("unit") or name)
+                # Checked again here, not just at `service add`: a hand-edited agent.toml
+                # with "nginx, /bin/sh" would otherwise become a root shell rule.
+                if not UNIT_RE.match(unit):
+                    raise Fail(f"service {name}: unit {unit!r} has characters that aren't allowed")
+                cmds.append(f"{systemctl} restart {unit}")
     for act in data.get("actions", {}).values():
         argv = act.get("command") or []
         if len(argv) > 2 and argv[:2] == ["sudo", "-n"]:
@@ -358,6 +366,8 @@ def detect_systemd(runner=run) -> list[Found]:
     found = []
     for unit in units:
         if not (KNOWN_UNITS.match(unit) or unit in custom):
+            continue
+        if not UNIT_RE.match(unit.removesuffix(".service")):
             continue
         name = _service_name(unit)
         body: dict = {"kind": "systemd", "unit": unit.removesuffix(".service")}
@@ -495,6 +505,8 @@ def cmd_service(opts) -> None:
         if opts.kind not in SERVICE_KINDS:
             raise Fail(f"--kind must be one of {', '.join(SERVICE_KINDS)}")
         body: dict = {"kind": opts.kind, "unit": opts.unit or name}
+        if opts.kind in ("systemd", "docker", "pm2") and not UNIT_RE.match(body["unit"]):
+            raise Fail(f"unit {body['unit']!r}: use letters, digits and _ . : @ - only")
         if opts.kind == "http":
             body = {"kind": "http", "url": opts.unit or ""}
             if not body["url"].startswith(("http://", "https://")):
@@ -624,12 +636,35 @@ def cmd_docker(opts) -> None:
     restart_agent()
 
 
+def _read_connection_string(opts) -> str:
+    """Hidden prompt (or stdin): a connection string on the command line would sit in
+    `ps` output and shell history, readable by other users of this server."""
+    if opts.redis_url and opts.redis_url != "-":
+        warn(
+            "the connection string was passed as an argument, so it's in your shell history; "
+            "next time run `sudo smctl connect` and paste it when asked"
+        )
+        return opts.redis_url.strip()
+    if opts.redis_url == "-" or not sys.stdin.isatty():
+        return sys.stdin.readline().strip()
+    import getpass
+
+    return getpass.getpass(
+        "Paste the connection string from the dashboard (input hidden): "
+    ).strip()
+
+
 def cmd_connect(opts) -> None:
-    url = opts.redis_url.strip()
+    url = _read_connection_string(opts)
     parts = urllib.parse.urlsplit(url)
     if parts.scheme not in ("rediss", "redis") or not parts.username or not parts.password:
         raise Fail(
-            "expected the connection string from the dashboard: rediss://sm-<id>:<password>@host:6379"
+            "expected the connection string from the dashboard: rediss://sm-<id>:<password>@host:6379/?key=..."
+        )
+    if "key=" not in parts.query:
+        warn(
+            "this connection string has no signing key: commands won't be verified. "
+            "Rotate the server's credentials in the dashboard to get a signed one."
         )
     data = load()
     data.setdefault("main", {})["redis_url"] = url
@@ -789,6 +824,9 @@ def cmd_restart(opts) -> None:
 
 
 def cmd_upgrade(opts) -> None:
+    """Re-run the installer from GitHub, verified against checksums from the dashboard
+    (server page → Install / upgrade). Without them, refuse unless --unverified: an
+    unverified upgrade runs whatever is on GitHub right now, as root."""
     need_root()
     source = {"SM_REPO": "sabbir-mahmud/servers-monitor", "SM_REF": "main"}
     try:
@@ -800,12 +838,29 @@ def cmd_upgrade(opts) -> None:
         pass
     if opts.ref:
         source["SM_REF"] = opts.ref
+    if not opts.sums and not opts.unverified:
+        raise Fail(
+            "copy the upgrade command from the server's page in the dashboard (it includes "
+            "--sums), or pass --unverified to trust GitHub as-is"
+        )
     url = (
         f"https://raw.githubusercontent.com/{source['SM_REPO']}/{source['SM_REF']}/agent/install.sh"
     )
     print(dim(f"  fetching installer from {url}"))
     script = urllib.request.urlopen(url, timeout=30).read()
-    p = subprocess.run(["bash", "-s"], input=script, env={**os.environ, **source})
+    env = {**os.environ, **source}
+    if opts.sums:
+        import hashlib
+
+        sums = dict(part.split("=", 1) for part in opts.sums.split(",") if "=" in part)
+        if hashlib.sha256(script).hexdigest() != sums.get("install"):
+            raise Fail(
+                "install.sh from GitHub doesn't match the dashboard's checksum; refusing to run it"
+            )
+        env["SM_SUMS"] = opts.sums
+    else:
+        env["SM_ALLOW_UNVERIFIED"] = "1"
+    p = subprocess.run(["bash", "-s"], input=script, env=env)
     raise SystemExit(p.returncode)
 
 
@@ -902,7 +957,12 @@ def build_parser() -> argparse.ArgumentParser:
     dk.add_argument("state", choices=["enable", "disable"])
     dk.set_defaults(fn=cmd_docker)
     t = sub.add_parser("connect", help="install new relay credentials (after rotating them)")
-    t.add_argument("redis_url", metavar="CONNECTION_STRING")
+    t.add_argument(
+        "redis_url",
+        metavar="CONNECTION_STRING",
+        nargs="?",
+        help="omit to paste it at a hidden prompt (recommended); '-' reads stdin",
+    )
     t.set_defaults(fn=cmd_connect)
 
     sub.add_parser("edit", help="edit agent.toml in $EDITOR, validated before saving").set_defaults(
@@ -918,6 +978,8 @@ def build_parser() -> argparse.ArgumentParser:
     lo.set_defaults(fn=cmd_logs)
     up = sub.add_parser("upgrade", help="install the latest agent from GitHub")
     up.add_argument("--ref", help="branch or tag to install (default: the one installed from)")
+    up.add_argument("--sums", help="checksums from the dashboard's upgrade command")
+    up.add_argument("--unverified", action="store_true", help="skip checksum verification")
     up.set_defaults(fn=cmd_upgrade)
     u = sub.add_parser("uninstall", help="remove the agent from this server")
     u.add_argument("--purge", action="store_true", help="also delete config and the agent user")

@@ -179,13 +179,25 @@ class AgentClient:
         self.server, self.fake = server, fake
 
     def _send(self, message):
+        from apps.agent_api import signing
         from apps.agent_api.bridge import handle
 
         self.server.refresh_from_db()
+        if key := signing.server_key(self.server):
+            message = signing.sign(message, key)  # what a real, keyed agent does
         handle(self.server, message)
 
     def heartbeat(self, body=None, interval=None):
+        from datetime import timedelta
+
         self.server.refresh_from_db()
+        # Real heartbeats are an interval apart; age the last one so the bridge's
+        # too-soon guard doesn't discard back-to-back test heartbeats.
+        if self.server.last_seen_at:
+            Server.objects.filter(pk=self.server.pk).update(
+                last_seen_at=self.server.last_seen_at
+                - timedelta(seconds=self.server.report_interval)
+            )
         interval = self.server.report_interval if interval is None else interval
         self._send({"t": "hb", "interval": interval, "report": body or report()})
 
