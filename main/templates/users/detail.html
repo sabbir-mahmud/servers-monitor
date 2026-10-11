@@ -67,6 +67,10 @@
         </div>
       {% endif %}
     </div></div>
+    <div class="card mb-3"><div class="card-header">{% icon "shield" 17 %} Two-factor</div><div class="card-body d-flex justify-content-between align-items-center gap-3">
+      <span>{% if has_2fa %}<span class="text-good fw-semibold">On</span>{% else %}<span class="muted">Off</span>{% endif %}</span>
+      {% if has_2fa and can_manage and person != user %}<form method="post" data-confirm="Remove {{ person.display_name }}'s authenticator? They'll set it up again at next sign-in.">{% csrf_token %}<input type="hidden" name="action" value="reset_2fa"><button class="btn btn-sm btn-outline-danger">Reset</button></form>{% endif %}
+    </div></div>
 
     {% if not is_self and not person.pending_approval %}
     <div class="card {% if person.is_active %}danger-zone{% endif %}"><div class="card-header">{% icon "shield" 17 %} Access</div><div class="card-body">

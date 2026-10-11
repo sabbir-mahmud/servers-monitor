@@ -33,7 +33,7 @@ CONF_DIR=/etc/server-monitor-agent
 CONF="$CONF_DIR/agent.toml"
 AGENT_USER=server-monitor
 
-if [ -t 1 ]; then B=$'\033[1m'; G=$'\033[32m'; R=$'\033[31m'; Y=$'\033[33m'; D=$'\033[2m'; N=$'\033[0m'; else B= G= R= Y= D= N=; fi
+if [ -t 1 ]; then B=$'\033[1m'; G=$'\033[32m'; R=$'\033[31m'; Y=$'\033[33m'; D=$'\033[2m'; N=$'\033[0m'; else B='' G='' R='' Y='' D='' N=''; fi
 step() { printf '\n%s==>%s %s\n' "$B" "$N" "$*"; }
 ok()   { printf '  %s✓%s %s\n' "$G" "$N" "$*"; }
 die()  { printf '\n  %s✗ %s%s\n\n' "$R" "$*" "$N" >&2; exit 1; }
@@ -164,8 +164,15 @@ fi
 # ------------------------------------------------------------------ 4. start + verify
 step "Starting"
 fetch server-monitor-agent.service unit /etc/systemd/system/server-monitor-agent.service
+# Dashboard-requested upgrades (opt-in): root acts on a request file the agent writes.
+fetch server-monitor-upgrade.path upath /etc/systemd/system/server-monitor-upgrade.path
+fetch server-monitor-upgrade.service uservice /etc/systemd/system/server-monitor-upgrade.service
 systemctl daemon-reload
 systemctl enable server-monitor-agent >/dev/null 2>&1
+if grep -Eq '^remote_upgrade *= *true' "$CONF"; then
+  systemctl enable --now server-monitor-upgrade.path >/dev/null 2>&1
+  ok "remote upgrades from the dashboard: on"
+fi
 systemctl restart server-monitor-agent
 sleep 2
 systemctl is-active --quiet server-monitor-agent || die "the agent failed to start: journalctl -u server-monitor-agent -n 30"

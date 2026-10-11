@@ -10,6 +10,8 @@ from django.db.models import Q
 from django.db.models.functions import Lower
 from django.utils import timezone
 
+from apps.core.fields import EncryptedTextField
+
 
 class User(AbstractUser):
     """Custom from day one so adding fields later never needs a swap migration."""
@@ -103,3 +105,52 @@ class Invitation(models.Model):
     @property
     def is_usable(self) -> bool:
         return self.state == "pending"
+
+
+class TOTPDevice(models.Model):
+    """A user's authenticator app. Unconfirmed until they've entered one valid code."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="totp"
+    )
+    secret = EncryptedTextField()
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    last_used_step = models.BigIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"2FA for {self.user}"
+
+    @property
+    def is_active(self) -> bool:
+        return self.confirmed_at is not None
+
+
+class RecoveryCode(models.Model):
+    """Single-use backup codes, stored only as SHA-256 hashes."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="recovery_codes"
+    )
+    code_hash = models.CharField(max_length=64)
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Recovery code for {self.user}"
+
+    @staticmethod
+    def normalise(code: str) -> str:
+        return "".join(ch for ch in code.lower() if ch.isalnum())
+
+
+class SSOIdentity(models.Model):
+    """Which single sign-on (OIDC) subject is which local account (see apps/users/sso.py)."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sso"
+    )
+    subject = models.CharField(max_length=255, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user} ↔ {self.subject}"

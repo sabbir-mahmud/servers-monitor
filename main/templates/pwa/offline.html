@@ -1,0 +1,20 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Offline · {{ SITE_NAME }}</title>
+  <link rel="stylesheet" href="{% static 'vendor/bootstrap.min.css' %}">
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  <script src="{% static 'js/app.js' %}"></script>
+</head>
+<body>
+<main class="offline"><div class="card"><div class="card-body text-center p-4">
+  <img src="{% static 'img/icon.svg' %}" width="56" height="56" alt="" class="mb-3">
+  <h1 class="h4">You're offline</h1>
+  <p class="text-body-secondary mb-3">{{ SITE_NAME }} can't be reached from this device right now. Your servers are still being watched, and alerts still go out from the dashboard.</p>
+  <a class="btn btn-primary" href="/">Try again</a>
+</div></div></main>
+</body>
+</html>

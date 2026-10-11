@@ -17,7 +17,7 @@ from apps.audit.services import record
 from apps.core.mixins import StaffViewMixin
 from apps.core.utils import client_ip
 
-from . import accounts, throttle
+from . import accounts, throttle, twofactor
 from .forms import (
     AcceptInviteForm,
     ForgotPasswordForm,
@@ -62,8 +62,116 @@ class ThrottledLoginView(auth_views.LoginView):
         return super().form_invalid(form)
 
     def form_valid(self, form):
-        throttle.clear(form.get_user().get_username(), client_ip(self.request))
+        user = form.get_user()
+        throttle.clear(user.get_username(), client_ip(self.request))
+        if twofactor.is_enabled(user):
+            # Password was right; the session isn't signed in until the second factor is.
+            self.request.session[twofactor.PENDING_KEY] = {
+                "uid": user.pk,
+                "backend": user.backend,
+                "at": timezone.now().timestamp(),
+                "next": self.get_redirect_url(),
+            }
+            return redirect("login_verify")
         return super().form_valid(form)
+
+
+class LoginVerifyView(View):
+    """Second step of sign-in: an authenticator code or a recovery code."""
+
+    template_name = "registration/login_verify.html"
+
+    def _pending(self, request):
+        pending = request.session.get(twofactor.PENDING_KEY)
+        if not pending or timezone.now().timestamp() - pending["at"] > twofactor.PENDING_SECONDS:
+            request.session.pop(twofactor.PENDING_KEY, None)
+            return None, None
+        return pending, User.objects.filter(pk=pending["uid"], is_active=True).first()
+
+    def get(self, request):
+        pending, user = self._pending(request)
+        if user is None:
+            messages.info(request, "Sign in again: that step timed out.")
+            return redirect("login")
+        return render(request, self.template_name, {"pending_user": user})
+
+    def post(self, request):
+        pending, user = self._pending(request)
+        if user is None:
+            return redirect("login")
+        if not throttle.allow("2fa", str(user.pk), 5, 15 * 60):
+            return render(request, self.template_name,
+                          {"pending_user": user, "error": "Too many attempts. Wait 15 minutes."})  # fmt: skip
+        kind = twofactor.check(user, request.POST.get("code", ""))
+        if kind is None:
+            record(request, "auth.2fa_failed", target=user.get_username())
+            return render(request, self.template_name,
+                          {"pending_user": user, "error": "That code isn't right. Try the current one."})  # fmt: skip
+        request.session.pop(twofactor.PENDING_KEY, None)
+        login(request, user, backend=pending["backend"])
+        record(request, "auth.2fa_verified", target=user.get_username(), method=kind)
+        if kind == "recovery":
+            left = twofactor.remaining_recovery_codes(user)
+            messages.warning(
+                request,
+                f"Recovery code used: {left} left. Generate new ones in My account if that's low.",
+            )
+        from apps.core.utils import url_is_safe
+
+        nxt = pending.get("next") or ""
+        return redirect(nxt if nxt and url_is_safe(request, nxt) else settings.LOGIN_REDIRECT_URL)
+
+
+class TwoFactorView(LoginRequiredMixin, View):
+    """My account → Two-factor: set up, regenerate recovery codes, turn off."""
+
+    template_name = "users/two_factor.html"
+
+    def _render(self, request, **ctx):
+        user = request.user
+        device = twofactor.device_for(user)
+        if device is None or not device.is_active:
+            device = twofactor.start_setup(user)
+            ctx.setdefault("qr", twofactor.qr_svg(user, device))
+            ctx.setdefault("secret", device.secret)
+        ctx.update(
+            enabled=device.is_active,
+            required=twofactor.is_required(user),
+            remaining=twofactor.remaining_recovery_codes(user) if device.is_active else 0,
+        )
+        return render(request, self.template_name, ctx)
+
+    def get(self, request):
+        return self._render(request)
+
+    def post(self, request):
+        user, action = request.user, request.POST.get("action")
+        if action == "confirm":
+            device = twofactor.device_for(user)
+            codes = twofactor.confirm(device, request.POST.get("code", "")) if device else None
+            if codes is None:
+                return self._render(
+                    request,
+                    error="That code isn't right. Check the time on your phone and try the current one.",
+                )
+            record(request, "user.2fa_enabled", target=user.get_username())
+            return self._render(request, codes=codes)
+        if action in ("regenerate", "disable"):
+            if (
+                not user.check_password(request.POST.get("password", ""))
+                or twofactor.check(user, request.POST.get("code", "")) is None
+            ):
+                return self._render(
+                    request, error="Enter your password and a current code to do that."
+                )
+            if action == "regenerate":
+                record(request, "user.2fa_codes_regenerated", target=user.get_username())
+                return self._render(request, codes=twofactor.issue_recovery_codes(user))
+            twofactor.disable(user)
+            record(request, "user.2fa_disabled", target=user.get_username())
+            messages.success(request, "Two-factor sign-in turned off.")
+            return redirect("account_2fa" if twofactor.is_required(user) else "account")
+        return redirect("account_2fa")
 
 
 class LogoutView(auth_views.LogoutView):
@@ -221,6 +329,8 @@ class AccountView(LoginRequiredMixin, TemplateView):
         ctx.setdefault("password_form", styled(PasswordChangeForm(self.request.user)))
         ctx["role"] = accounts.role_of(self.request.user)
         ctx["role_help"] = accounts.ROLE_HELP.get(ctx["role"], "")
+        ctx["has_2fa"] = twofactor.is_enabled(self.request.user)
+        ctx["api_tokens"] = self.request.user.api_tokens.filter(revoked_at__isnull=True).count()
         return ctx
 
     def post(self, request):
@@ -336,6 +446,7 @@ class UserDetailView(StaffViewMixin, View):
             "email_enabled": settings.EMAIL_ENABLED,
             "role_help": accounts.ROLE_HELP,
             "can_manage": not (person.is_superuser and not request.user.is_superuser),
+            "has_2fa": twofactor.is_enabled(person),
             **extra,
         }
 
@@ -374,6 +485,13 @@ class UserDetailView(StaffViewMixin, View):
                 messages.success(
                     request,
                     f"{person.display_name} {'reactivated' if action == 'activate' else 'deactivated and signed out everywhere'}.",
+                )
+            elif action == "reset_2fa":
+                twofactor.disable(person)
+                record(request, "user.2fa_reset", target=person.get_username())
+                messages.success(
+                    request,
+                    f"Two-factor removed for {person.display_name}. They set it up again at next sign-in.",
                 )
             elif action == "reset_link":
                 link = accounts.reset_link(request, person)

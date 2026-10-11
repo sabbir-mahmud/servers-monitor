@@ -5,11 +5,10 @@
 <a class="back-link" href="{% url 'alerts:channels' %}">{% icon "arrow-left" 15 %} Notifications</a>
 <div class="page-head">
   <div>
-    <h1 class="page-title">{% if object %}Edit {{ object }}{% else %}Add {% if kind == "telegram" %}Telegram{% else %}a webhook{% endif %}{% endif %}</h1>
+    <h1 class="page-title">{% if object %}Edit {{ object }}{% else %}Add a notification channel{% endif %}</h1>
     {% if not object %}
-    <nav class="segmented mt-3" aria-label="Channel type">
-      <a href="?kind=telegram" class="{% if kind == 'telegram' %}active{% endif %}">{% icon "send" 14 %} Telegram</a>
-      <a href="?kind=webhook" class="{% if kind == 'webhook' %}active{% endif %}">{% icon "link" 14 %} Slack · Discord · Teams</a>
+    <nav class="kind-picker mt-3" aria-label="Channel type">
+      {% for value, label in kind_choices %}<a href="?kind={{ value }}" class="kind-pill{% if kind == value %} active{% endif %}"{% if kind == value %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}
     </nav>
     {% endif %}
   </div>
@@ -34,6 +33,16 @@
             {% for e in form.telegram_chat_id.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
             <div id="chat-results" class="mt-2"></div>
           </div>
+        {% elif kind == "webpush" %}
+          {% for field in form.config_fields %}{{ field }}{% endfor %}
+          <div>
+            <span class="form-label d-block">This browser</span>
+            <button type="button" class="btn btn-outline-primary" data-push-subscribe data-vapid="{{ vapid_public_key }}">{% icon "bell" %} {% if object %}Re-subscribe this browser{% else %}Subscribe this browser{% endif %}</button>
+            <div class="form-text" data-push-status>{% if object %}Subscribed already. Re-subscribe only if this device stopped receiving alerts.{% else %}Your browser asks for permission to show notifications.{% endif %}</div>
+            {% for f in form.config_fields %}{% for e in f.errors %}<div class="field-error">{{ e }}</div>{% endfor %}{% endfor %}
+          </div>
+        {% elif form.kind_spec %}
+          {% for field in form.config_fields %}{% include "alerts/_field.html" with field=field %}{% endfor %}
         {% else %}
           {% include "alerts/_field.html" with field=form.webhook_url %}
         {% endif %}
@@ -74,6 +83,11 @@
         <div class="step"><span class="step-num"></span><div><h2>Pick the chat</h2><p class="mb-0">Press <b>Find my chats</b> and choose where alerts should go. Save, then send a test.</p></div></div>
       </div>
       <p class="small text-body-secondary mt-3 mb-0">The token is stored in this dashboard's database and never shown again. Nothing needs to reach this machine: Telegram is only ever called outbound.</p>
+      </div></div>
+      {% elif form.kind_spec %}
+      <div class="card"><div class="card-header">{% icon "bell" 17 %} {{ form.kind_spec.label }}</div><div class="card-body small text-body-secondary">
+        <p class="mb-2">{{ form.kind_spec.blurb }}</p>
+        <p class="mb-0">Secrets are encrypted in this dashboard's database and never shown again. Messages go out over HTTPS from this machine; nothing needs to reach it.</p>
       </div></div>
       {% else %}
       <div class="card"><div class="card-header">{% icon "link" 17 %} Where to get the URL</div><div class="card-body small text-body-secondary">

@@ -13,6 +13,7 @@ To report a vulnerability, see [SECURITY.md](../SECURITY.md).
 | **The Redis relay** (admin password or provider account) | Read relay traffic, delay or drop messages | Run any command or forge any result: messages are signed with keys Redis never sees |
 | **One monitored server** | Send its own heartbeats and results | Read or affect any other server (its Redis user is confined to its two keys), or flood the dashboard (per-server rate limits, 256 KB message cap) |
 | **A dashboard account** | What its role allows | Anything on a server beyond that server's allowlist |
+| **An API token** | What its owner's role allows, limited to its scope (read, or read + run actions) | Free-form shell (browser-only); anything after it's revoked, expired or its owner is deactivated |
 | **The dashboard machine itself** | Ask every server to run allowlisted actions (and shell, where enabled) | Run anything a server's `agent.toml` doesn't declare |
 | **The GitHub repository** | Publish modified agent code | Get it installed: install and upgrade commands verify checksums from your deployed dashboard |
 
@@ -39,6 +40,15 @@ credentials and run `sudo smctl connect` to upgrade them.
   the dashboard never change them. Logs can only be tailed if they're declared.
 - Free-form shell is off by default, needs `[shell] enabled = true` on the server **and** the
   Admin role in the dashboard, and is audited.
+- **Uptime probes** are off by default (`sudo smctl probes on`). With them on, the dashboard
+  can have the agent make HTTP GET/HEAD/POST/PUT requests and TCP connections to hosts it
+  names, including internal ones: that's their purpose. The agent itself refuses cloud
+  metadata, link-local, unspecified and multicast addresses, checks the address it connects
+  to (after DNS, and on every redirect), and never receives secret request headers (relay
+  messages are signed, not encrypted; the form refuses headers on agent-checked monitors).
+  Probe results only count for monitors that list that server.
+- **Live log follow** only follows logs declared in `[logs]` and journals of declared
+  `systemd` services, for at most 10 minutes, with output bounded like any command.
 - Root-level actions get one exact-command `NOPASSWD` sudo rule each, validated with `visudo`.
   Unit names and arguments are restricted so they can't widen a rule.
 - The agent refuses unencrypted Redis connections unless explicitly allowed for local
@@ -57,6 +67,12 @@ The dashboard computes SHA-256 checksums of the agent files it was deployed with
 
 Pin `AGENT_REF` to a release tag in production.
 
+**Upgrades from the dashboard** are opt-in per server (`sudo smctl remote-upgrade on`). The
+agent can only drop a request file; a root systemd service re-validates it (release tag of the
+recorded repository, SHA-256 checksums, untrusted-file handling) before running the same
+verified installer. A compromised agent user could at most request another release tag.
+See [agent.md](agent.md#upgrading-and-re-keying).
+
 ## Accounts and the web UI
 
 - **Roles:** Viewer, Operator and Admin. Superusers can only be changed by superusers.
@@ -69,11 +85,23 @@ Pin `AGENT_REF` to a release tag in production.
   has an account.
 - **Throttling:** sign-in is limited per account + IP, per account and per IP (Django admin's
   login uses the same throttle). Resets, sign-ups and invitation links are rate-limited.
+- **Two-factor sign-in** (authenticator app, single-use recovery codes) is required for
+  Admins by default. Break-glass on the host: `manage.py reset_2fa <user>`.
+- **Single sign-on (OIDC)** uses the authorization-code flow with state, nonce and PKCE, and
+  checks the ID token's signature against the provider's keys. Accounts are matched by the
+  provider's subject, linked once by *verified* email; superusers never sign in through it;
+  linked accounts can't fall back to a local password, so removing someone at the provider
+  locks them out. See [configuration.md](configuration.md#single-sign-on).
+- **API tokens** are stored as SHA-256 hashes, shown once, can expire and be revoked, and are
+  rate-limited per token (and bad tokens per IP). The API never accepts the session cookie,
+  so it can't be driven by cross-site requests. See [api.md](api.md).
 - **Web hardening:** CSRF on every form, a Content Security Policy with nonce-only scripts,
   `X-Frame-Options: DENY`, no open redirects, and HTTPS with HSTS and secure cookies by default
   in production.
 - **Audit log:** every sign-in, account change, server change, credential rotation, job,
-  cancellation, monitor change, channel change and maintenance window. Append-only.
+  cancellation, monitor change, channel change, maintenance window, schedule, rollout
+  resume/abort, API token and SSO role change. Jobs started through the API record the
+  token. Append-only.
 
 ## Outbound requests (SSRF)
 
@@ -85,9 +113,13 @@ metadata (`169.254.0.0/16`) stays blocked regardless.
 
 ## Data at rest
 
-- Telegram bot tokens, webhook URLs and pending enrolment credentials are encrypted with
-  Fernet, using a key derived from `SECRET_KEY` via HKDF.
-- Agent Redis passwords and invitation tokens are stored only as SHA-256 hashes.
+- Notification channel secrets, monitor request headers, TOTP secrets, the Web Push (VAPID)
+  private key and pending enrolment credentials are encrypted with Fernet, using a key derived
+  from `SECRET_KEY` via HKDF.
+- Agent Redis passwords, invitation tokens, recovery codes and API tokens are stored only as
+  SHA-256 hashes.
+- Browser push messages are end-to-end encrypted to the browser (RFC 8291): the push service
+  sees only ciphertext.
 - Agent signing keys aren't stored at all; they're derived when needed.
 
 Protect `main/.env` and the SQLite file like the credentials they are.
@@ -108,6 +140,10 @@ Protect `main/.env` and the SQLite file like the credentials they are.
 - [ ] `AGENT_REF` pinned to a release tag
 - [ ] Every server shows signed commands (no legacy warning on its page)
 - [ ] `[shell] enabled = false` unless you really need it
+- [ ] Every Admin has two-factor on (or signs in through SSO with the provider's MFA)
+- [ ] A local superuser kept for break-glass, with a strong password and 2FA
+- [ ] API tokens: read-only where possible, with an expiry
+- [ ] `WATCHDOG_URL` set, and backups (plus Litestream) on
 - [ ] Telegram or webhook notifications configured and tested
 - [ ] Regular backups of the SQLite file **and** `main/.env`
 - [ ] `make check` passes (Django's production deployment audit)

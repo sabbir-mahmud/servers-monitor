@@ -9,7 +9,7 @@
 x-app: &app
   build: { context: ., dockerfile: main/Dockerfile }
   env_file: main/.env
-  volumes: [data:/data]
+  volumes: ["data:/data"]
   restart: unless-stopped
 
 services:
@@ -29,6 +29,20 @@ services:
     # Exactly one: receives heartbeats/results, retries queued jobs, offline sweep, pruning.
     command: python manage.py relay
     depends_on: { web: { condition: service_healthy } }  # web runs the migrations
+    mem_limit: 128m
+
+  litestream:
+    # Optional continuous off-site backups: docker compose --profile backup up -d
+    # Set LITESTREAM_* in main/.env (see deploy/litestream.yml).
+    image: litestream/litestream:0.3.13
+    profiles: ["backup"]
+    command: replicate -config /etc/litestream.yml
+    env_file: main/.env
+    volumes:
+      - data:/data
+      - ./deploy/litestream.yml:/etc/litestream.yml:ro
+    depends_on: { web: { condition: service_healthy } }
+    restart: unless-stopped
     mem_limit: 128m
 
 volumes:

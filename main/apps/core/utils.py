@@ -21,3 +21,11 @@ def safe_next(request, fallback: str) -> str:
     ):
         return candidate
     return fallback
+
+
+def url_is_safe(request, url: str) -> bool:
+    from django.utils.http import url_has_allowed_host_and_scheme
+
+    return url_has_allowed_host_and_scheme(
+        url, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    )

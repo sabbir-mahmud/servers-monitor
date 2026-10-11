@@ -1,0 +1,12 @@
+# Runs a verified upgrade requested from the dashboard. smctl refuses unless remote upgrades
+# are on in agent.toml (root-owned), the ref is a release tag of the repository recorded at
+# install, and every downloaded file matches the dashboard's checksums.
+[Unit]
+Description=Server Monitor agent upgrade (requested from the dashboard)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env python3 /usr/local/bin/smctl upgrade --from-request
+TimeoutStartSec=1200

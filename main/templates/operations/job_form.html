@@ -18,7 +18,9 @@
       <div data-arg="command"><label class="form-label" for="id_command">Command</label>{{ form.command }}<div class="form-text">{{ form.command.help_text }}</div></div>
       <div><label class="form-label" for="id_note">Note <span class="muted fw-normal">· optional, shown in the audit log</span></label>{{ form.note }}</div>
       <button class="btn btn-primary w-100">{% icon "play" %} Queue job</button>
-    </div></div></div>
+    </div></div>
+    {% include "operations/_rollout.html" %}
+    </div>
     <div class="col-12 col-lg-7 col-xxl-8"><div class="card"><div class="card-header">{% icon "server" 17 %} Servers
       <div class="card-actions">
         <div class="segmented"><button type="button" data-select-all="1">Select all</button><button type="button" data-select-all="0">None</button></div>

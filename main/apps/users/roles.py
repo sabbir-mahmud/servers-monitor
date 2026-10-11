@@ -4,8 +4,9 @@ way to change what a role can do. `sync_roles` runs after every migrate.
 
 Viewer   — read everything except the audit log.
 Operator — Viewer + run allow-listed actions, cancel commands, acknowledge alerts,
-           edit/pause/re-check application monitors, schedule maintenance windows.
-Admin    — Operator + manage servers/tokens, monitors, notification channels and users
+           edit/pause/re-check application monitors, schedule maintenance windows,
+           post status-page incidents.
+Admin    — Operator + manage servers/tokens, monitors, status pages, notification channels and users
            (invite, roles, deactivate, reset passwords), free-form shell, audit log.
 """
 
@@ -23,6 +24,8 @@ VIEW = [
     "alerts.view_alert",
     "monitors.view_monitor",
     "alerts.view_maintenancewindow",
+    "status.view_statuspage",
+    "operations.view_schedule",
 ]
 OPERATE = [
     "operations.add_job",
@@ -32,6 +35,8 @@ OPERATE = [
     "alerts.add_maintenancewindow",
     "alerts.change_maintenancewindow",
     "alerts.delete_maintenancewindow",
+    "status.add_statusincident",
+    "status.change_statusincident",
 ]
 ADMINISTER = [
     "fleet.add_server",
@@ -46,7 +51,13 @@ ADMINISTER = [
     "alerts.delete_channel",
     "monitors.add_monitor",
     "monitors.delete_monitor",
+    "status.add_statuspage",
+    "status.change_statuspage",
+    "status.delete_statuspage",
     "operations.run_shell",
+    "operations.add_schedule",
+    "operations.change_schedule",
+    "operations.delete_schedule",
     "audit.view_auditlog",
     "users.view_user",
     "users.add_user",

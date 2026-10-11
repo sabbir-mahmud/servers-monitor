@@ -379,3 +379,16 @@ def test_dashboard_and_agent_signing_interoperate(
     from_agent = sma.sign({"t": "ack", "id": str(job.commands.get().pk)}, key)
     assert signing.verify_from_server(keyed, from_agent)  # dashboard accepts the agent's
     assert not signing.verify_from_server(keyed, {**from_agent, "id": "other"})
+
+
+def test_real_agent_report_passes_the_dashboard_schema(tmp_path):
+    """The agent's actual report (this machine's processes etc.) survives clean_report."""
+    from apps.agent_api.schema import clean_report
+
+    sma = _agent_module()
+    conf = tmp_path / "agent.toml"
+    conf.write_text('[main]\nredis_url = "rediss://sm-1:tok@relay.test:6379"\n')
+    raw = sma.Collector(sma.load_config(conf)).report()
+    clean = clean_report(raw)
+    assert clean["inventory"]["processes"]["count"] == raw["inventory"]["processes"]["count"] > 0
+    assert clean["capabilities"]["features"] == sma.FEATURES

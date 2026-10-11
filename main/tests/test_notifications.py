@@ -37,10 +37,10 @@ class Outbox:
     def __init__(self):
         self.sent, self.fail = [], False
 
-    def __call__(self, channel, text_html, text_plain):
+    def __call__(self, channel, message, *_):
         if self.fail:
             raise delivery.SendError("HTTP 502")
-        self.sent.append((channel.name, text_plain))
+        self.sent.append((channel.name, message.plain))
 
 
 @pytest.fixture

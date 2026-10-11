@@ -2,17 +2,27 @@ from django.conf import settings
 
 # Pages that use the sign-in layout even for a signed-in visitor (opening an invite or a
 # reset link while logged in must not render an empty dashboard).
-AUTH_PAGES = {"login", "password_forgot", "password_reset_confirm", "accept_invite", "signup"}
+AUTH_PAGES = {
+    "login",
+    "login_verify",
+    "password_forgot",
+    "password_reset_confirm",
+    "accept_invite",
+    "signup",
+}
 
 
 def site(request):
     match = getattr(request, "resolver_match", None)
     ctx = {
         "SITE_NAME": settings.SITE_NAME,
+        "APP_VERSION": settings.APP_VERSION,
         "TIME_ZONE_NAME": settings.TIME_ZONE,
         "AUTH_PAGE": bool(match and match.url_name in AUTH_PAGES and not match.namespace),
         "INVITATION_DAYS": settings.INVITATION_DAYS,
         "PASSWORD_RESET_HOURS": settings.PASSWORD_RESET_TIMEOUT // 3600,
+        "SSO_ENABLED": settings.OIDC_ENABLED,
+        "SSO_NAME": settings.OIDC_PROVIDER_NAME,
     }
     user = getattr(request, "user", None)
     # Full page loads only: HTMX partial refreshes never render the sidebar.
@@ -62,6 +72,8 @@ def _nav_counts(user) -> dict:
         from apps.users.models import User
 
         counts["pending_users"] = User.objects.filter(pending_approval=True).count()
+        # A dot on System when nobody would be told the dashboard died.
+        counts["system_problem"] = not settings.WATCHDOG_URL
     if user.has_perm("alerts.view_maintenancewindow"):
         from django.utils import timezone
 

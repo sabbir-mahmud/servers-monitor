@@ -4,6 +4,7 @@ server-rendered SVG sparklines that HTMX can swap without a chart library."""
 import json
 
 from django import template
+from django.template.defaultfilters import pluralize
 from django.utils import timezone
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
@@ -27,9 +28,11 @@ COMMAND_BADGES = {
     "lost": ("serious", "?", "Lost"),
     "expired": ("muted", "⌛", "Expired"),
     "cancelled": ("muted", "–", "Cancelled"),
+    "waiting": ("muted", "⋯", "Waiting"),
 }
 MONITOR_BADGES = {
     "up": ("good", "●", "Up"),
+    "degraded": ("warning", "◐", "Slow"),
     "down": ("critical", "✕", "Down"),
     "pending": ("muted", "○", "Checking…"),
     "paused": ("muted", "⏸", "Paused"),
@@ -70,6 +73,7 @@ ICONS = {
     "disk": '<path d="M22 12H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><path d="M6 16h.01M10 16h.01"/>',
     "activity": '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
     "clock": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    "plug": '<path d="M9 2v6M15 2v6"/><path d="M6 8h12v3a6 6 0 0 1-12 0V8z"/><path d="M12 17v5"/>',
     "network": '<path d="m3 16 4 4 4-4M7 20V4M21 8l-4-4-4 4M17 4v16"/>',
     "arrow-left": '<path d="m12 19-7-7 7-7M19 12H5"/>',
     "copy": '<rect width="13" height="13" x="9" y="9" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
@@ -85,6 +89,7 @@ ICONS = {
     "box": '<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/>',
     "chevron": '<path d="m9 18 6-6-6-6"/>',
     "chart": '<path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 6-6"/>',
+    "download": '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>',
     "eye": '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     "eye-off": '<path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.53 13.53 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><path d="m2 2 20 20"/>',
     "lock": '<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
@@ -346,3 +351,31 @@ def sparkline(points, start, end, label, ymax=100, unit="%"):
         top=_fmt(ymax, unit),
         mid=_fmt(ymax / 2, unit),
     )
+
+
+@register.filter
+def fills_in(full_at):
+    """Server.disk_full_at -> "fills in ~6 days" (only within 30 days; otherwise "")."""
+    if not full_at:
+        return ""
+    seconds = (full_at - timezone.now()).total_seconds()
+    if seconds > 30 * 86400:
+        return ""
+    if seconds < 86400:
+        return f"fills in ~{max(int(seconds // 3600), 0)} h"
+    days = round(seconds / 86400)
+    return f"fills in ~{days} day{pluralize(days)}"
+
+
+KIND_ICONS = {"http": "globe", "tcp": "plug", "ping": "activity", "dns": "layers",
+              "domain": "globe", "heartbeat": "clock"}  # fmt: skip
+
+
+@register.filter
+def kind_icon(kind):
+    return KIND_ICONS.get(kind, "globe")
+
+
+@register.filter
+def tone_of(status):
+    return {"up": "good", "degraded": "warning", "down": "critical"}.get(status, "muted")

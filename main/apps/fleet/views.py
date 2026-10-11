@@ -207,3 +207,35 @@ class ServerRotateTokenView(StaffViewMixin, View):
             request, "Credentials rotated. The old ones no longer work: update the agent."
         )
         return redirect("fleet:server_enroll", pk=server.pk)
+
+
+class AgentUpgradeView(StaffViewMixin, View):
+    """Upgrade one server's agent, or every outdated one in rolling batches (no SSH)."""
+
+    permission_required = "fleet.change_server"
+    http_method_names = ["post"]
+
+    def post(self, request, pk=None):
+        from apps.operations import services as ops
+
+        if pk is not None:
+            targets, batch = [get_object_or_404(Server, pk=pk)], 0
+        else:
+            targets = [s for s in Server.objects.filter(is_enabled=True) if s.agent_outdated]
+            try:
+                batch = max(1, min(50, int(request.POST.get("batch_size") or 2)))
+            except ValueError:
+                batch = 2
+        try:
+            job, skipped = ops.upgrade_agents(request, targets, batch)
+        except ops.JobError as exc:
+            messages.error(request, str(exc))
+            if pk is not None:
+                return redirect("fleet:server_detail", pk=pk)
+            return redirect("system" if request.POST.get("back") == "system" else "fleet:dashboard")
+        for server, reason in skipped:
+            messages.warning(request, f"Skipped {server.name}: {reason}")
+        messages.success(
+            request, f"Upgrading {job.commands.count()} agent(s) to {job.args['ref']}."
+        )
+        return redirect("operations:job_detail", pk=job.pk)

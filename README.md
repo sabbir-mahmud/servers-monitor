@@ -5,8 +5,8 @@
 **Monitor, operate and deploy to all your servers from one calm dashboard,
 without opening a single inbound port.**
 
-Live health · services and versions · application uptime · one-click deploys across the fleet ·
-Telegram alerts · maintenance windows · teams and roles · full audit trail
+Live health · containers and processes · uptime from many places · status pages ·
+rolling and scheduled deploys · alerts everywhere · SSO, 2FA and an API · full audit trail
 
 [Quick start](#quick-start) · [Features](#features) · [How it works](#how-it-works) ·
 [Docs](#documentation) · [Security](docs/security.md) · [Contributing](CONTRIBUTING.md)
@@ -30,8 +30,8 @@ internet, or every server needs SSH keys, VPNs and open ports. Server Monitor ne
 - **The server decides what it allows.** Each agent has a local allowlist of services, logs
   and deploy actions. The dashboard can only *ask*; a compromised dashboard can't turn into
   root on your fleet.
-- **Lightweight by design.** Django + SQLite + one small background process. Five runtime
-  dependencies on the dashboard; the agent is one Python file plus `psutil`.
+- **Lightweight by design.** Django + SQLite + one small background process, and a handful of
+  runtime dependencies on the dashboard; the agent is one Python file plus `psutil`.
 - **Secure by default.** Signed commands, verified installs, invite-only accounts, encrypted
   secrets, SSRF guards and an append-only audit log. See the [security model](docs/security.md).
 
@@ -39,15 +39,18 @@ internet, or every server needs SSH keys, VPNs and open ports. Server Monitor ne
 
 | | |
 |---|---|
-| **Fleet dashboard** | CPU, memory, disk, load, network and uptime for every server, refreshed live. Filter by environment, group or health. |
-| **Server pages** | Ring gauges, services with state and version (systemd, Docker, pm2, process, HTTP), disks, 1h–7d history charts. |
-| **One-click operations** | Run allowlisted actions (deploy, update, clear cache…) on one server or many at once and watch the output stream in. Restart services, tail logs, optional audited shell. |
-| **Application monitors** | HTTP(S) health checks with expected status codes, keyword matching, 24-hour uptime bars, response-time charts, incidents and TLS-certificate expiry. |
-| **Alerts** | Offline, CPU, memory, disk, service down, app down and certificate expiring. Deduplicated, with hysteresis so nothing flaps. |
-| **Notifications** | Telegram and webhooks (Slack, Discord, Teams, Mattermost) with routing rules, reminders until acknowledged, retries and a delivery log. |
+| **Fleet dashboard** | CPU, memory, disk, load, network and uptime for every server, refreshed live, with "disk fills in ~6 days" forecasts per mount. Filter by environment, group or health. |
+| **Server pages** | Ring gauges, services with state and version (systemd, Docker, pm2, process, HTTP), containers, top processes, temperatures and GPUs, disks, 1 hour to 90 day charts. |
+| **One-click operations** | Run allowlisted actions on one server or many, **in rolling batches with health gates**, or **on a cron schedule**, and watch the output stream in. Restart services, tail or **follow logs live** (files and systemd journals), optional audited shell. |
+| **Application monitors** | HTTP(S) (POST, headers, keywords, slow thresholds), TCP, ping, DNS and domain-expiry checks, **from the dashboard and from your own servers** with a quorum, plus **Heartbeat** monitors for cron jobs and backups. Uptime bars, response-time charts, incidents, certificate expiry. |
+| **Status pages** | Public pages with uptime history and incident updates, published as static files to GitHub Pages or Cloudflare Pages. |
+| **Alerts** | Offline, CPU, memory, disk, disk forecast, service, container, temperature, app down, certificate and domain expiring. Deduplicated, with hysteresis so nothing flaps. |
+| **Notifications** | Telegram, email, Slack, Discord, ntfy, Gotify, Pushover, PagerDuty, webhooks and **browser push**, with routing rules, reminders until acknowledged, retries and a delivery log. |
 | **Maintenance windows** | Schedule a window or press **Mute** on any server or app: alerts are still recorded, nobody gets paged. |
-| **Teams** | Invite-only accounts with Viewer / Operator / Admin roles, optional sign-up with approval, self-service or admin password resets. |
-| **`smctl`** | One command on each server to detect services, add deploy actions, manage sudo rules, diagnose problems and upgrade. |
+| **Teams** | Viewer / Operator / Admin roles, invitations or **single sign-on (OIDC)** with group-to-role mapping, **two-factor sign-in**, self-service or admin password resets. |
+| **Integrations** | A token-authenticated **REST API** and **Prometheus `/metrics`**; an installable web app. |
+| **Trust the system** | A watchdog for the dashboard itself, daily backups (plus optional Litestream), a Redis usage meter and a System page. |
+| **`smctl`** | One command on each server to detect services, add deploy actions, manage sudo rules, wrap cron jobs, diagnose problems and upgrade. |
 
 ## How it works
 
@@ -128,7 +131,8 @@ Full reference: [docs/agent.md](docs/agent.md).
 |---|---|
 | [Deployment](docs/deployment.md) | Docker, systemd and Raspberry Pi installs, HTTPS options, backups, upgrades, Redis cost |
 | [Agent & smctl](docs/agent.md) | Installing on servers, the allowlist, every `smctl` command, upgrades, troubleshooting |
-| [Configuration](docs/configuration.md) | Every environment variable with its default |
+| [Configuration](docs/configuration.md) | Every environment variable with its default, including single sign-on |
+| [REST API](docs/api.md) | Tokens, endpoints, running actions from CI, Prometheus scraping |
 | [Architecture](docs/architecture.md) | The relay protocol, job lifecycle, health model, alerting and notifications |
 | [Security model](docs/security.md) | Threat model, signed commands, verified installs, hardening checklist |
 

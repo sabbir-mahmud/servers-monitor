@@ -117,9 +117,58 @@ def evaluate_report(server: Server, back_online: bool = False) -> None:
             )
         elif svc.get("state") == "up":
             _resolve(open_alerts, AlertKind.SERVICE, name)
+    _inventory_alerts(server, open_alerts)
     # A service removed from the agent config can no longer recover; close its alert.
     for kind, subject in list(open_alerts):
         if kind == AlertKind.SERVICE and subject not in reported:
+            _resolve(open_alerts, kind, subject)
+
+
+STOPPED_STATES = {"exited", "dead", "restarting"}
+
+
+def _inventory_alerts(server, open_alerts) -> None:
+    inv = server.inventory or {}
+    # Containers: alert when one that was running stops (an intentionally stopped container
+    # was never seen running, so it stays quiet). Removing it (docker rm) resolves the alert.
+    before = {
+        c.get("name"): c.get("state")
+        for c in (getattr(server, "previous_inventory", None) or {}).get("containers", [])
+    }
+    now_states = {c.get("name"): c.get("state") for c in inv.get("containers", [])}
+    for name, state in now_states.items():
+        if state in STOPPED_STATES and (
+            before.get(name) == "running" or (AlertKind.CONTAINER, name) in open_alerts
+        ):
+            _open(server, open_alerts, AlertKind.CONTAINER, f"Container {name} is {state} on {server.name}",
+                  Severity.CRITICAL, subject=name)  # fmt: skip
+        elif state == "running":
+            _resolve(open_alerts, AlertKind.CONTAINER, name)
+    for kind, subject in list(open_alerts):
+        if kind == AlertKind.CONTAINER and subject not in now_states and "containers" in inv:
+            _resolve(open_alerts, kind, subject)
+    # Temperatures: the sensor's own high/critical marks.
+    seen = set()
+    for t in inv.get("temps", []):
+        sensor, current, high, critical = (
+            t.get("sensor"),
+            t.get("current"),
+            t.get("high"),
+            t.get("critical"),
+        )
+        if not sensor or current is None:
+            continue
+        seen.add(sensor)
+        if critical and current >= critical:
+            _open(server, open_alerts, AlertKind.TEMPERATURE, f"{sensor} at {current:.0f}°C on {server.name} "
+                  f"(critical {critical:.0f}°C)", Severity.CRITICAL, subject=sensor, value=current)  # fmt: skip
+        elif high and current >= high:
+            _open(server, open_alerts, AlertKind.TEMPERATURE, f"{sensor} at {current:.0f}°C on {server.name} "
+                  f"(high {high:.0f}°C)", Severity.WARNING, subject=sensor, value=current)  # fmt: skip
+        elif not high or current < high - 3:  # a few degrees of hysteresis
+            _resolve(open_alerts, AlertKind.TEMPERATURE, sensor)
+    for kind, subject in list(open_alerts):
+        if kind == AlertKind.TEMPERATURE and subject not in seen:
             _resolve(open_alerts, kind, subject)
 
 

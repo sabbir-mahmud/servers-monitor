@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}System{% endblock %}
+{% block content %}
+<div class="page-head"><div>
+  <h1 class="page-title">System</h1>
+  <p class="page-sub">The health of this dashboard itself: is it watched, backed up, affordable and up to date? Version {{ APP_VERSION }}.</p>
+</div></div>
+
+<div class="sys-grid mb-3">
+  <div class="card sys-tile"><div class="card-body">
+    <div class="stat-label">{% icon "activity" 15 %} Relay process</div>
+    {% if relay_alive %}<div class="sys-state text-good">{% icon "check" 18 %} Running</div><div class="stat-hint">last seen {{ relay_last_alive|ago }}</div>
+    {% else %}<div class="sys-state text-critical">{% icon "alert" 18 %} Not running</div><div class="stat-hint">Agents' messages wait in Redis until it starts.</div>{% endif %}
+  </div></div>
+
+  <div class="card sys-tile"><div class="card-body">
+    <div class="stat-label">{% icon "shield" 15 %} Watchdog</div>
+    {% if not watchdog_configured %}<div class="sys-state text-critical">{% icon "alert" 18 %} Not set up</div>
+      <div class="stat-hint">If this machine stops, nobody is told. Create a free check at <a href="https://healthchecks.io" rel="noopener" target="_blank">healthchecks.io</a> and set <code>WATCHDOG_URL</code>.</div>
+    {% elif watchdog.ok %}<div class="sys-state text-good">{% icon "check" 18 %} Pinging</div><div class="stat-hint">last ping {{ watchdog.at|slice:":19"|cut:"T" }} · {{ watchdog.ms }} ms</div>
+    {% elif watchdog %}<div class="sys-state text-critical">{% icon "alert" 18 %} Failing</div><div class="stat-hint">{{ watchdog.error }}</div>
+    {% else %}<div class="sys-state muted">Waiting for the first ping</div>{% endif %}
+  </div></div>
+
+  <div class="card sys-tile"><div class="card-body">
+    <div class="stat-label">{% icon "disk" 15 %} Backups</div>
+    {% if backup.ok %}<div class="sys-state {% if backup.stale %}text-critical{% else %}text-good{% endif %}">{% icon "check" 18 %} {{ backup.count }} snapshot{{ backup.count|pluralize }}</div>
+      <div class="stat-hint">latest {{ backup.at|slice:":16"|cut:"T" }} · {{ backup.size|filesizeformat }}{% if backup.stale %} · <b>over 36 h old</b>{% endif %}</div>
+    {% elif backup %}<div class="sys-state text-critical">{% icon "alert" 18 %} Failing</div><div class="stat-hint">{{ backup.error }}</div>
+    {% else %}<div class="sys-state muted">No snapshot yet</div><div class="stat-hint">The relay process takes one daily.</div>{% endif %}
+  </div></div>
+
+  <div class="card sys-tile"><div class="card-body">
+    <div class="stat-label">{% icon "layers" 15 %} Redis usage this month</div>
+    {% if usage %}<div class="sys-state {% if usage.warn %}text-critical{% endif %}">{{ usage.projected|floatformat:"0g" }} <small class="muted fw-normal">projected</small></div>
+      <div class="stat-hint">{{ usage.so_far|floatformat:"0g" }} so far · {% if usage.cost %}≈ ${{ usage.cost|floatformat:2 }}{% else %}within the free tier{% endif %} ({{ usage.free|floatformat:"0g" }} free)</div>
+    {% else %}<div class="sys-state muted">No data yet</div>{% endif %}
+  </div></div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-xl-6">
+    <div class="card h-100"><div class="card-header">{% icon "server" 17 %} Agents</div><div class="card-body">
+      <dl class="kv mb-3"><dt>Servers</dt><dd>{{ server_count }}</dd>
+        <dt>Outdated agents</dt><dd>{% if outdated %}<span class="text-critical fw-semibold">{{ outdated }}</span> behind {{ APP_VERSION }}{% else %}none{% endif %}</dd>
+        <dt>Unsigned (legacy)</dt><dd>{% if unsigned %}<span class="text-critical fw-semibold">{{ unsigned }}</span>: rotate their credentials{% else %}none{% endif %}</dd></dl>
+      {% for v in versions %}<span class="chip me-1">v{{ v.agent_version }} · {{ v.n }}</span>{% empty %}<span class="muted small">No agent has reported yet.</span>{% endfor %}
+      {% if outdated %}
+      <form method="post" action="{% url 'fleet:upgrade_all' %}" class="d-flex flex-wrap align-items-center gap-2 mt-3" data-confirm="Upgrade every outdated agent, in batches? A failed batch stops the rollout.">{% csrf_token %}
+        <input type="hidden" name="back" value="system">
+        <button class="btn btn-sm btn-primary">{% icon "download" %} Upgrade all outdated</button>
+        <label class="small muted">in batches of <input class="form-control form-control-sm d-inline-block" style="width:4.5rem" type="number" name="batch_size" value="2" min="1" max="50"></label>
+      </form>
+      <div class="form-text">Servers need <code>sudo smctl remote-upgrade on</code> (and <code>AGENT_REF</code> pinned to a release tag); the others are listed as skipped. Otherwise use the upgrade command on each server's page.</div>
+      {% endif %}
+    </div></div>
+  </div>
+  <div class="col-12 col-xl-6">
+    <div class="card h-100"><div class="card-header">{% icon "key" 17 %} Configuration</div><div class="card-body">
+      <dl class="kv">{% for label, value in settings_summary %}<dt>{{ label }}</dt><dd>{{ value }}</dd>{% endfor %}
+        <dt>Database</dt><dd>{{ db_size|filesizeformat }}</dd>
+        <dt>Last downtime</dt><dd>{% if downtime %}{{ downtime.minutes }} min, ended {{ downtime.to|slice:":16"|cut:"T" }}{% else %}none recorded{% endif %}</dd></dl>
+    </div></div>
+  </div>
+</div>
+{% endblock %}

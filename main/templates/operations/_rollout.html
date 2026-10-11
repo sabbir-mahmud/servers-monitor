@@ -1,0 +1,15 @@
+{% load monitor %}
+<div class="card mt-3"><div class="card-header">{% icon "layers" 17 %} Rollout</div><div class="card-body form-section" data-rollout>
+  <div><div class="form-check">{{ form.rolling }} <label class="form-check-label fw-medium" for="id_rolling">{{ form.rolling.label }}</label></div>
+    <div class="form-text">{{ form.rolling.help_text }}</div></div>
+  <div data-rolling-only>
+    <div class="row g-2"><div class="col"><label class="form-label" for="id_batch_size">{{ form.batch_size.label }}</label>{{ form.batch_size }}</div>
+      <div class="col"><label class="form-label" for="id_pause_seconds">Pause (s)</label>{{ form.pause_seconds }}</div></div>
+    <div class="form-check mt-3">{{ form.stop_on_failure }} <label class="form-check-label" for="id_stop_on_failure">{{ form.stop_on_failure.label }}</label></div>
+    {% if form.health_gates.field.queryset %}
+    <div class="mt-3"><span class="form-label d-block">{{ form.health_gates.label }}</span>
+      <div class="d-flex flex-wrap gap-1">{% for cb in form.health_gates %}<label class="check-tile py-2">{{ cb.tag }} <span class="check-tile-name">{{ cb.choice_label }}</span></label>{% endfor %}</div>
+      <div class="form-text">{{ form.health_gates.help_text }}</div></div>
+    {% endif %}
+  </div>
+</div></div>

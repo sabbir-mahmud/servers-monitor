@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Status pages{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Status pages</h1>
+    <p class="page-sub">Public pages showing your applications' status and incidents. They're published as static files (GitHub Pages or Cloudflare Pages), so this dashboard stays private.</p>
+  </div>
+  {% if perms.status.add_statuspage %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'status:create' %}">{% icon "plus" %} New status page</a></div>{% endif %}
+</div>
+
+{% if pages %}
+<div class="card"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
+  <thead><tr><th>Page</th><th>Components</th><th>Incidents</th><th>Published</th></tr></thead>
+  <tbody>
+  {% for p in pages %}
+    <tr>
+      <td><a class="row-link" href="{% url 'status:detail' p.pk %}">{{ p.name }}</a>
+        <div class="row-sub">{% if p.public_url %}{{ p.public_url }}{% else %}{{ p.title }}{% endif %}</div></td>
+      <td>{{ p.entries.all|length }}</td>
+      <td>{% with n=p.incidents.all|length %}{{ n }}{% endwith %}</td>
+      <td>{% if p.publish_kind == "none" %}<span class="muted">manual (download)</span>
+        {% elif p.last_error %}<span class="text-critical" title="{{ p.last_error }}">{% icon "alert" 14 %} failing</span>
+        {% elif p.last_published_at %}{{ p.last_published_at|ago }}{% else %}<span class="muted">pending</span>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+{% else %}
+<div class="card"><div class="card-body empty-state">
+  {% icon "globe" 28 %}
+  <h2>No status pages yet</h2>
+  <p>Pick which applications to show, give them public names, and publish. Visitors see up/down, daily uptime and your incident updates; never URLs, servers or error messages.</p>
+  {% if perms.status.add_statuspage %}<a class="btn btn-primary" href="{% url 'status:create' %}">{% icon "plus" %} New status page</a>{% endif %}
+</div></div>
+{% endif %}
+{% endblock %}

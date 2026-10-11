@@ -91,3 +91,29 @@ def test_relay_uses_the_servers_own_keys(tmp_path):
     assert srv.lists == {"sm:a:abc:in": ['{"t":"hb"}']}
     srv.lists["sm:a:abc:cmd"] = ['{"t":"cfg","report_interval":60}']
     assert relay.receive(1) == {"t": "cfg", "report_interval": 60}
+
+
+def test_job_ping_sends_one_signed_message(tmp_path):
+    import json
+
+    srv = MiniRedis()
+    srv.start()
+    key = "ab" * 32
+    conf = tmp_path / "agent.toml"
+    conf.write_text(
+        f'[main]\nredis_url = "redis://sm-7:pw@127.0.0.1:{srv.port}?key={key}"\nallow_insecure = true\n'
+    )
+    assert sma.main(["-c", str(conf), "--job-ping", "nightly-backup", "--job-status", "fail",
+                     "--job-exit-code", "3"]) == 0  # fmt: skip
+    (raw,) = srv.lists["sm:a:7:in"]
+    message = json.loads(raw)
+    assert {k: message[k] for k in ("t", "name", "status", "exit")} == {
+        "t": "ping", "name": "nightly-backup", "status": "fail", "exit": 3,
+    }  # fmt: skip
+    assert sma.verify(message, bytes.fromhex(key))
+
+
+def test_job_ping_rejects_bad_names(tmp_path):
+    conf = tmp_path / "agent.toml"
+    conf.write_text('[main]\nredis_url = "redis://sm-7:pw@127.0.0.1:1"\nallow_insecure = true\n')
+    assert sma.main(["-c", str(conf), "--job-ping", "Bad Name;rm"]) == 2

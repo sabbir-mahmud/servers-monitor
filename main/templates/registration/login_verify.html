@@ -1,0 +1,23 @@
+{% extends "registration/auth_base.html" %}
+{% load monitor %}
+{% block auth_title %}Two-factor check{% endblock %}
+{% block auth_form %}
+      <div class="login-heading">
+        <h1>One more step</h1>
+        <p>Enter the 6-digit code from your authenticator app, {{ pending_user.first_name|default:pending_user.get_username }}.</p>
+      </div>
+      <form method="post" class="form-section" data-loading-form novalidate>{% csrf_token %}
+        {% if error %}<div class="alert alert-danger mb-0" role="alert">{% icon "alert" %}<div>{{ error }}</div></div>{% endif %}
+        <div>
+          <label class="form-label" for="id_code">Authentication code</label>
+          <div class="input-icon">{% icon "shield" 16 %}
+            <input class="form-control form-control-lg otp-input" id="id_code" name="code" inputmode="numeric" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" required autofocus placeholder="123 456" maxlength="20">
+          </div>
+          <div class="form-text">Lost your phone? Enter one of your recovery codes instead.</div>
+        </div>
+        <button class="btn btn-primary btn-lg w-100 login-submit">
+          <span class="spinner" aria-hidden="true"></span><span class="login-submit-label">Verify</span>
+        </button>
+      </form>
+      <p class="login-note"><a href="{% url 'login' %}">Start over</a></p>
+{% endblock %}

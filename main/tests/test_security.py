@@ -340,3 +340,74 @@ def test_4_install_command_pins_checksums_and_keeps_secrets_out(client, admin_us
     command = page.split('id="install">')[1].split("</pre>")[0]
     assert "sha256sum -c" in command and agentdist.sums()["install"] in command
     assert "SM_SUMS=agent=" in command and "rediss://" not in command  # credential not in argv
+
+
+def test_netguard_refuses_internal_addresses_before_connecting(settings, monkeypatch):
+    """No connection attempt at all, so open and closed internal ports look the same."""
+    import socket
+
+    from apps.core import netguard
+
+    settings.MONITOR_ALLOW_PRIVATE_TARGETS = False
+    monkeypatch.setattr(socket, "create_connection", lambda *a, **k: pytest.fail("connected"))
+    for host in ("127.0.0.1", "10.0.0.8", "169.254.169.254", "localhost"):
+        with pytest.raises(netguard.BlockedAddress):
+            netguard.create_connection((host, 6379), timeout=1)
+
+
+# Phase 3–4 surfaces: each one an attack that must fail ---------------------------------
+
+
+def test_api_ignores_the_browser_session(client, admin_user, agent):
+    """A malicious page can make a signed-in browser POST to the dashboard (CSRF). The API
+    is CSRF-exempt, so it must never accept the session cookie as a credential."""
+    agent.heartbeat()
+    client.force_login(admin_user)
+    r = client.post(reverse("api_jobs"), '{"action": "deploy_api", "servers": ["web-01"]}',
+                    content_type="application/json")  # fmt: skip
+    assert r.status_code == 401
+    from apps.operations.models import Job
+
+    assert not Job.objects.exists()
+
+
+def test_api_token_cannot_reach_browser_only_shell(client, admin_user, agent):
+    from apps.api.models import ApiToken, Scope
+
+    agent.heartbeat(report(capabilities={"shell": True, "actions": [], "logs": []}))
+    raw = ApiToken.issue(admin_user, "leaked", Scope.OPERATE)[1]
+    r = client.post(reverse("api_jobs"), '{"action": "shell", "args": {"command": "id"}, "servers": ["web-01"]}',
+                    content_type="application/json", HTTP_AUTHORIZATION=f"Bearer {raw}")  # fmt: skip
+    assert r.status_code == 403
+
+
+def test_agent_cannot_write_probe_results_for_monitors_it_was_not_given(fake_relay):
+    from apps.monitors.models import Monitor, MonitorCheck
+
+    from .conftest import AgentClient, make_server
+
+    server = make_server("probe", signing_salt="ef" * 16)[0]
+    victim = Monitor.objects.create(name="payments", url="https://pay.example.com/")
+    AgentClient(server, fake_relay).heartbeat(report(
+        capabilities={"features": ["probes"]},
+        probe_results=[{"id": str(victim.pk), "ok": False, "error": "forged outage"}]))  # fmt: skip
+    assert not MonitorCheck.objects.filter(monitor=victim).exists()
+
+
+def test_sso_never_links_a_superuser_or_takes_over_by_unverified_email(settings, roles):
+    """A provider account with someone's email must not become them unless the provider
+    verified it, and never a superuser (local break-glass only)."""
+    from apps.users.sso import SSOBackend
+
+    settings.OIDC_OP_TOKEN_ENDPOINT = settings.OIDC_OP_USER_ENDPOINT = "https://idp.example.com/x"
+    settings.OIDC_OP_JWKS_ENDPOINT = "https://idp.example.com/jwks"
+    settings.OIDC_RP_CLIENT_ID = settings.OIDC_RP_CLIENT_SECRET = "x"
+    settings.OIDC_DEFAULT_ROLE = "Viewer"
+    backend = SSOBackend()
+    claims = {"sub": "evil", "email": "owner@example.com", "groups": []}
+    assert not backend.verify_claims({**claims, "email_verified": False})
+    root = User.objects.create_superuser("root", "owner@example.com", "pw-1-not-used!")
+    from django.core.exceptions import SuspiciousOperation
+
+    with pytest.raises(SuspiciousOperation):
+        backend.update_user(root, {**claims, "email_verified": True})

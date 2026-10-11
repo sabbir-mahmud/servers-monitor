@@ -23,5 +23,8 @@ class UsernameOrEmailBackend(ModelBackend):
             User().set_password(password)
             return None
         if user.check_password(password) and self.user_can_authenticate(user):
+            if hasattr(user, "sso") and not user.is_superuser:
+                # Managed by the SSO provider: removing someone there must lock them out.
+                return None
             return user
         return None

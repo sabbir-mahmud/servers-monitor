@@ -38,6 +38,46 @@ def _pct(value, required=True):
     return _num(value, lo=0.0, hi=100.0, required=required)
 
 
+def _list(value, limit):
+    return [x for x in value[:limit] if isinstance(x, dict)] if isinstance(value, list) else []
+
+
+def clean_inventory(inv) -> dict:
+    """Containers, top processes, temperatures and GPUs (agent 2.2+). Bounded: a heartbeat
+    must stay small whatever the agent sends."""
+    if not isinstance(inv, dict) or not inv:
+        return {}
+    procs = inv.get("processes") if isinstance(inv.get("processes"), dict) else {}
+
+    def proc(p):
+        return {"pid": _num(p.get("pid"), lo=0, integer=True), "name": _str(p.get("name"), 60),
+                "user": _str(p.get("user"), 32), "cpu": _num(p.get("cpu"), lo=0, hi=100_000),
+                "rss": _num(p.get("rss"), lo=0, integer=True), "cmd": _str(p.get("cmd"), 120)}  # fmt: skip
+
+    return {
+        "containers": [
+            {"id": _str(c.get("id"), 12), "name": _str(c.get("name"), 80), "image": _str(c.get("image"), 120),
+             "state": _str(c.get("state"), 20), "cpu": _num(c.get("cpu"), lo=0, hi=100_000),
+             "memory": _num(c.get("memory"), lo=0, integer=True)}
+            for c in _list(inv.get("containers"), 50)
+        ],
+        "processes": {"cpu": [proc(p) for p in _list(procs.get("cpu"), 10)],
+                      "memory": [proc(p) for p in _list(procs.get("memory"), 10)],
+                      "count": _num(procs.get("count"), lo=0, integer=True)},
+        "temps": [
+            {"sensor": _str(t.get("sensor"), 60), "current": _num(t.get("current"), lo=-100, hi=300),
+             "high": _num(t.get("high"), lo=0, hi=300), "critical": _num(t.get("critical"), lo=0, hi=300)}
+            for t in _list(inv.get("temps"), 16) if t.get("sensor")
+        ],
+        "gpus": [
+            {"name": _str(g.get("name"), 60), "util": _pct(g.get("util"), required=False),
+             "mem_used": _num(g.get("mem_used"), lo=0), "mem_total": _num(g.get("mem_total"), lo=0),
+             "temp": _num(g.get("temp"), lo=-100, hi=300)}
+            for g in _list(inv.get("gpus"), 8)
+        ],
+    }  # fmt: skip
+
+
 def clean_report(data) -> dict:
     if not isinstance(data, dict):
         raise PayloadError("body must be a JSON object")
@@ -102,7 +142,15 @@ def clean_report(data) -> dict:
         "net_tx_bps": _num(metrics.get("net_tx_bps"), lo=0),
         "services": services,
         "disks": disks,
-        "capabilities": {"actions": actions, "logs": logs, "shell": bool(caps.get("shell"))},
+        "capabilities": {
+            "actions": actions,
+            "logs": logs,
+            "shell": bool(caps.get("shell")),
+            "features": [
+                _str(f, 32) for f in (caps.get("features") or [])[:32] if isinstance(f, str)
+            ],
+        },
+        "inventory": clean_inventory(data.get("inventory")),
     }
 
 

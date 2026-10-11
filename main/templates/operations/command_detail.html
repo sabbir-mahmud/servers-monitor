@@ -16,10 +16,16 @@
     {% if command.status == "pending" %}<span class="muted small fw-normal">Waiting for the agent's next poll…</span>{% endif %}
     {% if command.status == "expired" %}<span class="muted small fw-normal">No agent picked this up in time. Is the server online?</span>{% endif %}
     {% if command.status == "lost" %}<span class="muted small fw-normal">Delivered, but no result arrived before the timeout.</span>{% endif %}
-    <div class="card-actions"><a href="{% url 'operations:command_detail' command.pk %}" class="btn btn-sm btn-link">Open {% icon "chevron" %}</a></div>
+    <div class="card-actions">
+      {% if command.action == "tail_follow" and command.is_active and perms.operations.change_command %}
+        {% if command.stopping %}<span class="muted small fw-normal">Stopping…</span>{% else %}
+        <button class="btn btn-sm btn-outline-secondary" hx-post="{% url 'operations:command_stop' command.pk %}" hx-target="#cmd-{{ command.pk }}" hx-swap="outerHTML">{% icon "pause" %} Stop</button>{% endif %}
+      {% endif %}
+      <a href="{% url 'operations:command_detail' command.pk %}" class="btn btn-sm btn-link">Open {% icon "chevron" %}</a></div>
   </div>
   <div class="card-body">
     {% if command.output_truncated %}<div class="form-text mt-0 mb-2">Output truncated. Showing the last part.</div>{% endif %}
+    {% if command.action == "tail_follow" and command.status == "running" %}<div class="form-text mt-0 mb-2">{% icon "activity" 13 %} Following live for up to 10 minutes. This uses about one relay (Redis) command every 3 seconds, ~1,200 an hour.</div>{% endif %}
     <pre class="output">{{ command.output|default:"(no output yet)" }}</pre>
   </div>
 </div>

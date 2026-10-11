@@ -3,6 +3,7 @@ from django import forms
 from apps.fleet.models import Environment, Server
 from apps.monitors.models import Monitor
 
+from .channels import KINDS
 from .models import Channel, ChannelKind, MaintenanceWindow
 
 REPEAT_CHOICES = [
@@ -100,8 +101,36 @@ class ChannelForm(forms.ModelForm):
         for name in ("telegram_token", "webhook_url"):
             if name in self.fields:
                 self.fields[name].required = not editing
+        self.kind_spec = KINDS.get(self.kind)
+        if self.kind_spec:
+            for name in ("telegram_token", "telegram_chat_id", "webhook_url"):
+                self.fields.pop(name, None)
+            saved = self.instance.settings if editing else {}
+            for setting in self.kind_spec.settings:
+                keep = setting.secret and editing and saved.get(setting.name)
+                field = forms.CharField(
+                    label=setting.label,
+                    # Hidden settings are filled by the page's script: one clear error below.
+                    required=setting.required and not keep and not setting.hidden,
+                    max_length=500,
+                    help_text=setting.help
+                    + (" Leave blank to keep the saved value." if keep else ""),
+                    widget=forms.HiddenInput()
+                    if setting.hidden
+                    else forms.PasswordInput(render_value=False)
+                    if setting.secret
+                    else forms.TextInput(),
+                    initial=None if setting.secret else saved.get(setting.name, ""),
+                )
+                if setting.placeholder:
+                    field.widget.attrs["placeholder"] = setting.placeholder
+                self.fields[f"cfg_{setting.name}"] = field
         self.fields["min_severity"].help_text = "Warning includes critical alerts too."
         _style(self)
+
+    @property
+    def config_fields(self):
+        return [self[name] for name in self.fields if name.startswith("cfg_")]
 
     def clean(self):
         data = super().clean()
@@ -122,11 +151,55 @@ class ChannelForm(forms.ModelForm):
                 self.add_error("webhook_url", "Use the https:// URL your chat service gave you.")
             elif problem := check_url_host(data["webhook_url"]):
                 self.add_error("webhook_url", problem)
+        if self.kind_spec:
+            self._clean_config(data)
         if not data.get("include_servers") and not data.get("include_apps"):
             raise forms.ValidationError("Choose server alerts, application alerts or both.")
         return data
 
+    def _clean_config(self, data):
+        import json
+
+        from django.core.validators import URLValidator, validate_email
+
+        from apps.core.netguard import check_url_host
+
+        config = dict(self.instance.settings) if not self.instance._state.adding else {}
+        for setting in self.kind_spec.settings:
+            field = f"cfg_{setting.name}"
+            value = (data.get(field) or "").strip()
+            if not value and setting.secret and config.get(setting.name):
+                continue  # keep the saved secret
+            if not value and setting.hidden and setting.required:
+                self.add_error(None, "Press Subscribe this browser first, and allow notifications.")
+                return
+            if value and setting.url:
+                try:
+                    URLValidator(schemes=["https", "http"])(value)
+                except forms.ValidationError:
+                    self.add_error(field, "Enter the full https:// URL.")
+                    continue
+                if problem := check_url_host(value):
+                    self.add_error(field, problem)
+                    continue
+            if value and setting.name == "recipients":
+                addresses = [a.strip() for a in value.split(",") if a.strip()]
+                try:
+                    for address in addresses:
+                        validate_email(address)
+                except forms.ValidationError:
+                    self.add_error(field, f"{address!r} isn't an email address.")
+                    continue
+                value = ", ".join(addresses)
+            if value:
+                config[setting.name] = value
+            else:
+                config.pop(setting.name, None)
+        self.config_json = json.dumps(config)
+
     def save(self, commit=True):
+        if self.kind_spec:
+            self.instance.config = self.config_json
         self.instance.kind = self.kind
         for secret in ("telegram_token", "webhook_url"):
             if secret in self.cleaned_data:
