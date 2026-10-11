@@ -47,8 +47,9 @@ class Job(models.Model):
 
 
 class Command(models.Model):
-    """One action on one server. Delivered at most once: a deploy must never run twice
-    because a result POST was lost, so a delivered-but-silent command becomes LOST."""
+    """One action on one server. Delivered at most once: the agent BLPOPs it from its
+    mailbox, so only one consumer ever sees it, and a delivered-but-silent command becomes
+    LOST rather than being re-sent: a deploy must never run twice."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
     job = models.ForeignKey(Job, on_delete=models.CASCADE, related_name="commands")
@@ -64,6 +65,9 @@ class Command(models.Model):
     output_truncated = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     deliver_by = models.DateTimeField()
+    # When the command was pushed to the agent's relay mailbox. NULL = still in the outbox
+    # (Redis was unreachable at queue time); the relay process retries it.
+    dispatched_at = models.DateTimeField(null=True, blank=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
 
@@ -73,8 +77,8 @@ class Command(models.Model):
             models.UniqueConstraint(fields=["job", "server"], name="command_one_per_job_server"),
         ]
         indexes = [
-            # Agent poll: WHERE server_id = ? AND status = 'pending'. Partial, so it stays
-            # tiny no matter how much history accumulates.
+            # Outbox and expiry: WHERE status = 'pending'. Partial, so it stays tiny no
+            # matter how much history accumulates.
             models.Index(
                 fields=["server", "created_at"],
                 condition=Q(status="pending"),

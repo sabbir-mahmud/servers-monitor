@@ -1,20 +1,22 @@
 # /etc/server-monitor-agent/agent.toml  (mode 640, owner root:server-monitor)
 #
-# This file is the allowlist. The dashboard can only offer — and this agent will only
-# run — the services, logs and actions declared here. Restart the agent after editing:
-#   sudo systemctl restart server-monitor-agent
+# This file is the allowlist. The dashboard can only offer (and this agent will only
+# run) the services, logs and actions declared here. Manage it with `sudo smctl`, which
+# validates and restarts for you.
 
 [main]
-url = "https://monitor.example.com"
-token = "smk_paste-the-token-from-the-dashboard"
+# The connection string from the dashboard's "Add server" page. sm-<id> is this server's own
+# Redis user: it can only reach this server's two relay keys. Rotate in the dashboard, then
+#   sudo smctl connect 'rediss://...'
+redis_url = "rediss://sm-<server-id>:<password>@<relay-host>:6379"
 verify_tls = true
 # ca_file = "/etc/ssl/certs/internal-ca.pem"   # for a private CA
-# allow_insecure_http = true                   # local development ONLY: the token travels in clear text
+# allow_insecure = true                        # redis:// without TLS: local development ONLY
 
 [agent]
-# Starting values; main overrides both on every heartbeat (edit them in the dashboard).
-report_interval = 30
-command_poll_interval = 5
+# Starting value; the dashboard pushes changes live (edit the server there).
+# Each heartbeat costs ~2 relay commands: 120 s ~= 65K Redis commands per server per month.
+report_interval = 120
 max_concurrent_commands = 2
 # Mounts to watch. Empty = every real (non-tmpfs/overlay) filesystem.
 disk_mounts = []

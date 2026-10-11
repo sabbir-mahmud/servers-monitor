@@ -15,5 +15,4 @@ urlpatterns = [
         views.ServerRotateTokenView.as_view(),
         name="server_rotate_token",
     ),
-    path("agent/files/<str:filename>", views.AgentFileView.as_view(), name="agent_file"),
 ]

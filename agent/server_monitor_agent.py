@@ -2,19 +2,21 @@
 """
 Server Monitor agent ("child").
 
-Runs on every monitored server. It only ever dials OUT to main over HTTPS:
+Runs on every monitored server. Neither this agent nor the dashboard accepts inbound
+connections: both dial OUT over TLS to a Redis relay (e.g. Upstash) and meet there.
 
-  every report_interval s   POST /api/agent/v1/heartbeat/  metrics, services, capabilities
-                            ← schedule + any queued commands
-  every command_poll s      GET  /api/agent/v1/commands/   ← queued commands
-  while a command runs      POST /api/agent/v1/commands/<id>/  streamed output, then result
+  <prefix>:a:<id>:cmd   dashboard -> agent   jobs, cancels, schedule changes (agent BLPOPs)
+  <prefix>:a:<id>:in    agent -> dashboard   heartbeats, acks, streamed output, results
 
-Security model: the agent's local config is the allowlist. Main can ask for an action by
-name; the agent runs it only if this file declares it. Free-form shell is off unless
-`[shell] enabled = true`. Commands are executed as argv lists (no shell) except that one
+Each agent logs in as its own Redis ACL user that can only push to and pop from its own
+two keys, so a compromised server can neither read nor forge another server's traffic.
+
+Security model: the agent's local config is the allowlist. The dashboard can ask for an
+action by name; the agent runs it only if this file declares it. Free-form shell is off
+unless `[shell] enabled = true`. Commands run as argv lists (no shell) except that one
 opt-in action.
 
-Dependencies: Python 3.11+ (tomllib) and psutil.
+Dependencies: Python 3.11+ (tomllib) and psutil. The Redis client is built in.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ import threading
 import time
 import tomllib
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -42,11 +45,12 @@ from pathlib import Path
 
 import psutil
 
-VERSION = "1.0.0"
-API_PREFIX = "/api/agent/v1"
-HTTP_TIMEOUT = 15
-MAX_CHUNK = 60 * 1024  # main accepts 64 KiB per progress post
-FLUSH_EVERY = 2.0  # seconds between streamed output posts
+VERSION = "2.0.0"
+NET_TIMEOUT = 20  # seconds for a single non-blocking Redis round trip
+MAX_BLOCK = 120  # longest BLPOP wait (Upstash holds 110 s+); heartbeats go between waits
+MAX_CHUNK = 60 * 1024  # main accepts 64 KiB per progress message
+FLUSH_EVERY = 3.0  # seconds between streamed output messages
+INBOX_KEEP = 5000  # newest messages kept if the dashboard is offline for a long time
 MAX_TAIL_LINES = 2000
 VERSION_CACHE_SECONDS = 300
 PSEUDO_FS = {"tmpfs", "devtmpfs", "squashfs", "overlay", "proc", "sysfs", "devfs", "autofs"}
@@ -84,12 +88,12 @@ class ActionSpec:
 
 @dataclass
 class Config:
-    url: str
-    token: str
+    redis_url: str
+    server_id: str
+    key_prefix: str = "sm"
     verify_tls: bool = True
     ca_file: str | None = None
-    report_interval: int = 30
-    command_poll_interval: int = 5
+    report_interval: int = 120
     max_concurrent_commands: int = 2
     disk_mounts: list[str] = field(default_factory=list)
     services: dict[str, ServiceSpec] = field(default_factory=dict)
@@ -117,25 +121,32 @@ def load_config(path: str | Path) -> Config:
     with open(path, "rb") as fh:
         raw = tomllib.load(fh)
     main = raw.get("main", {})
-    url = os.environ.get("SM_URL") or main.get("url", "")
-    token = os.environ.get("SM_TOKEN") or main.get("token", "")
-    if not url or not token:
-        raise ConfigError("[main] url and token are required")
-    url = url.rstrip("/")
-    if url.startswith("http://") and not main.get("allow_insecure_http", False):
-        # The bearer token would cross the network in clear text.
+    redis_url = os.environ.get("SM_REDIS") or main.get("redis_url", "")
+    if not redis_url:
+        raise ConfigError("[main] redis_url is required (the connection string from the dashboard)")
+    parsed = urllib.parse.urlsplit(redis_url)
+    if parsed.scheme not in ("rediss", "redis") or not parsed.hostname:
+        raise ConfigError("main.redis_url must look like rediss://user:token@host:6379")
+    if parsed.scheme == "redis" and not main.get("allow_insecure", False):
+        # The credential and every job would cross the network in clear text.
         raise ConfigError(
-            "main.url must be https:// (set allow_insecure_http = true for local dev)"
+            "main.redis_url must use rediss:// (TLS); allow_insecure = true for local dev"
+        )
+    user = urllib.parse.unquote(parsed.username or "")
+    server_id = str(main.get("server_id") or (user[3:] if user.startswith("sm-") else ""))
+    if not server_id:
+        raise ConfigError(
+            "cannot tell this server's id: user must be sm-<id> or set main.server_id"
         )
 
     agent = raw.get("agent", {})
     cfg = Config(
-        url=url,
-        token=token,
+        redis_url=redis_url,
+        server_id=server_id,
+        key_prefix=str(main.get("key_prefix", "sm")),
         verify_tls=bool(main.get("verify_tls", True)),
         ca_file=main.get("ca_file"),
-        report_interval=int(agent.get("report_interval", 30)),
-        command_poll_interval=int(agent.get("command_poll_interval", 5)),
+        report_interval=max(10, int(agent.get("report_interval", 120))),
         max_concurrent_commands=max(1, int(agent.get("max_concurrent_commands", 2))),
         disk_mounts=list(agent.get("disk_mounts", [])),
         shell_enabled=bool(raw.get("shell", {}).get("enabled", False)),
@@ -195,6 +206,16 @@ def _run(argv: list[str], timeout: float = 5.0) -> tuple[int, str]:
         return 126, str(exc)
 
 
+def _primary_address() -> str:
+    """The IP this host uses for outbound traffic (no packet is sent: UDP connect only)."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("192.0.2.1", 9))  # TEST-NET-1: routable shape, never answered
+            return sock.getsockname()[0]
+    except OSError:
+        return ""
+
+
 class Collector:
     def __init__(self, cfg: Config):
         self.cfg = cfg
@@ -209,6 +230,7 @@ class Collector:
             "cpu_count": psutil.cpu_count() or 0,
             "memory_total": psutil.virtual_memory().total,
             "uptime_seconds": int(time.time() - psutil.boot_time()),
+            "address": _primary_address(),
         }
 
     def disks(self) -> list[dict]:
@@ -267,7 +289,7 @@ class Collector:
         if svc.version_file:
             try:
                 value = Path(svc.version_file).read_text(errors="replace").strip().splitlines()[0]
-            except OSError, IndexError:
+            except (OSError, IndexError):
                 value = ""
         elif svc.version_command:
             _, text = _run(svc.version_command)
@@ -299,7 +321,7 @@ class Collector:
                             if code == 0
                             else {}
                         )
-                    except ValueError, KeyError, TypeError:
+                    except (ValueError, KeyError, TypeError):
                         pm2 = {}
                 status = pm2.get(svc.unit, "not found")
                 state = "up" if status == "online" else "down"
@@ -431,46 +453,171 @@ def plan_command(cfg: Config, action: str, args: dict) -> Plan:
     return Plan(argv=spec.command, timeout=spec.timeout, cwd=spec.cwd, env=env)
 
 
-class Api:
-    def __init__(self, cfg: Config):
-        self.cfg = cfg
-        if cfg.verify_tls:
-            self.ctx = ssl.create_default_context(cafile=cfg.ca_file)
-        else:
-            self.ctx = ssl._create_unverified_context()  # noqa: S323 - explicit opt-out
-        self.headers = {
-            "Authorization": f"Bearer {cfg.token}",
-            "Content-Type": "application/json",
-            "User-Agent": f"server-monitor-agent/{VERSION}",
-        }
+class RedisError(Exception):
+    """An error reply from Redis (wrong credentials, ACL denial, ...)."""
 
-    def call(self, method: str, path: str, body: dict | None = None) -> dict:
-        data = json.dumps(body).encode() if body is not None else None
-        req = urllib.request.Request(
-            self.cfg.url + API_PREFIX + path, data=data, headers=self.headers, method=method
-        )
-        ctx = self.ctx if req.full_url.startswith("https://") else None
-        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT, context=ctx) as resp:
-            return json.loads(resp.read() or b"{}")
+
+class Redis:
+    """Just enough of RESP2 for the agent: AUTH plus a few list commands, over TLS.
+    One instance is one connection; callers serialise access with their own lock."""
+
+    def __init__(self, url: str, verify_tls: bool = True, ca_file: str | None = None):
+        u = urllib.parse.urlsplit(url)
+        self.host, self.port = u.hostname, u.port or 6379
+        self.username = urllib.parse.unquote(u.username or "")
+        self.password = urllib.parse.unquote(u.password or "")
+        self.tls = u.scheme == "rediss"
+        self.ctx = None
+        if self.tls:
+            self.ctx = ssl.create_default_context(cafile=ca_file)
+            if not verify_tls:  # explicit opt-out in agent.toml
+                self.ctx.check_hostname = False
+                self.ctx.verify_mode = ssl.CERT_NONE
+        self.sock = None
+        self.reader = None
+
+    def close(self) -> None:
+        if self.sock is not None:
+            try:
+                self.sock.close()
+            except OSError:
+                pass
+        self.sock = self.reader = None
+
+    def interrupt(self) -> None:
+        """Wake a thread blocked in BLPOP on this connection (called from a signal handler)."""
+        sock = self.sock
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def _connect(self) -> None:
+        sock = socket.create_connection((self.host, self.port), timeout=NET_TIMEOUT)
+        if self.ctx is not None:
+            sock = self.ctx.wrap_socket(sock, server_hostname=self.host)
+        self.sock, self.reader = sock, sock.makefile("rb")
+        if self.password:
+            auth = (
+                ["AUTH", self.username, self.password] if self.username else ["AUTH", self.password]
+            )
+            self._send(auth)
+            self._read()
+
+    def _send(self, args) -> None:
+        out = [b"*%d\r\n" % len(args)]
+        for arg in args:
+            data = arg if isinstance(arg, bytes) else str(arg).encode()
+            out.append(b"$%d\r\n%s\r\n" % (len(data), data))
+        self.sock.sendall(b"".join(out))
+
+    def _read(self):
+        line = self.reader.readline()
+        if not line:
+            raise ConnectionError("Redis closed the connection")
+        kind, rest = line[:1], line[1:-2]
+        if kind == b"+":
+            return rest.decode()
+        if kind == b"-":
+            raise RedisError(rest.decode(errors="replace"))
+        if kind == b":":
+            return int(rest)
+        if kind == b"$":
+            n = int(rest)
+            if n < 0:
+                return None
+            data = self.reader.read(n + 2)
+            return data[:-2].decode("utf-8", errors="replace")
+        if kind == b"*":
+            n = int(rest)
+            return None if n < 0 else [self._read() for _ in range(n)]
+        raise ConnectionError(f"unexpected Redis reply {line[:20]!r}")
+
+    def call(self, *args, block: float = 0):
+        """Run one command. `block` is how long the server may legitimately stay silent."""
+        if self.sock is None:
+            self._connect()
+        try:
+            self.sock.settimeout(NET_TIMEOUT + block)
+            self._send(args)
+            return self._read()
+        except (OSError, ConnectionError):
+            self.close()  # a half-read reply poisons the stream; reconnect next time
+            raise
+
+
+class Relay:
+    """The agent's two mailboxes. Writes (heartbeats, output) and the blocking read for
+    jobs use separate connections so streaming output never waits behind a BLPOP."""
+
+    def __init__(self, cfg: Config):
+        base = f"{cfg.key_prefix}:a:{cfg.server_id}"
+        self.inbox, self.outbox = f"{base}:cmd", f"{base}:in"
+        self.writer = Redis(cfg.redis_url, cfg.verify_tls, cfg.ca_file)
+        self.reader = Redis(cfg.redis_url, cfg.verify_tls, cfg.ca_file)
+        self.lock = threading.Lock()
+        self.sent = 0
+
+    def send(self, message: dict) -> None:
+        payload = json.dumps(message, separators=(",", ":"))
+        with self.lock:
+            self.writer.call("RPUSH", self.outbox, payload)
+            self.sent += 1
+            if self.sent % 50 == 0:
+                # Bound the mailbox if the dashboard is down for days: keep the newest.
+                self.writer.call("LTRIM", self.outbox, -INBOX_KEEP, -1)
+
+    def receive(self, timeout: float) -> dict | None:
+        wait = max(1, int(timeout))
+        reply = self.reader.call("BLPOP", self.inbox, wait, block=wait)
+        if not reply:
+            return None
+        try:
+            message = json.loads(reply[1])
+        except ValueError:
+            log.warning("Ignoring malformed message in %s", self.inbox)
+            return None
+        return message if isinstance(message, dict) else None
+
+    def requeue(self, message: dict) -> None:
+        """Put back a job popped while shutting down. Same canonical JSON as the dashboard
+        writes, so it can still find (and cancel) it with LREM."""
+        payload = json.dumps(message, sort_keys=True, separators=(",", ":"))
+        with self.lock:
+            self.writer.call("RPUSH", self.inbox, payload)
+
+    def close(self) -> None:
+        self.writer.close()
+        self.reader.close()
 
 
 class Executor:
-    def __init__(self, cfg: Config, api: Api):
-        self.cfg, self.api = cfg, api
+    def __init__(self, cfg: Config, relay: Relay):
+        self.cfg, self.relay = cfg, relay
         self.pool = ThreadPoolExecutor(
             max_workers=cfg.max_concurrent_commands, thread_name_prefix="cmd"
         )
         self._seen: deque[str] = deque(maxlen=500)
+        self._cancelled: set[str] = set()
         self._lock = threading.Lock()
 
     def submit(self, command: dict) -> None:
         cid = command.get("id")
         with self._lock:
-            # Main delivers each command once; this guards against a replayed response.
+            # Each job is popped once; this guards against a message pushed twice.
             if not cid or cid in self._seen:
                 return
             self._seen.append(cid)
         self.pool.submit(self._run_safely, command)
+
+    def cancel(self, cid: str) -> None:
+        with self._lock:
+            self._cancelled.add(cid)
+
+    def _is_cancelled(self, cid: str) -> bool:
+        with self._lock:
+            return cid in self._cancelled
 
     def _post(
         self,
@@ -479,17 +626,23 @@ class Executor:
         output: str = "",
         exit_code: int | None = None,
         retries: int = 0,
-    ) -> dict:
-        body = {"status": status, "output": output[-MAX_CHUNK:], "exit_code": exit_code}
+    ) -> None:
+        body = {
+            "t": "res",
+            "id": cid,
+            "status": status,
+            "output": output[-MAX_CHUNK:],
+            "exit_code": exit_code,
+        }
         for attempt in range(retries + 1):
             try:
-                return self.api.call("POST", f"/commands/{cid}/", body)
-            except (OSError, ValueError) as exc:
+                self.relay.send(body)
+                return
+            except (OSError, ConnectionError, RedisError) as exc:
                 if attempt == retries:
                     log.warning("Could not report command %s: %s", cid, exc)
-                    return {}
+                    return
                 time.sleep(min(30, 2**attempt) + random.random())
-        return {}
 
     def _run_safely(self, command: dict) -> None:
         cid, action = command["id"], command.get("action", "")
@@ -537,7 +690,7 @@ class Executor:
         t = threading.Thread(target=reader, daemon=True)
         t.start()
         deadline = time.monotonic() + plan.timeout
-        timed_out = False
+        timed_out = cancelled = False
         last_flush = time.monotonic()
 
         def drain() -> str:
@@ -551,23 +704,24 @@ class Executor:
                 timed_out = True
                 self._kill(proc)
                 break
+            if self._is_cancelled(cid):
+                cancelled = True
+                self._kill(proc)
+                break
             time.sleep(0.2)
-            chunk = ""
             if time.monotonic() - last_flush >= FLUSH_EVERY:
                 last_flush = time.monotonic()
-                chunk = drain()
-            if chunk:
-                reply = self._post(cid, "running", chunk)
-                if reply.get("cancel"):
-                    self._kill(proc)
-                    break
+                if chunk := drain():
+                    self._post(cid, "running", chunk)
         proc.wait()
         t.join(timeout=5)
         tail = drain()
         if timed_out:
             tail += f"\n[agent] killed after {plan.timeout}s timeout\n"
+        if cancelled:
+            tail += "\n[agent] stopped: the dashboard cancelled this command\n"
         code = proc.returncode
-        status = "succeeded" if code == 0 and not timed_out else "failed"
+        status = "succeeded" if code == 0 and not (timed_out or cancelled) else "failed"
         # Large final output goes up in chunks so nothing is cut at the 64 KiB limit.
         while len(tail) > MAX_CHUNK:
             self._post(cid, "running", tail[:MAX_CHUNK], retries=2)
@@ -580,7 +734,7 @@ class Executor:
         try:
             os.killpg(proc.pid, signal.SIGTERM)
             proc.wait(timeout=10)
-        except ProcessLookupError, subprocess.TimeoutExpired:
+        except (ProcessLookupError, subprocess.TimeoutExpired):
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
             except ProcessLookupError:
@@ -596,20 +750,16 @@ class Executor:
 class Agent:
     def __init__(self, cfg: Config):
         self.cfg = cfg
-        self.api = Api(cfg)
+        self.relay = Relay(cfg)
         self.collector = Collector(cfg)
-        self.executor = Executor(cfg, self.api)
+        self.executor = Executor(cfg, self.relay)
         self.stop = threading.Event()
         self.report_interval = cfg.report_interval
-        self.poll_interval = cfg.command_poll_interval
         self.failures = 0
 
-    def _apply(self, reply: dict) -> None:
-        # Main owns the schedule: changing intervals in the dashboard retunes the agent.
-        self.report_interval = max(5, int(reply.get("report_interval") or self.report_interval))
-        self.poll_interval = max(2, int(reply.get("command_poll_interval") or self.poll_interval))
-        for command in reply.get("commands") or []:
-            self.executor.submit(command)
+    def request_stop(self) -> None:
+        self.stop.set()
+        self.relay.reader.interrupt()  # don't sit out a 2-minute BLPOP on shutdown
 
     def _backoff(self) -> float:
         self.failures += 1
@@ -617,39 +767,84 @@ class Agent:
 
     def heartbeat(self) -> bool:
         try:
-            self._apply(self.api.call("POST", "/heartbeat/", self.collector.report()))
+            report = self.collector.report()
+            self.relay.send({"t": "hb", "interval": self.report_interval, "report": report})
             self.failures = 0
             return True
-        except urllib.error.HTTPError as exc:
-            if exc.code == 401:
-                log.error("Main rejected the token (401). Was it rotated? Check agent.toml.")
+        except RedisError as exc:
+            if "WRONGPASS" in str(exc) or "NOPERM" in str(exc):
+                log.error(
+                    "The relay rejected this agent's credentials (%s). Was the token rotated "
+                    "or the server disabled? Install the new ones: sudo smctl connect ...",
+                    exc,
+                )
             else:
-                log.warning("Heartbeat failed: HTTP %s", exc.code)
-        except (OSError, ValueError) as exc:
+                log.warning("Heartbeat failed: %s", exc)
+        except (OSError, ConnectionError, ValueError) as exc:
             log.warning("Heartbeat failed: %s", exc)
         return False
 
-    def poll(self) -> None:
-        try:
-            self._apply(self.api.call("GET", "/commands/"))
-        except (OSError, ValueError) as exc:
-            log.debug("Command poll failed: %s", exc)
+    def handle(self, message: dict) -> None:
+        kind = message.get("t")
+        if kind == "cmd":
+            if float(message.get("exp") or 0) < time.time():
+                # Queued while this agent was offline and nobody is waiting any more.
+                log.info(
+                    "Skipping expired command %s (%s)", message.get("id"), message.get("action")
+                )
+                return
+            try:
+                self.relay.send({"t": "ack", "id": message.get("id")})
+            except (OSError, ConnectionError, RedisError) as exc:
+                log.warning("Could not acknowledge command: %s", exc)
+            self.executor.submit(message)
+        elif kind == "cancel":
+            self.executor.cancel(str(message.get("id")))
+        elif kind == "cfg":
+            # The dashboard owns the schedule: changing it there retunes the agent.
+            self.report_interval = max(
+                10, int(message.get("report_interval") or self.report_interval)
+            )
+            log.info("Report interval set to %ss by the dashboard", self.report_interval)
 
     def run(self) -> None:
-        log.info("Agent %s reporting to %s", VERSION, self.cfg.url)
-        next_report = next_poll = time.monotonic()
+        log.info(
+            "Agent %s for server %s via %s",
+            VERSION,
+            self.cfg.server_id,
+            urllib.parse.urlsplit(self.cfg.redis_url).hostname,
+        )
+        next_report = time.monotonic()
         while not self.stop.is_set():
             now = time.monotonic()
             if now >= next_report:
                 ok = self.heartbeat()
                 next_report = now + (self.report_interval if ok else self._backoff())
-                next_poll = now + self.poll_interval
-            elif now >= next_poll:
-                self.poll()
-                next_poll = now + self.poll_interval
-            self.stop.wait(max(0.1, min(next_report, next_poll) - time.monotonic()))
+            # Block on the job mailbox until the next heartbeat is due: jobs start the
+            # instant they're queued, and an idle agent costs ~2 Redis commands per interval.
+            wait = min(MAX_BLOCK, max(1.0, next_report - time.monotonic()))
+            try:
+                message = self.relay.receive(wait)
+            except (OSError, ConnectionError, RedisError) as exc:
+                if self.stop.is_set():
+                    break  # interrupted on purpose
+                log.warning("Relay unavailable: %s", exc)
+                self.stop.wait(min(30.0, self._backoff()))
+                continue
+            if message and self.stop.is_set() and message.get("t") == "cmd":
+                # Popped in the instant we were told to stop: hand it back unrun.
+                try:
+                    self.relay.requeue(message)
+                except (OSError, ConnectionError, RedisError) as exc:
+                    log.error(
+                        "Could not return command %s to the queue: %s", message.get("id"), exc
+                    )
+                break
+            if message:
+                self.handle(message)
         log.info("Stopping; waiting for running commands")
         self.executor.shutdown()
+        self.relay.close()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -661,6 +856,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--check", action="store_true", help="Validate the config and exit (used by smctl)"
+    )
+    parser.add_argument(
+        "--ping", action="store_true", help="Log in to the relay and exit (used by the installer)"
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     opts = parser.parse_args(argv)
@@ -676,6 +874,17 @@ def main(argv: list[str] | None = None) -> int:
     if opts.check:
         print(f"ok: {len(cfg.services)} services, {len(cfg.logs)} logs, {len(cfg.actions)} actions")
         return 0
+    if opts.ping:
+        try:
+            Redis(cfg.redis_url, cfg.verify_tls, cfg.ca_file).call("PING")
+        except RedisError as exc:
+            print(f"relay refused the credentials: {exc}", file=sys.stderr)
+            return 3
+        except (OSError, ConnectionError) as exc:
+            print(f"cannot reach the relay: {exc}", file=sys.stderr)
+            return 4
+        print(f"ok: logged in to {urllib.parse.urlsplit(cfg.redis_url).hostname}")
+        return 0
     if opts.print_only:
         collector = Collector(cfg)
         time.sleep(0.5)  # let cpu_percent measure something
@@ -685,9 +894,10 @@ def main(argv: list[str] | None = None) -> int:
     if opts.once:
         ok = agent.heartbeat()
         agent.executor.shutdown()
+        agent.relay.close()
         return 0 if ok else 1
     for sig in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(sig, lambda *_: agent.stop.set())
+        signal.signal(sig, lambda *_: agent.request_stop())
     agent.run()
     return 0
 

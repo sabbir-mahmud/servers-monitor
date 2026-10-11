@@ -6,7 +6,7 @@
 <div class="page-head">
   <div>
     <h1 class="page-title">Connect {{ server }}</h1>
-    <p class="page-sub">Run one command on the server. No SSH access or open ports needed: the agent dials out to this dashboard and picks up the jobs you queue.</p>
+    <p class="page-sub">Run one command on the server. No SSH, no open ports and no public dashboard: the agent and this dashboard both dial out to your Redis relay and meet there.</p>
   </div>
 </div>
 <div class="enroll">
@@ -30,32 +30,33 @@
 </div>
 {% endpartialdef %}
 
-{% if token %}
-<div class="alert alert-warning" role="alert">{% icon "alert" %}<div><strong>Copy the command now.</strong> The token in it is shown once and stored only as a hash. If you lose it, rotate the token.</div></div>
+{% if agent_url %}
+<div class="alert alert-warning" role="alert">{% icon "alert" %}<div><strong>Copy the command now.</strong> It holds this server's own Redis password, shown once and never stored here. Lost it? Rotate the credentials.</div></div>
 {% endif %}
 
 <div class="card mb-3"><div class="card-body p-4"><div class="steps">
   <div class="step"><span class="step-num"></span><div>
     <h2>Run this on the server</h2>
-    {% if token %}
-    <p>As root, on Ubuntu, Debian or RHEL with systemd and Python 3.11+. It checks the token, installs the agent and the <code>smctl</code> command, finds the services and logs already on the machine, and confirms the connection.</p>
-    <div class="copy-block"><pre class="output" id="install">curl -fsSL {{ public_url }}/agent/files/install.sh | sudo SM_URL={{ public_url }} SM_TOKEN={{ token }} bash</pre>
+    {% if agent_url %}
+    <p>As root, on Ubuntu, Debian or RHEL with systemd and Python 3.11+. It downloads the agent from GitHub, checks the credentials against the relay, installs the agent and the <code>smctl</code> command, finds the services and logs already on the machine, and confirms the connection.</p>
+    <div class="copy-block"><pre class="output" id="install">curl -fsSL {{ install_url }} | sudo SM_REF={{ agent_ref }} SM_REDIS='{{ agent_url }}' bash</pre>
       <button type="button" class="btn btn-sm copy-btn" data-copy="#install">{% icon "copy" %} <span data-copy-label>Copy</span></button></div>
-    <details class="token-details"><summary>Show the token on its own</summary>
-      <div class="token-box mt-2"><code id="token" class="fs-6 text-break">{{ token }}</code>
+    <details class="token-details"><summary>Show the connection string on its own</summary>
+      <p class="small text-body-secondary mt-2 mb-1">For an existing agent: <code>sudo smctl connect '&lt;string&gt;'</code></p>
+      <div class="token-box"><code id="token" class="fs-6 text-break">{{ agent_url }}</code>
         <button type="button" class="btn btn-sm btn-outline-secondary" data-copy="#token">{% icon "copy" %} <span data-copy-label>Copy</span></button></div>
     </details>
     {% else %}
-    <p class="mb-2">The install token was already shown. Rotate it to get a fresh install command; the old token stops working immediately.</p>
+    <p class="mb-2">The install command was already shown. Rotate the credentials to get a fresh one; the old password stops working immediately.</p>
     {% if perms.fleet.change_server %}
-    <form method="post" action="{% url 'fleet:server_rotate_token' server.pk %}" data-confirm="Rotate the token for {{ server.name }}? An agent using the current token will be disconnected.">{% csrf_token %}<button class="btn btn-warning btn-sm">{% icon "key" %} Rotate token</button></form>
+    <form method="post" action="{% url 'fleet:server_rotate_token' server.pk %}" data-confirm="Rotate credentials for {{ server.name }}? An agent using the current ones will be disconnected.">{% csrf_token %}<button class="btn btn-warning btn-sm">{% icon "key" %} Rotate credentials</button></form>
     {% endif %}
     {% endif %}
   </div></div>
 
   <div class="step"><span class="step-num"></span><div>
     <h2>Choose what the dashboard can do there</h2>
-    <p>The server decides what it allows; the dashboard can only ask. Use <code>smctl</code> on the server, and the change shows up here within 30 seconds.</p>
+    <p>The server decides what it allows; the dashboard can only ask. Use <code>smctl</code> on the server, and the change shows up here with the next heartbeat.</p>
 <pre class="output smctl-cheats"><span class="c"># one-click deploy (runs your script; --sudo runs it as root)</span>
 sudo smctl action add deploy -d "Pull and restart" -- /opt/deploy/deploy.sh
 

@@ -14,8 +14,7 @@ def write_config(tmp_path, body=""):
     path.write_text(
         textwrap.dedent("""
         [main]
-        url = "https://monitor.test"
-        token = "smk_test"
+        redis_url = "rediss://sm-srv1:tok@relay.test:6379"
     """)
         + textwrap.dedent(body)
     )
@@ -45,13 +44,21 @@ def cfg(tmp_path):
     )
 
 
-def test_requires_https_unless_opted_out(tmp_path):
+def test_requires_tls_unless_opted_out(tmp_path):
     p = tmp_path / "a.toml"
-    p.write_text('[main]\nurl = "http://x"\ntoken = "t"\n')
-    with pytest.raises(sma.ConfigError, match="https"):
+    p.write_text('[main]\nredis_url = "redis://sm-abc:pw@localhost:6379"\n')
+    with pytest.raises(sma.ConfigError, match="rediss"):
         sma.load_config(p)
-    p.write_text('[main]\nurl = "http://x"\ntoken = "t"\nallow_insecure_http = true\n')
-    assert sma.load_config(p).url == "http://x"
+    p.write_text('[main]\nredis_url = "redis://sm-abc:pw@localhost:6379"\nallow_insecure = true\n')
+    cfg = sma.load_config(p)
+    assert cfg.server_id == "abc" and cfg.report_interval == 120
+
+
+def test_server_id_comes_from_the_relay_username(tmp_path):
+    p = tmp_path / "a.toml"
+    p.write_text('[main]\nredis_url = "rediss://default:pw@relay.test:6379"\n')
+    with pytest.raises(sma.ConfigError, match="server's id"):
+        sma.load_config(p)
 
 
 def test_builtin_names_cannot_be_shadowed(tmp_path):
@@ -97,39 +104,76 @@ def test_custom_action_args_are_ignored(cfg):
     assert plan.argv == ["echo", "deployed"]
 
 
-class FakeApi:
+class FakeRelay:
     def __init__(self):
-        self.calls = []
+        self.sent = []
 
-    def call(self, method, path, body=None):
-        self.calls.append((method, path, body))
-        return {}
+    def send(self, message):
+        self.sent.append(message)
 
 
 def test_executor_runs_and_reports(cfg):
-    api = FakeApi()
-    ex = sma.Executor(cfg, api)
-    ex._run("c1", "deploy", {})
-    final = api.calls[-1][2]
+    relay = FakeRelay()
+    sma.Executor(cfg, relay)._run("c1", "deploy", {})
+    final = relay.sent[-1]
+    assert final["t"] == "res" and final["id"] == "c1"
     assert final["status"] == "succeeded" and final["exit_code"] == 0
-    assert "deployed" in "".join(c[2]["output"] for c in api.calls)
+    assert "deployed" in "".join(m["output"] for m in relay.sent)
 
 
 def test_executor_timeout_kills_process(tmp_path):
     cfg = sma.load_config(
         write_config(tmp_path, '[actions.slow]\ncommand = ["sleep", "30"]\ntimeout = 1\n')
     )
-    api = FakeApi()
-    sma.Executor(cfg, api)._run("c2", "slow", {})
-    final = api.calls[-1][2]
-    assert final["status"] == "failed" and "timeout" in final["output"]
+    relay = FakeRelay()
+    sma.Executor(cfg, relay)._run("c2", "slow", {})
+    assert relay.sent[-1]["status"] == "failed" and "timeout" in relay.sent[-1]["output"]
+
+
+def test_executor_cancel_stops_a_running_command(tmp_path):
+    import threading
+
+    cfg = sma.load_config(
+        write_config(tmp_path, '[actions.slow]\ncommand = ["sleep", "30"]\ntimeout = 60\n')
+    )
+    relay = FakeRelay()
+    ex = sma.Executor(cfg, relay)
+    threading.Timer(0.5, ex.cancel, args=("c9",)).start()
+    ex._run("c9", "slow", {})
+    assert relay.sent[-1]["status"] == "failed" and "cancelled" in relay.sent[-1]["output"]
 
 
 def test_executor_reports_rejection(cfg):
-    api = FakeApi()
-    sma.Executor(cfg, api)._run("c3", "nope", {})
-    assert api.calls[-1][2]["status"] == "failed"
-    assert "rejected by agent" in api.calls[-1][2]["output"]
+    relay = FakeRelay()
+    sma.Executor(cfg, relay)._run("c3", "nope", {})
+    assert relay.sent[-1]["status"] == "failed"
+    assert "rejected by agent" in relay.sent[-1]["output"]
+
+
+def test_agent_handles_relay_messages(cfg, monkeypatch):
+    import time
+
+    agent = sma.Agent(cfg)
+    relay, submitted = FakeRelay(), []
+    agent.relay = relay
+    monkeypatch.setattr(agent.executor, "submit", submitted.append)
+    agent.handle({"t": "cmd", "id": "old", "action": "deploy", "exp": time.time() - 1})
+    assert submitted == [] and relay.sent == []  # expired while offline: never runs
+    agent.handle({"t": "cmd", "id": "new", "action": "deploy", "exp": time.time() + 60})
+    assert [c["id"] for c in submitted] == ["new"] and relay.sent == [{"t": "ack", "id": "new"}]
+    agent.handle({"t": "cfg", "report_interval": 300})
+    assert agent.report_interval == 300
+    agent.handle({"t": "cancel", "id": "new"})
+    assert agent.executor._is_cancelled("new")
+
+
+def test_agent_code_runs_on_python_311():
+    """Servers run their system Python (Debian 12 = 3.11). Guard against newer syntax."""
+    import ast
+
+    for name in ("server_monitor_agent.py", "smctl.py"):
+        source = (Path(__file__).resolve().parents[1] / name).read_text()
+        ast.parse(source, feature_version=(3, 11))
 
 
 def test_report_shape_matches_main_schema(cfg):

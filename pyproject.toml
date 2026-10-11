@@ -2,6 +2,9 @@
 line-length = 100
 target-version = "py314"
 extend-exclude = ["venv", "*/migrations/*", "main/static"]
+# The agent runs on servers' system Python (Ubuntu 24.04 = 3.12, Debian 12 = 3.11). Keep
+# ruff from emitting newer syntax there, e.g. 3.14's unparenthesised `except A, B:`.
+per-file-target-version = { "agent/**/*.py" = "py311" }
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "DJ", "C4"]

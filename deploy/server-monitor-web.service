@@ -1,0 +1,26 @@
+# Dashboard UI on a plain Linux box / Raspberry Pi (no Docker). Install:
+#   sudo cp deploy/*.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#   sudo systemctl enable --now server-monitor-web server-monitor-relay
+# Assumes the repo at /opt/server-monitor, a venv in /opt/server-monitor/venv and
+# /opt/server-monitor/main/.env (see main/.env.example). Adjust paths/user to taste.
+[Unit]
+Description=Server Monitor dashboard (web)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=server-monitor-ui
+WorkingDirectory=/opt/server-monitor/main
+EnvironmentFile=/opt/server-monitor/main/.env
+ExecStartPre=/opt/server-monitor/venv/bin/python manage.py migrate --noinput
+ExecStart=/opt/server-monitor/venv/bin/gunicorn config.wsgi:application --bind 127.0.0.1:8000 --workers 1 --threads 8 --timeout 30
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/server-monitor/data
+PrivateTmp=true
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

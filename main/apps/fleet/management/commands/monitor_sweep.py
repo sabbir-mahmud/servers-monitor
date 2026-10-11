@@ -8,8 +8,8 @@ from apps.fleet.services import prune_samples
 
 class Command(BaseCommand):
     help = (
-        "Run the offline/command-expiry sweep. Celery beat does this in production; use "
-        "--loop in development or from cron if you run without Celery."
+        "Run the offline/command-expiry sweep once (or --loop). The relay process "
+        "(manage.py relay) already does this every 15 s; this is for debugging and cron."
     )
 
     def add_arguments(self, parser):

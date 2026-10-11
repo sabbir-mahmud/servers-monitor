@@ -1,6 +1,5 @@
 from django.conf import settings
 from django.contrib import messages
-from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
@@ -8,6 +7,7 @@ from django.views import View
 from django.views.generic import DeleteView, DetailView, ListView, TemplateView, UpdateView
 from django.views.generic.edit import CreateView
 
+from apps.agent_api.relay import RelayError
 from apps.alerts.models import Alert
 from apps.alerts.services import resolve_all
 from apps.audit.services import record
@@ -67,9 +67,13 @@ class ServerCreateView(StaffViewMixin, CreateView):
     form_class = ServerForm
 
     def form_valid(self, form):
-        server, raw = services.create_server(self.request, form)
-        # The raw token lives only in this session until the enrolment page shows it once.
-        self.request.session[ENROLL_SESSION_KEY.format(server.pk)] = raw
+        try:
+            server, agent_url = services.create_server(self.request, form)
+        except RelayError as exc:
+            form.add_error(None, f"Could not reach the relay (Redis): {exc}")
+            return self.form_invalid(form)
+        # The connection URL lives only in this session until the enrolment page shows it.
+        self.request.session[ENROLL_SESSION_KEY.format(server.pk)] = agent_url
         return redirect("fleet:server_enroll", pk=server.pk)
 
 
@@ -91,8 +95,9 @@ class ServerEnrollView(StaffViewMixin, TemplateView):
             token = self.request.session.pop(ENROLL_SESSION_KEY.format(server.pk), None)
         ctx.update(
             server=server,
-            token=token,
-            public_url=settings.MONITOR_PUBLIC_URL.rstrip("/"),
+            agent_url=token,
+            install_url=settings.AGENT_INSTALL_URL,
+            agent_ref=settings.AGENT_REF,
         )
         return ctx
 
@@ -140,11 +145,10 @@ class ServerUpdateView(StaffViewMixin, UpdateView):
     def form_valid(self, form):
         response = super().form_valid(form)
         services.log_settings_change(self.request, self.object, form.changed_data)
+        services.server_settings_changed(self.object, form.changed_data)
         if "is_enabled" in form.changed_data and not self.object.is_enabled:
             resolve_all(self.object)
-        messages.success(
-            self.request, "Server updated. The agent picks up new intervals on its next report."
-        )
+        messages.success(self.request, "Server updated. The agent picks up the change right away.")
         return response
 
     def get_success_url(self):
@@ -159,8 +163,9 @@ class ServerDeleteView(StaffViewMixin, DeleteView):
 
     def form_valid(self, form):
         record(self.request, "server.delete", target=self.object.name)
+        services.delete_server(self.object)  # also revokes its relay user
         messages.success(self.request, f"Removed {self.object.name}. Uninstall its agent too.")
-        return super().form_valid(form)
+        return redirect(self.success_url)
 
 
 class ServerRotateTokenView(StaffViewMixin, View):
@@ -169,32 +174,13 @@ class ServerRotateTokenView(StaffViewMixin, View):
 
     def post(self, request, pk):
         server = get_object_or_404(Server, pk=pk)
-        request.session[ENROLL_SESSION_KEY.format(server.pk)] = services.rotate_token(
-            request, server
-        )
+        try:
+            agent_url = services.rotate_token(request, server)
+        except RelayError as exc:
+            messages.error(request, f"Could not reach the relay (Redis): {exc}")
+            return redirect("fleet:server_detail", pk=server.pk)
+        request.session[ENROLL_SESSION_KEY.format(server.pk)] = agent_url
         messages.warning(
-            request, "Token rotated. The old token no longer works — update the agent."
+            request, "Credentials rotated. The old ones no longer work: update the agent."
         )
         return redirect("fleet:server_enroll", pk=server.pk)
-
-
-AGENT_FILES = {
-    "install.sh": "text/x-shellscript",
-    "server_monitor_agent.py": "text/x-python",
-    "smctl.py": "text/x-python",
-    "agent.example.toml": "text/plain",
-    "server-monitor-agent.service": "text/plain",
-}
-
-
-class AgentFileView(View):
-    """Public download of the agent so `curl …/agent/files/install.sh | sudo bash` works.
-    Only names in AGENT_FILES are served; nothing secret lives in these files."""
-
-    def get(self, request, filename):
-        if filename not in AGENT_FILES:
-            raise Http404
-        path = settings.AGENT_DIST_DIR / filename
-        if not path.is_file():
-            raise Http404
-        return FileResponse(path.open("rb"), content_type=f"{AGENT_FILES[filename]}; charset=utf-8")

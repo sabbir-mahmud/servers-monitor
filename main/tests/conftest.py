@@ -97,30 +97,111 @@ def report(**overrides):
     return body
 
 
+class FakeRedis:
+    """In-memory stand-in for the relay: the list and ACL commands the dashboard uses, with
+    Upstash's quirk that ACL passwords must come from ACL GENTOKEN."""
+
+    def __init__(self):
+        self.lists: dict[str, list[str]] = {}
+        self.users: dict[str, list] = {}
+        self.tokens: set[str] = set()
+        self.down = False
+
+    def _check(self):
+        if self.down:
+            import redis
+
+            raise redis.ConnectionError("relay unreachable (test)")
+
+    def execute_command(self, *args):
+        self._check()
+        op = [str(a).upper() for a in args[:2]]
+        if op == ["ACL", "GENTOKEN"]:
+            token = f"tok_{args[2]}_{len(self.tokens)}"
+            self.tokens.add(token)
+            return token
+        if op == ["ACL", "SETUSER"]:
+            rules = list(args[3:])
+            for rule in rules:
+                if str(rule).startswith(">") and rule[1:] not in self.tokens:
+                    import redis
+
+                    raise redis.ResponseError("The password must be generated with ACL GENTOKEN")
+            self.users[args[2]] = rules if "reset" in rules else self.users.get(args[2], []) + rules
+            return "OK"
+        if op == ["ACL", "DELUSER"]:
+            return int(self.users.pop(args[2], None) is not None)
+        raise NotImplementedError(args)
+
+    def rpush(self, key, *values):
+        self._check()
+        self.lists.setdefault(key, []).extend(values)
+        return len(self.lists[key])
+
+    def lrem(self, key, count, value):
+        self._check()
+        items = self.lists.get(key, [])
+        if value in items:
+            items.remove(value)
+            return 1
+        return 0
+
+    def blpop(self, keys, timeout=0):
+        self._check()
+        for key in keys:
+            if self.lists.get(key):
+                return key, self.lists[key].pop(0)
+        return None
+
+    def delete(self, *keys):
+        return sum(self.lists.pop(k, None) is not None for k in keys)
+
+    def drain(self, key) -> list[dict]:
+        items, self.lists[key] = self.lists.get(key, []), []
+        return [json.loads(i) for i in items]
+
+
+@pytest.fixture(autouse=True)
+def fake_relay(monkeypatch, settings):
+    from apps.agent_api import relay
+
+    fake = FakeRedis()
+    settings.REDIS_URL = "rediss://default:admin-secret@relay.test:6379"
+    monkeypatch.setattr(relay, "client", lambda: fake)
+    return fake
+
+
 class AgentClient:
-    def __init__(self, client, token):
-        self.client, self.auth = client, {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+    """Plays one agent: puts messages in its relay inbox the way the real agent does and
+    runs them through the bridge, and reads what the dashboard pushed to its mailbox."""
 
-    def heartbeat(self, body=None):
-        return self.client.post(
-            "/api/agent/v1/heartbeat/",
-            json.dumps(body or report()),
-            content_type="application/json",
-            **self.auth,
-        )
+    def __init__(self, server, fake):
+        self.server, self.fake = server, fake
 
-    def poll(self):
-        return self.client.get("/api/agent/v1/commands/", **self.auth)
+    def _send(self, message):
+        from apps.agent_api.bridge import handle
+
+        self.server.refresh_from_db()
+        handle(self.server, message)
+
+    def heartbeat(self, body=None, interval=None):
+        self.server.refresh_from_db()
+        interval = self.server.report_interval if interval is None else interval
+        self._send({"t": "hb", "interval": interval, "report": body or report()})
+
+    def mailbox(self) -> list[dict]:
+        """BLPOP everything queued for this agent (each message is seen once)."""
+        from apps.agent_api import relay
+
+        return self.fake.drain(relay.keys(self.server)[0])
+
+    def ack(self, command_id):
+        self._send({"t": "ack", "id": str(command_id)})
 
     def result(self, command_id, **body):
-        return self.client.post(
-            f"/api/agent/v1/commands/{command_id}/",
-            json.dumps(body),
-            content_type="application/json",
-            **self.auth,
-        )
+        self._send({"t": "res", "id": str(command_id), **body})
 
 
 @pytest.fixture
-def agent(client, server_and_token):
-    return AgentClient(client, server_and_token[1])
+def agent(server_and_token, fake_relay):
+    return AgentClient(server_and_token[0], fake_relay)

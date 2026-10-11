@@ -50,15 +50,14 @@ def test_dashboard_query_budget(client, viewer, django_assert_max_num_queries):
     assert b"<html" not in resp.content  # partial only
 
 
-def test_create_server_shows_token_once_and_stores_hash(client, admin_user):
+def test_create_server_shows_credentials_once_and_stores_hash(client, admin_user, fake_relay):
     client.force_login(admin_user)
     resp = client.post(
         reverse("fleet:server_create"),
         {
             "name": "api-01",
             "environment": "production",
-            "report_interval": 30,
-            "command_poll_interval": 5,
+            "report_interval": 120,
             "is_enabled": "on",
             "new_groups": "api, Workers",
         },
@@ -66,26 +65,34 @@ def test_create_server_shows_token_once_and_stores_hash(client, admin_user):
     server = Server.objects.get(name="api-01")
     assert resp["Location"] == reverse("fleet:server_enroll", args=[server.pk])
     page = client.get(resp["Location"]).content.decode()
-    token = page.split('id="token" class="fs-6 text-break">')[1].split("<")[0]
-    assert server.token_hash == hash_token(token) and token not in server.token_hash
+    agent_url = page.split('id="token" class="fs-6 text-break">')[1].split("<")[0]
+    password = agent_url.split(":")[2].split("@")[0]
+    assert agent_url.startswith(f"rediss://sm-{server.pk}:") and "raw.githubusercontent.com" in page
+    assert server.token_hash == hash_token(password) and password not in server.token_hash
+    assert f"sm-{server.pk}" in fake_relay.users
     assert sorted(server.groups.values_list("name", flat=True)) == ["api", "workers"]
     assert (
-        token not in client.get(reverse("fleet:server_enroll", args=[server.pk])).content.decode()
+        password
+        not in client.get(reverse("fleet:server_enroll", args=[server.pk])).content.decode()
     )
     assert AuditLog.objects.filter(action="server.create", server=server).exists()
 
 
-def test_rotate_token_invalidates_old(client, admin_user, server_and_token):
-    server, old = server_and_token
+def test_rotate_credentials_replaces_relay_password(
+    client, admin_user, server_and_token, fake_relay
+):
+    from apps.agent_api import relay
+
+    server, _ = server_and_token
+    relay.provision(server)
+    old_rules = fake_relay.users[f"sm-{server.pk}"]
     client.force_login(admin_user)
-    client.post(reverse("fleet:server_rotate_token", args=[server.pk]))
-    resp = client.post(
-        "/api/agent/v1/heartbeat/",
-        "{}",
-        content_type="application/json",
-        HTTP_AUTHORIZATION=f"Bearer {old}",
-    )
-    assert resp.status_code == 401
+    resp = client.post(reverse("fleet:server_rotate_token", args=[server.pk]))
+    assert resp["Location"] == reverse("fleet:server_enroll", args=[server.pk])
+    new_rules = fake_relay.users[f"sm-{server.pk}"]
+    # `reset` first: the old password is dropped, only the new one is accepted.
+    assert new_rules[0] == "reset" and new_rules != old_rules
+    assert AuditLog.objects.filter(action="server.rotate_token", server=server).exists()
 
 
 def test_server_detail_renders_with_data(client, operator, agent, server_and_token):
@@ -132,6 +139,10 @@ def test_login_throttle(client, viewer, settings):
     assert b"Too many failed attempts" in resp.content
 
 
-def test_agent_files_are_served_and_whitelisted(client):
-    assert client.get("/agent/files/install.sh").status_code == 200
-    assert client.get("/agent/files/..%2Fmain%2F.env").status_code == 404
+def test_no_agent_facing_http_endpoints(client):
+    """Agents talk only to the relay: the dashboard exposes nothing for them."""
+    assert client.get("/agent/files/install.sh").status_code == 404
+    assert (
+        client.post("/api/agent/v1/heartbeat/", "{}", content_type="application/json").status_code
+        == 404
+    )

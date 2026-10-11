@@ -28,8 +28,8 @@
       <div class="dropdown">
         <button class="btn btn-outline-secondary btn-sm btn-icon" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="More actions">{% icon "more" %}</button>
         <div class="dropdown-menu dropdown-menu-end">
-          <form method="post" action="{% url 'fleet:server_rotate_token' server.pk %}" data-confirm="Rotate the token for {{ server.name }}? The current token stops working immediately.">{% csrf_token %}
-            <button class="dropdown-item">{% icon "key" 16 %}<span><span class="d-block">Rotate token</span><small>Issue a new agent token</small></span></button>
+          <form method="post" action="{% url 'fleet:server_rotate_token' server.pk %}" data-confirm="Rotate credentials for {{ server.name }}? The agent is disconnected until you install the new ones (sudo smctl connect).">{% csrf_token %}
+            <button class="dropdown-item">{% icon "key" 16 %}<span><span class="d-block">Rotate credentials</span><small>New relay password for the agent</small></span></button>
           </form>
           {% if perms.fleet.delete_server %}
           <div class="dropdown-divider"></div>
@@ -45,7 +45,7 @@
     <div><dt>Platform</dt><dd>{{ server.platform|default:"—" }}</dd></div>
     <div><dt>Hardware</dt><dd>{% if server.cpu_count %}{{ server.cpu_count }} cores{% else %}—{% endif %}{% if server.memory_total %} · {{ server.memory_total|filesizeformat }}{% endif %}</dd></div>
     <div><dt>Agent</dt><dd>{% if server.agent_version %}v{{ server.agent_version }}{% else %}—{% endif %} · every {{ server.report_interval }}s</dd></div>
-    <div><dt>Token</dt><dd><code>{{ server.token_prefix }}…</code></dd></div>
+    <div><dt>Credential</dt><dd><code>{{ server.token_prefix }}…</code></dd></div>
   </dl>
 </header>
 

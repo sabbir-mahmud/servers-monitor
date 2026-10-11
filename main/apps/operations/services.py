@@ -1,4 +1,5 @@
-"""Command lifecycle: create (fan-out), claim (agent poll), progress/result, cancel, expire.
+"""Command lifecycle: create (fan-out), dispatch (relay push), ack, progress/result, cancel,
+expire.
 
 Validation happens twice on purpose. Main refuses actions a server never advertised;
 the agent independently refuses anything not in its local allowlist. A compromised
@@ -7,6 +8,7 @@ dashboard can therefore only trigger what each server's own config already permi
 import logging
 from datetime import timedelta
 
+import redis
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
@@ -14,6 +16,13 @@ from django.utils import timezone
 from apps.audit.services import record
 
 from .models import ACTIVE_STATUSES, Command, CommandStatus, Job
+
+
+def _relay():
+    from apps.agent_api import relay  # late: agent_api imports this module too
+
+    return relay
+
 
 logger = logging.getLogger(__name__)
 
@@ -118,38 +127,49 @@ def create_job(request, action: str, raw_args: dict, servers, note: str = "") ->
             servers=[s.name for s in eligible],
             skipped={s.name: r for s, r in skipped},
         )
+        transaction.on_commit(lambda: dispatch(list(job.commands.select_related("server"))))
     return job, skipped
 
 
-def claim_commands(server) -> list[dict]:
-    """Hand the agent its queued commands and mark them delivered, exactly once.
+def dispatch(commands) -> int:
+    """Push commands into their agents' relay mailboxes. A command Redis refuses stays in
+    the outbox (dispatched_at NULL) and the relay process retries it every few seconds."""
+    relay, sent, now = _relay(), 0, timezone.now()
+    for command in commands:
+        if command.status != CommandStatus.PENDING or command.deliver_by < now:
+            continue
+        try:
+            relay.push_command(command)
+        except (redis.RedisError, relay.RelayError, OSError) as exc:
+            logger.warning("Relay push failed for %s; will retry: %s", command.pk, exc)
+            break  # Redis is down for everyone: leave the rest for the retry loop
+        Command.objects.filter(pk=command.pk, dispatched_at__isnull=True).update(dispatched_at=now)
+        sent += 1
+    return sent
 
-    SKIP LOCKED: if two polls from one agent overlap (slow network, restart), each command
-    goes to exactly one of them instead of the second poll blocking or double-delivering.
-    """
-    if not server.is_enabled:
-        return []
-    now = timezone.now()
-    with transaction.atomic():
-        pending = list(
-            Command.objects.select_for_update(skip_locked=True)
-            .filter(server=server, status=CommandStatus.PENDING)
-            .order_by("created_at")[: settings.MONITOR_COMMANDS_PER_POLL]
+
+def dispatch_pending() -> int:
+    """Outbox retry: commands queued while Redis was unreachable."""
+    waiting = (
+        Command.objects.filter(
+            status=CommandStatus.PENDING,
+            dispatched_at__isnull=True,
+            deliver_by__gte=timezone.now(),
+            server__is_enabled=True,
         )
-        live = [c for c in pending if c.deliver_by >= now]
-        stale = [c.pk for c in pending if c.deliver_by < now]
-        if stale:
-            Command.objects.filter(pk__in=stale).update(
-                status=CommandStatus.EXPIRED, finished_at=now
-            )
-        if live:
-            Command.objects.filter(pk__in=[c.pk for c in live]).update(
-                status=CommandStatus.RUNNING, delivered_at=now
-            )
-    return [
-        {"id": str(c.pk), "action": c.action, "args": c.args, "timeout": c.timeout_seconds}
-        for c in live
-    ]
+        .select_related("server")
+        .order_by("created_at")[:100]
+    )
+    return dispatch(list(waiting))
+
+
+def acknowledge(server, command_id) -> Command | None:
+    """The agent popped this command and is starting it."""
+    now = timezone.now()
+    Command.objects.filter(pk=command_id, server=server, status=CommandStatus.PENDING).update(
+        status=CommandStatus.RUNNING, delivered_at=now
+    )
+    return Command.objects.filter(pk=command_id, server=server).first()
 
 
 def _append(command: Command, chunk: str) -> None:
@@ -190,7 +210,18 @@ def report_progress(server, command_id, status: str, output: str, exit_code) -> 
 
 
 def cancel_command(request, command: Command) -> bool:
-    """Only queued commands can be cancelled; a running deploy is the agent's to finish."""
+    """Only queued commands can be cancelled; a running deploy is the agent's to finish.
+    A dispatched command is cancellable only if it's still sitting in the agent's mailbox
+    (LREM proves the agent never popped it)."""
+    if command.status != CommandStatus.PENDING:
+        return False
+    if command.dispatched_at is not None:
+        try:
+            if not _relay().unqueue_command(command):
+                return False  # already picked up: it's running now
+        except (redis.RedisError, OSError) as exc:
+            logger.warning("Could not reach the relay to cancel %s: %s", command.pk, exc)
+            return False
     with transaction.atomic():
         updated = Command.objects.filter(pk=command.pk, status=CommandStatus.PENDING).update(
             status=CommandStatus.CANCELLED, finished_at=timezone.now()
@@ -208,9 +239,13 @@ def cancel_command(request, command: Command) -> bool:
 
 def expire_commands(now=None) -> int:
     now = now or timezone.now()
-    expired = Command.objects.filter(status=CommandStatus.PENDING, deliver_by__lt=now).update(
-        status=CommandStatus.EXPIRED, finished_at=now
-    )
+    stale = Command.objects.filter(status=CommandStatus.PENDING, deliver_by__lt=now)
+    for command in stale.filter(dispatched_at__isnull=False).select_related("server"):
+        try:  # tidy the mailbox; the agent also ignores expired jobs on its own
+            _relay().unqueue_command(command)
+        except redis.RedisError, OSError:
+            break
+    expired = stale.update(status=CommandStatus.EXPIRED, finished_at=now)
     lost = 0
     running = Command.objects.filter(status=CommandStatus.RUNNING).only(
         "pk", "delivered_at", "timeout_seconds"

@@ -11,41 +11,69 @@ from apps.alerts import services as alert_services
 from apps.audit.services import record
 
 from .models import Health, MetricSample, Server
-from .tokens import generate_token, hash_token
+from .tokens import hash_token
+
+
+def _relay():
+    from apps.agent_api import relay  # late: avoids an import cycle via the bridge
+
+    return relay
+
+
+def _remember_credential(server: Server, agent_url: str) -> None:
+    """Store only a digest and a short display prefix of the agent's relay password."""
+    from urllib.parse import unquote, urlsplit
+
+    password = unquote(urlsplit(agent_url).password or "")
+    server.token_hash, server.token_prefix = hash_token(password), password[:8]
+
 
 logger = logging.getLogger(__name__)
 
 
 @transaction.atomic
 def create_server(request, form) -> tuple[Server, str]:
-    """Save a new server from a bound ServerForm. Returns (server, raw token)."""
-    raw, digest, prefix = generate_token()
+    """Save a new server and create its relay (Redis ACL) user. Returns (server, the agent's
+    connection URL); the URL holds the password and is shown once, never stored."""
     server = form.save(commit=False)
-    server.token_hash, server.token_prefix = digest, prefix
     server.created_by = request.user
-    server.save()
+    server.save()  # the pk names the ACL user and its keys
+    agent_url = _relay().provision(server)  # RelayError rolls the whole create back
+    _remember_credential(server, agent_url)
+    server.save(update_fields=["token_hash", "token_prefix"])
     form.save_m2m()
     record(request, "server.create", target=server.name, server=server)
-    return server, raw
+    return server, agent_url
 
 
 @transaction.atomic
 def rotate_token(request, server: Server) -> str:
-    """Issue a new token; the old one stops working immediately."""
-    raw, digest, prefix = generate_token()
-    server.token_hash, server.token_prefix = digest, prefix
+    """Issue a new relay password; the old one stops working immediately."""
+    agent_url = _relay().provision(server)
+    _remember_credential(server, agent_url)
     server.save(update_fields=["token_hash", "token_prefix", "updated_at"])
     record(request, "server.rotate_token", target=server.name, server=server)
-    return raw
+    return agent_url
 
 
-def server_for_token(raw: str) -> Server | None:
-    if not raw:
-        return None
-    return Server.objects.filter(token_hash=hash_token(raw)).first()
+def server_settings_changed(server: Server, changed: list[str]) -> None:
+    """Push dashboard-side changes the agent must know about right away."""
+    relay = _relay()
+    try:
+        if "is_enabled" in changed:
+            relay.set_enabled(server)
+        if "report_interval" in changed and server.is_enabled:
+            relay.push(server, {"t": "cfg", "report_interval": server.report_interval})
+    except Exception as exc:  # the next heartbeat re-syncs the interval anyway
+        logger.warning("Could not notify %s's agent of new settings: %s", server.name, exc)
 
 
-def ingest_report(server: Server, report: dict, remote_addr: str | None) -> None:
+def delete_server(server: Server) -> None:
+    _relay().deprovision(server)
+    server.delete()
+
+
+def ingest_report(server: Server, report: dict, remote_addr: str | None = None) -> None:
     """Store one validated heartbeat: snapshot on the server row, a sample, alert rules."""
     now = timezone.now()
     with transaction.atomic():

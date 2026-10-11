@@ -10,7 +10,7 @@ import server_monitor_agent as sma  # noqa: E402
 import smctl  # noqa: E402
 
 BASE = {
-    "main": {"url": "https://monitor.test", "token": "smk_test", "verify_tls": True},
+    "main": {"redis_url": "rediss://sm-srv1:tok@relay.test:6379", "verify_tls": True},
     "agent": {"report_interval": 30, "disk_mounts": []},
     "logs": {},
     "shell": {"enabled": False},
@@ -40,6 +40,7 @@ def read(conf):
 def test_dump_round_trips_through_the_agent(tmp_path):
     data = {
         **BASE,
+        "agent": {"report_interval": 120, "disk_mounts": []},
         "services": {"api": {"kind": "systemd", "unit": "gunicorn-api", "restartable": True}},
         "actions": {
             "deploy": {
@@ -112,10 +113,10 @@ def test_agent_validation_blocks_bad_config(env, monkeypatch):
     assert env.read_text() == before
 
 
-def test_token_command(env):
-    assert smctl.main(["token", "not-a-token"]) == 1
-    assert smctl.main(["token", "smk_new"]) == 0
-    assert read(env)["main"]["token"] == "smk_new"
+def test_connect_command(env):
+    assert smctl.main(["connect", "https://not-redis"]) == 1
+    assert smctl.main(["connect", "rediss://sm-new:tok2@relay.test:6379"]) == 0
+    assert read(env)["main"]["redis_url"] == "rediss://sm-new:tok2@relay.test:6379"
 
 
 def test_detect_systemd_known_and_custom_units():

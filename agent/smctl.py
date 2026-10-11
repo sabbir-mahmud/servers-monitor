@@ -2,7 +2,8 @@
 """
 smctl: manage the Server Monitor agent on this server.
 
-The agent dials OUT to the dashboard; nothing ever connects in, so no SSH is needed.
+The agent dials OUT to a Redis relay (the dashboard does too); nothing ever connects in,
+so no SSH, no open ports and no public dashboard are needed.
 This tool edits the agent's allowlist (/etc/server-monitor-agent/agent.toml), keeps the
 sudo rules it needs in step, validates every change with the agent itself, and restarts
 it. The dashboard shows the result on the next heartbeat.
@@ -14,7 +15,7 @@ it. The dashboard shows the result on the next heartbeat.
   sudo smctl service add api --unit gunicorn-api --restartable
   sudo smctl log add api /var/www/api/logs/app.log
   sudo smctl action add deploy --sudo -- /opt/deploy/deploy.sh
-  sudo smctl token smk_...                  install a rotated token
+  sudo smctl connect 'rediss://sm-...'      install rotated credentials
   sudo smctl upgrade | uninstall
 
 Standard library only (Python 3.11+), so it runs before the agent's venv exists.
@@ -33,7 +34,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
-import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -453,10 +454,13 @@ def cmd_detect(opts) -> None:
     )
 
 
+def relay_host(data: dict) -> str:
+    return urllib.parse.urlsplit(data.get("main", {}).get("redis_url", "")).hostname or "?"
+
+
 def cmd_list(opts) -> None:
     data = load()
-    main = data.get("main", {})
-    head(f"Reporting to {main.get('url', '?')}")
+    head(f"Reporting through relay {relay_host(data)}")
     head("\nServices")
     for name, s in data.get("services", {}).items():
         flags = " restartable" if s.get("restartable") else ""
@@ -620,13 +624,18 @@ def cmd_docker(opts) -> None:
     restart_agent()
 
 
-def cmd_token(opts) -> None:
+def cmd_connect(opts) -> None:
+    url = opts.redis_url.strip()
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("rediss", "redis") or not parts.username or not parts.password:
+        raise Fail(
+            "expected the connection string from the dashboard: rediss://sm-<id>:<password>@host:6379"
+        )
     data = load()
-    if not opts.token.startswith("smk_"):
-        raise Fail("that doesn't look like an agent token (they start with smk_)")
-    data.setdefault("main", {})["token"] = opts.token
+    data.setdefault("main", {})["redis_url"] = url
+    data["main"].pop("server_id", None)  # derived from the username
     save(data)
-    ok("token updated")
+    ok(f"connected as {parts.username}; check with: sudo smctl doctor")
 
 
 def _heartbeat() -> tuple[bool, str]:
@@ -640,14 +649,13 @@ def _heartbeat() -> tuple[bool, str]:
 
 def cmd_status(opts) -> None:
     data = load()
-    url = data.get("main", {}).get("url", "?")
     code, state = run(["systemctl", "is-active", UNIT])
     _, since = run(["systemctl", "show", "-p", "ActiveEnterTimestamp", "--value", UNIT])
     head("Server Monitor agent")
     (ok if state == "active" else bad)(
         f"service {state}{dim('  since ' + since) if since and state == 'active' else ''}"
     )
-    print(f"    dashboard  {url}")
+    print(f"    relay      {relay_host(data)}")
     print(f"    config     {CONF}")
     n = {k: len(data.get(k, {})) for k in ("services", "logs", "actions")}
     print(
@@ -675,31 +683,30 @@ def cmd_doctor(opts) -> None:
     except Fail as exc:
         bad(str(exc))
         return
-    url = data.get("main", {}).get("url", "")
     code, state = run(["systemctl", "is-active", UNIT])
     if state == "active":
         ok("agent service is running")
     else:
         problems += 1
         bad(f"agent service is {state}: sudo systemctl start {UNIT}; journalctl -u {UNIT}")
-    try:
-        urllib.request.urlopen(url.rstrip("/") + "/login/", timeout=10)
-        ok(f"dashboard reachable at {url}")
-    except urllib.error.HTTPError:
-        ok(f"dashboard reachable at {url}")
-    except (OSError, ValueError) as exc:
-        problems += 1
-        reason = getattr(exc, "reason", exc)
-        bad(f"cannot reach {url}: {reason}  (DNS, firewall egress or TLS?)")
-    sent, detail = _heartbeat()
-    if sent:
-        ok("token accepted: heartbeat delivered")
+    python = str(AGENT_PYTHON) if AGENT_PYTHON.exists() else sys.executable
+    code, out = run([python, str(AGENT_PY), "-c", str(CONF), "--ping"], timeout=30)
+    if code == 0:
+        ok(f"relay {relay_host(data)} reachable, credentials accepted")
     else:
         problems += 1
         hint = (
-            " Rotate it in the dashboard, then: sudo smctl token <new>" if "401" in detail else ""
+            " Rotate them in the dashboard, then: sudo smctl connect '<new string>'"
+            if code == 3
+            else " (DNS, outbound firewall on port 6379, or TLS?)"
         )
-        bad(f"heartbeat failed: {detail}{hint}")
+        bad((out.splitlines() or ["relay check failed"])[-1] + hint)
+    sent, detail = _heartbeat()
+    if sent:
+        ok("heartbeat delivered to the dashboard's mailbox")
+    else:
+        problems += 1
+        bad(f"heartbeat failed: {detail}")
     for name, path in data.get("logs", {}).items():
         if run(["test", "-r", path], user=AGENT_USER)[0] != 0:
             problems += 1
@@ -783,10 +790,22 @@ def cmd_restart(opts) -> None:
 
 def cmd_upgrade(opts) -> None:
     need_root()
-    url = load().get("main", {}).get("url", "").rstrip("/")
+    source = {"SM_REPO": "sabbir-mahmud/servers-monitor", "SM_REF": "main"}
+    try:
+        for line in (PREFIX / "source").read_text().splitlines():
+            key, _, value = line.partition("=")
+            if key in source and value:
+                source[key] = value
+    except OSError:
+        pass
+    if opts.ref:
+        source["SM_REF"] = opts.ref
+    url = (
+        f"https://raw.githubusercontent.com/{source['SM_REPO']}/{source['SM_REF']}/agent/install.sh"
+    )
     print(dim(f"  fetching installer from {url}"))
-    script = urllib.request.urlopen(f"{url}/agent/files/install.sh", timeout=30).read()
-    p = subprocess.run(["bash", "-s"], input=script, env={**os.environ, "SM_URL": url})
+    script = urllib.request.urlopen(url, timeout=30).read()
+    p = subprocess.run(["bash", "-s"], input=script, env={**os.environ, **source})
     raise SystemExit(p.returncode)
 
 
@@ -882,9 +901,9 @@ def build_parser() -> argparse.ArgumentParser:
     dk = sub.add_parser("docker", help="let the agent see docker containers (root-equivalent)")
     dk.add_argument("state", choices=["enable", "disable"])
     dk.set_defaults(fn=cmd_docker)
-    t = sub.add_parser("token", help="install a new token after rotating it in the dashboard")
-    t.add_argument("token")
-    t.set_defaults(fn=cmd_token)
+    t = sub.add_parser("connect", help="install new relay credentials (after rotating them)")
+    t.add_argument("redis_url", metavar="CONNECTION_STRING")
+    t.set_defaults(fn=cmd_connect)
 
     sub.add_parser("edit", help="edit agent.toml in $EDITOR, validated before saving").set_defaults(
         fn=cmd_edit
@@ -897,9 +916,9 @@ def build_parser() -> argparse.ArgumentParser:
     lo.add_argument("-f", "--follow", action="store_true")
     lo.add_argument("-n", "--lines", type=int, default=50)
     lo.set_defaults(fn=cmd_logs)
-    sub.add_parser("upgrade", help="install the latest agent from the dashboard").set_defaults(
-        fn=cmd_upgrade
-    )
+    up = sub.add_parser("upgrade", help="install the latest agent from GitHub")
+    up.add_argument("--ref", help="branch or tag to install (default: the one installed from)")
+    up.set_defaults(fn=cmd_upgrade)
     u = sub.add_parser("uninstall", help="remove the agent from this server")
     u.add_argument("--purge", action="store_true", help="also delete config and the agent user")
     u.add_argument("-y", "--yes", action="store_true")

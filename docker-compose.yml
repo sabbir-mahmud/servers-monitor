@@ -1,28 +1,35 @@
+# Server Monitor on any machine with Docker: a laptop, a home server, a Raspberry Pi.
+# Nothing here is reachable from the internet: the UI binds to this machine only, and both
+# containers dial OUT to your Redis relay. Agents never connect to this machine.
+#
+#   cp main/.env.example main/.env     # set SECRET_KEY and REDIS_URL
+#   docker compose up -d --build
+#   docker compose exec web python manage.py createsuperuser
+#   open http://127.0.0.1:8000
+x-app: &app
+  build: { context: ., dockerfile: main/Dockerfile }
+  env_file: main/.env
+  volumes: [data:/data]
+  restart: unless-stopped
+
 services:
-  db:
-    image: postgres:17
-    environment: { POSTGRES_DB: monitor, POSTGRES_USER: monitor, POSTGRES_PASSWORD: monitor }
-    volumes: [pgdata:/var/lib/postgresql/data]
-    healthcheck: { test: ["CMD", "pg_isready", "-U", "monitor"], interval: 5s, retries: 10 }
-  redis:
-    image: redis:7-alpine
   web:
-    build: { context: ., dockerfile: main/Dockerfile }
-    env_file: main/.env
-    environment: &env
-      DATABASE_URL: postgres://monitor:monitor@db:5432/monitor
-      REDIS_URL: redis://redis:6379
-    command: sh -c "DB_STATEMENT_TIMEOUT_MS=0 python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --threads 4 --timeout 30"
-    ports: ["8000:8000"]
-    depends_on: { db: { condition: service_healthy }, redis: { condition: service_started } }
-  worker:
-    build: { context: ., dockerfile: main/Dockerfile }
-    env_file: main/.env
-    environment:
-      <<: *env
-      DB_STATEMENT_TIMEOUT_MS: "0"
-    # One beat only: running -B on several workers would duplicate every sweep.
-    command: celery -A config worker -B -l info --concurrency 2
-    depends_on: { db: { condition: service_healthy }, redis: { condition: service_started } }
+    <<: *app
+    command: sh -c "python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 1 --threads 8 --timeout 30 --access-logfile -"
+    # Change to "8000:8000" to open it to your LAN (and add the IP to ALLOWED_HOSTS).
+    ports: ["127.0.0.1:8000:8000"]
+    mem_limit: 256m
+    healthcheck:  # healthy = migrations applied and the app answering
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/login/', timeout=3)"]
+      interval: 10s
+      start_period: 20s
+
+  relay:
+    <<: *app
+    # Exactly one: receives heartbeats/results, retries queued jobs, offline sweep, pruning.
+    command: python manage.py relay
+    depends_on: { web: { condition: service_healthy } }  # web runs the migrations
+    mem_limit: 128m
+
 volumes:
-  pgdata:
+  data:

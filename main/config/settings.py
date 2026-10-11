@@ -9,7 +9,6 @@ and production.
 import sys
 from pathlib import Path
 
-import dj_database_url
 from decouple import Csv, config
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.csp import CSP
@@ -87,26 +86,30 @@ ASGI_APPLICATION = "config.asgi.application"
 # Database
 # ---------------------------------------------------------------------------#
 
+# SQLite in WAL mode: readers never block the one writer, and the web and relay processes
+# share the file safely. IMMEDIATE transactions take the write lock up front, so two writers
+# queue on busy_timeout instead of failing with "database is locked" halfway through.
+SQLITE_PATH = Path(config("SQLITE_PATH", default=str(BASE_DIR / "db.sqlite3")))
 DATABASES = {
-    "default": dj_database_url.config(
-        default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
-        # Reuse connections: a new TCP+TLS+auth handshake per request costs 5-20 ms, and
-        # every agent heartbeat is a request.
-        conn_max_age=config("DB_CONN_MAX_AGE", default=600, cast=int),
-        conn_health_checks=True,
-    )
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": SQLITE_PATH,
+        "OPTIONS": {
+            "transaction_mode": "IMMEDIATE",
+            "timeout": 20,
+            "init_command": (
+                "PRAGMA journal_mode=WAL;"
+                "PRAGMA synchronous=NORMAL;"
+                "PRAGMA busy_timeout=20000;"
+                "PRAGMA foreign_keys=ON;"
+                "PRAGMA temp_store=MEMORY;"
+                "PRAGMA cache_size=-20000;"
+            ),
+        },
+        "CONN_MAX_AGE": config("DB_CONN_MAX_AGE", default=600, cast=int),
+        "CONN_HEALTH_CHECKS": True,
+    }
 }
-if DATABASES["default"]["ENGINE"] == "django.db.backends.postgresql":
-    # A runaway query dies in Postgres instead of holding a worker forever. Kept below
-    # Gunicorn's 30 s timeout. Migrations and Celery run with DB_STATEMENT_TIMEOUT_MS=0.
-    _stmt_ms = config("DB_STATEMENT_TIMEOUT_MS", default=20000, cast=int)
-    DATABASES["default"].setdefault("OPTIONS", {}).update(
-        {
-            "options": f"-c statement_timeout={_stmt_ms} -c lock_timeout=5000"
-            " -c idle_in_transaction_session_timeout=60000",
-            "connect_timeout": 5,
-        }
-    )
 
 # The test runner cannot DROP the test DB while a persistent connection is attached.
 if "test" in sys.argv or "pytest" in sys.modules:
@@ -159,59 +162,37 @@ STORAGES = {
 }
 
 # ---------------------------------------------------------------------------#
-# Cache & Celery
+# Cache & relay
 # ---------------------------------------------------------------------------#
 
-REDIS_URL = config("REDIS_URL", default="")
-# The login throttle needs a cache shared by every Gunicorn worker; locmem is per-process.
-CACHES = {
-    "default": (
-        {"BACKEND": "django.core.cache.backends.redis.RedisCache", "LOCATION": f"{REDIS_URL}/1"}
-        if REDIS_URL
-        else {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}
-    )
-}
+# Run the web app as ONE Gunicorn worker (with threads), so this per-process cache is the
+# whole cache: the login throttle needs no Redis round trips.
+CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 
-CELERY_BROKER_URL = config("CELERY_BROKER_URL", default=f"{REDIS_URL}/0" if REDIS_URL else "")
-CELERY_TASK_ACKS_LATE = True
-CELERY_TASK_REJECT_ON_WORKER_LOST = True
-CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
-# A heartbeat must not wait seconds on kombu retries when the broker is down.
-CELERY_BROKER_CONNECTION_TIMEOUT = 2
-CELERY_TASK_PUBLISH_RETRY_POLICY = {
-    "max_retries": 2,
-    "interval_start": 0,
-    "interval_step": 0.1,
-    "interval_max": 0.3,
-}
-CELERY_TASK_SOFT_TIME_LIMIT = 45
-CELERY_TASK_TIME_LIMIT = 60
-CELERY_TASK_SERIALIZER = CELERY_RESULT_SERIALIZER = "json"
-CELERY_ACCEPT_CONTENT = ["json"]
-CELERY_TASK_IGNORE_RESULT = True
-CELERY_WORKER_PREFETCH_MULTIPLIER = 1
-CELERY_TASK_ALWAYS_EAGER = config(
-    "CELERY_TASK_ALWAYS_EAGER", default=not bool(CELERY_BROKER_URL), cast=bool
-)
-CELERY_TASK_EAGER_PROPAGATES = False  # "webhook down" must not 500 a heartbeat
-if not DEBUG and CELERY_TASK_ALWAYS_EAGER:
-    # Without a broker, alert webhooks would run inside agent requests and the offline
-    # sweep would never run at all. Fail at boot rather than silently degrade.
-    raise ImproperlyConfigured("CELERY_BROKER_URL (or REDIS_URL) is required when DEBUG=False")
-CELERY_BEAT_SCHEDULE = {
-    # Offline detection + command expiry. 15 s keeps detection within one interval of the
-    # default 30 s report cadence without hammering the DB.
-    "monitor-sweep": {"task": "alerts.sweep", "schedule": 15.0},
-    "prune-metrics": {"task": "fleet.prune_metrics", "schedule": 3600.0},
-}
+# The relay: agents and this dashboard both dial out to Redis over TLS (e.g. Upstash).
+# Admin credentials: they create one ACL user per server and never leave this machine.
+REDIS_URL = config("REDIS_URL", default="")
+if REDIS_URL.startswith("redis://") and ".upstash.io" in REDIS_URL:
+    REDIS_URL = "rediss://" + REDIS_URL.removeprefix("redis://")  # Upstash is TLS-only
+if not REDIS_URL and not DEBUG and "test" not in sys.argv and "pytest" not in sys.modules:
+    raise ImproperlyConfigured("REDIS_URL is required: agents reach the dashboard through it")
+RELAY_KEY_PREFIX = config("RELAY_KEY_PREFIX", default="sm")
+# Host agents should use if it differs from REDIS_URL's (rare: a different DNS name).
+RELAY_PUBLIC_HOST = config("RELAY_PUBLIC_HOST", default="")
+# How long the bridge blocks waiting for agent messages per Redis command. Longer = fewer
+# billed commands when idle; new servers are noticed within this many seconds.
+RELAY_BLOCK_SECONDS = config("RELAY_BLOCK_SECONDS", default=60, cast=int)
+
+# Agents install from GitHub, not from this dashboard (which isn't reachable from servers).
+AGENT_REPO = config("AGENT_REPO", default="sabbir-mahmud/servers-monitor")
+AGENT_REF = config("AGENT_REF", default="main")  # pin to a release tag in production
+AGENT_INSTALL_URL = f"https://raw.githubusercontent.com/{AGENT_REPO}/{AGENT_REF}/agent/install.sh"
 
 # ---------------------------------------------------------------------------#
 # Monitoring behaviour
 # ---------------------------------------------------------------------------#
 
 SITE_NAME = config("SITE_NAME", default="Server Monitor")
-# Public base URL the agents use; shown in the enrolment snippet.
-MONITOR_PUBLIC_URL = config("MONITOR_PUBLIC_URL", default="http://127.0.0.1:8000")
 # A server is "late" after this many missed intervals and "offline" after OFFLINE many.
 MONITOR_LATE_AFTER_INTERVALS = config("MONITOR_LATE_AFTER_INTERVALS", default=2, cast=int)
 MONITOR_OFFLINE_AFTER_INTERVALS = config("MONITOR_OFFLINE_AFTER_INTERVALS", default=6, cast=int)
@@ -222,7 +203,7 @@ MONITOR_METRIC_RETENTION_DAYS = config("MONITOR_METRIC_RETENTION_DAYS", default=
 # a deploy that runs an hour after someone clicked it is worse than one that never ran.
 MONITOR_COMMAND_DELIVERY_SECONDS = config("MONITOR_COMMAND_DELIVERY_SECONDS", default=300, cast=int)
 MONITOR_COMMAND_OUTPUT_LIMIT = config("MONITOR_COMMAND_OUTPUT_LIMIT", default=256 * 1024, cast=int)
-MONITOR_COMMANDS_PER_POLL = 10
+MONITOR_SWEEP_SECONDS = 15  # offline detection + command expiry, run by the relay bridge
 
 ALERT_CPU_PERCENT = config("ALERT_CPU_PERCENT", default=90, cast=float)
 ALERT_MEMORY_PERCENT = config("ALERT_MEMORY_PERCENT", default=90, cast=float)
@@ -234,9 +215,6 @@ ALERT_HYSTERESIS_PERCENT = 5.0
 ALERT_CPU_SAMPLES = 3
 # Slack/Discord/Teams-compatible incoming webhook. Empty disables notifications.
 ALERT_WEBHOOK_URL = config("ALERT_WEBHOOK_URL", default="")
-
-# Where the agent files served at /agent/files/ live.
-AGENT_DIST_DIR = Path(config("AGENT_DIST_DIR", default=str(BASE_DIR.parent / "agent")))
 
 # ---------------------------------------------------------------------------#
 # Security
@@ -255,7 +233,15 @@ SECURE_CSP = {
     "base-uri": [CSP.SELF],
 }
 
-if not DEBUG:
+# HTTPS=True when the dashboard sits behind TLS (Caddy, nginx, Tailscale Serve, Cloudflare).
+# Left False, it runs over plain HTTP on a local device or LAN: secure-only cookies would
+# make login impossible there.
+HTTPS = config("HTTPS", default=False, cast=bool)
+X_FRAME_OPTIONS = "DENY"
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "same-origin"
+SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
+if HTTPS and not DEBUG:
     SECURE_SSL_REDIRECT = config("SECURE_SSL_REDIRECT", default=True, cast=bool)
     # Only behind a proxy that OVERWRITES X-Forwarded-Proto.
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
@@ -267,13 +253,7 @@ if not DEBUG:
     if not SECURE_HSTS_PRELOAD:
         SILENCED_SYSTEM_CHECKS = ["security.W021"]
     SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = True
-    X_FRAME_OPTIONS = "DENY"
-    SECURE_CONTENT_TYPE_NOSNIFF = True
-    SECURE_REFERRER_POLICY = "same-origin"
-    SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
 
-# Command output chunks are capped at 64 KiB by the agent; 2.5 MiB leaves ample headroom.
-DATA_UPLOAD_MAX_MEMORY_SIZE = 2_621_440
 
 # ---------------------------------------------------------------------------#
 # Logging
@@ -288,7 +268,7 @@ LOGGING = {
         "django.security": {"handlers": ["console"], "level": "INFO", "propagate": False},
         **{
             n: {"handlers": ["console"], "level": "WARNING", "propagate": False}
-            for n in ("urllib3", "celery", "kombu", "amqp")
+            for n in ("urllib3",)
         },
     },
     "root": {"handlers": ["console"], "level": config("LOG_LEVEL", default="INFO")},

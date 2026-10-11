@@ -7,7 +7,6 @@ from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from apps.core.tasks import safe_delay
 from apps.fleet.models import Health, MetricSample, Server
 
 from .models import Alert, AlertKind, Severity
@@ -19,9 +18,9 @@ DOWN_STATES = {"down"}
 
 
 def _notify(alert: Alert, event: str) -> None:
-    from .tasks import notify_alert
+    from .notify import notify
 
-    transaction.on_commit(lambda: safe_delay(notify_alert, str(alert.pk), event))
+    transaction.on_commit(lambda: notify(str(alert.pk), event))
 
 
 def _open(server, open_alerts, kind, message, severity, subject="", value=None) -> None:

@@ -1,0 +1,22 @@
+# Relay bridge: receives agent heartbeats/results via Redis, retries queued jobs, detects
+# offline servers, prunes old metrics. Run exactly one. See server-monitor-web.service.
+[Unit]
+Description=Server Monitor relay bridge
+After=network-online.target server-monitor-web.service
+Wants=network-online.target
+
+[Service]
+User=server-monitor-ui
+WorkingDirectory=/opt/server-monitor/main
+EnvironmentFile=/opt/server-monitor/main/.env
+ExecStart=/opt/server-monitor/venv/bin/python manage.py relay
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/server-monitor/data
+PrivateTmp=true
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target

@@ -30,6 +30,8 @@ def _seen(server, seconds_ago):
 
 def test_health_thresholds(server_and_token):
     server, _ = server_and_token  # 30 s interval, late after 2×+10 s, offline after 6×+10 s
+    Server.objects.filter(pk=server.pk).update(report_interval=30)
+    server.refresh_from_db()
     assert server.health == Health.PENDING
     _seen(server, 20)
     assert server.health == Health.ONLINE
@@ -41,7 +43,7 @@ def test_health_thresholds(server_and_token):
 
 def test_sweep_opens_one_offline_alert_and_heartbeat_resolves_it(agent, server_and_token):
     server, _ = server_and_token
-    _seen(server, 500)
+    _seen(server, 6 * server.report_interval + 60)
     sweep()
     sweep()
     alert = Alert.objects.get(kind=AlertKind.OFFLINE)
@@ -57,7 +59,7 @@ def test_sweep_marks_silent_running_commands_lost(server_and_token, operator):
     server.capabilities = {"actions": [{"name": "deploy_api", "timeout": 60}]}
     server.save()
     job, _ = services.create_job(_request(operator), "deploy_api", {}, [server])
-    services.claim_commands(server)
+    services.acknowledge(server, job.commands.get().pk)
     Command.objects.update(delivered_at=timezone.now() - timedelta(seconds=60 + 121))
     sweep()
     assert Command.objects.get().status == CommandStatus.LOST
@@ -106,4 +108,4 @@ def test_cancel_only_pending(operator):
     assert not services.cancel_command(_request(operator), cmd)
     cmd.refresh_from_db()
     assert cmd.status == CommandStatus.CANCELLED
-    assert services.claim_commands(a) == []
+    assert services.dispatch_pending() == 0

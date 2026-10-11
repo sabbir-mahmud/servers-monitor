@@ -21,7 +21,6 @@ class ServerForm(forms.ModelForm):
             "groups",
             "description",
             "report_interval",
-            "command_poll_interval",
             "is_enabled",
         ]
 

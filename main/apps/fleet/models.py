@@ -50,7 +50,8 @@ class Server(models.Model):
     # Pushed to the agent in every heartbeat response, so changing them here retunes the
     # agent within one cycle — no SSH needed.
     report_interval = models.PositiveIntegerField(
-        default=30,
+        # Each heartbeat is ~2 relay (Redis) commands; 120 s keeps a server near 65K/month.
+        default=120,
         validators=[MinValueValidator(5), MaxValueValidator(3600)],
         help_text="Seconds between metric reports.",
     )
