@@ -9,7 +9,8 @@ Live health · containers and processes · uptime from many places · status pag
 rolling and scheduled deploys · alerts everywhere · SSO, 2FA and an API · full audit trail
 
 [Quick start](#quick-start) · [Features](#features) · [How it works](#how-it-works) ·
-[Docs](#documentation) · [Security](docs/security.md) · [Contributing](CONTRIBUTING.md)
+[Docs](#documentation) · [API](docs/api.md) · [Security](docs/security.md) ·
+[Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md)
 
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 ![Python](https://img.shields.io/badge/dashboard-Python%203.14%20%C2%B7%20Django%206.1-3b62d9)
@@ -32,8 +33,11 @@ internet, or every server needs SSH keys, VPNs and open ports. Server Monitor ne
   root on your fleet.
 - **Lightweight by design.** Django + SQLite + one small background process, and a handful of
   runtime dependencies on the dashboard; the agent is one Python file plus `psutil`.
-- **Secure by default.** Signed commands, verified installs, invite-only accounts, encrypted
-  secrets, SSRF guards and an append-only audit log. See the [security model](docs/security.md).
+- **Secure by default.** Signed commands, verified installs, invite-only accounts, two-factor
+  sign-in required for Admins, optional SSO, encrypted secrets, SSRF guards and an
+  append-only audit log. See the [security model](docs/security.md).
+- **It watches itself.** A watchdog tells you if the dashboard goes quiet, backups run daily,
+  and a System page shows relay health, Redis usage and agent versions.
 
 ## Features
 
@@ -50,7 +54,8 @@ internet, or every server needs SSH keys, VPNs and open ports. Server Monitor ne
 | **Teams** | Viewer / Operator / Admin roles, invitations or **single sign-on (OIDC)** with group-to-role mapping, **two-factor sign-in**, self-service or admin password resets. |
 | **Integrations** | A token-authenticated **REST API** and **Prometheus `/metrics`**; an installable web app. |
 | **Trust the system** | A watchdog for the dashboard itself, daily backups (plus optional Litestream), a Redis usage meter and a System page. |
-| **`smctl`** | One command on each server to detect services, add deploy actions, manage sudo rules, wrap cron jobs, diagnose problems and upgrade. |
+| **Agent upgrades** | Upgrade one agent or the whole fleet in batches from the dashboard, with no SSH: opt-in per server, release tags only, checksum-verified. |
+| **`smctl`** | One command on each server to detect services, add deploy actions, manage sudo rules, wrap cron jobs, turn on probes and remote upgrades, diagnose problems and upgrade. |
 
 ## How it works
 
@@ -93,6 +98,8 @@ SECRET_KEY=<python3 -c 'import secrets; print(secrets.token_urlsafe(50))'>
 REDIS_URL=rediss://default:<password>@<name>.upstash.io:6379
 HTTPS=False          # serving on this machine over plain HTTP; see docs/deployment.md
 TIME_ZONE=UTC        # e.g. Asia/Dhaka, Europe/London
+AGENT_REF=v2.2.0     # install agents from a release tag (needed for upgrades from the dashboard)
+WATCHDOG_URL=        # recommended: a healthchecks.io ping URL, so you hear if monitoring stops
 ```
 
 Start it and create the first administrator:
@@ -102,8 +109,18 @@ docker compose up -d --build
 docker compose exec web python manage.py createsuperuser
 ```
 
-Open **http://127.0.0.1:8000**, go to **Servers → Add server**, and follow the two-step
-instructions on the page. The server appears as **Connected** within seconds.
+Open **http://localhost:8000**. As an Admin you'll first be asked to set up two-factor
+sign-in with an authenticator app (keep the recovery codes; locked out on the host:
+`docker compose exec web python manage.py reset_2fa <user>`). Then go to
+**Servers → Add server** and follow the two-step instructions on the page. The server appears
+as **Connected** within seconds.
+
+Next steps:
+
+1. **Notifications → Add**: Telegram, email, Slack, ntfy, browser push… and send a test.
+2. **Applications → Add monitor**: your websites, ports, DNS records, or a **Heartbeat** for a
+   cron job (`smctl run nightly-backup -- /opt/backup.sh`).
+3. **Administration → System**: check the watchdog and backups are green.
 
 Not using Docker, running on a Raspberry Pi, or putting HTTPS in front? See
 [docs/deployment.md](docs/deployment.md).
@@ -120,7 +137,10 @@ sudo smctl doctor                                  # diagnose config, relay, per
 sudo smctl detect --apply                          # add services and logs found on this host
 sudo smctl action add deploy -d "Pull and restart" -- /opt/deploy/deploy.sh
 sudo smctl service restartable nginx on            # Restart button, with an exact sudo rule
-sudo smctl log add app /var/www/app/logs/app.log   # make a log tail-able from the dashboard
+sudo smctl log add app /var/www/app/logs/app.log   # make a log tail-able (and followable live)
+sudo smctl run nightly-backup -- /opt/backup.sh    # report a cron job to its Heartbeat monitor
+sudo smctl probes on                               # let this server run uptime checks (internal URLs)
+sudo smctl remote-upgrade on                       # allow agent upgrades from the dashboard
 ```
 
 Full reference: [docs/agent.md](docs/agent.md).
@@ -136,6 +156,18 @@ Full reference: [docs/agent.md](docs/agent.md).
 | [Architecture](docs/architecture.md) | The relay protocol, job lifecycle, health model, alerting and notifications |
 | [Security model](docs/security.md) | Threat model, signed commands, verified installs, hardening checklist |
 
+## Upgrading
+
+```bash
+git pull
+docker compose up -d --build      # migrations run automatically
+```
+
+When the [changelog](CHANGELOG.md) says **agents must be upgraded**, use **Upgrade all
+outdated** on the System page (servers with `smctl remote-upgrade on`), or the verified
+command on each server's page (**⋯ → Install / upgrade agent**). Older agents keep working
+meanwhile; features they don't support simply aren't offered for them.
+
 ## Requirements
 
 | Component | Needs |
@@ -143,21 +175,26 @@ Full reference: [docs/agent.md](docs/agent.md).
 | Dashboard | Docker, or Python 3.14 on any Linux/macOS box (≈ 200 MB RAM) |
 | Relay | Redis 6+ with TLS and `ACL SETUSER` (Upstash, self-hosted Redis or Valkey) |
 | Monitored servers | Linux with systemd and Python 3.11+ (Ubuntu 22.04+, Debian 12+, RHEL 9+) |
+| Browser push, "Install app" | The dashboard on HTTPS (or opened as `localhost`) |
+| Single sign-on (optional) | Any OpenID Connect provider: Keycloak, Authentik, Okta, Google, Entra ID |
 
 ## Development
 
 ```bash
 make install          # virtualenv + dependencies
 cp main/.env.example main/.env   # set DEBUG=True, SECRET_KEY and REDIS_URL
+                                 # (REQUIRE_2FA_FOR_ADMINS=False skips 2FA setup locally)
 make migrate superuser
 make dev              # dashboard on :8000 + the relay process, in one terminal
+                      # (or `make run` and `make relay` in two terminals)
 make test             # dashboard and agent test suites
 make lint             # ruff (the agent is held to Python 3.11 syntax)
 make check            # Django system checks, migrations, production deployment audit
 ```
 
-The tests run without Redis or network access: the relay is exercised through an
-in-memory fake, and HTTP checks, Telegram and Redis wire formats against local test servers.
+The tests (about 400) run without Redis or network access: the relay is exercised through
+an in-memory fake; HTTP checks, notification channels, browser push and Redis wire formats
+run against local test servers; SSO against a stubbed provider.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the project layout and conventions.
 
 ## Contributing
