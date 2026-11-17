@@ -194,7 +194,8 @@ def chart_series(server: Server, range_key: str) -> dict:
     start = end - span
     bucket = span.total_seconds() / CHART_POINTS
     buckets: dict[int, list] = {}
-    for ts, cpu, mem, disk in _chart_rows(server, start, span):
+    rows = _chart_rows(server, start, span)  # oldest first
+    for ts, cpu, mem, disk in rows:
         idx = min(int((ts - start).total_seconds() // bucket), CHART_POINTS - 1)
         acc = buckets.setdefault(idx, [ts, 0.0, 0.0, 0.0, 0])
         acc[0] = ts
@@ -209,7 +210,16 @@ def chart_series(server: Server, range_key: str) -> dict:
         series["cpu"].append([epoch, round(cpu / n, 1)])
         series["memory"].append([epoch, round(mem / n, 1)])
         series["disk"].append([epoch, round(disk / n, 1)])
-    return {"start": int(start.timestamp()), "end": int(end.timestamp()), **series}
+    # When recording began partway through the range (a new server, or the relay was off),
+    # say so: otherwise a mostly empty chart looks like lost data.
+    # The first raw row, not the first bucket: a bucket is stamped with its last sample.
+    data_from = rows[0][0] if rows and rows[0][0] - start > span / 20 else None
+    return {
+        "start": int(start.timestamp()),
+        "end": int(end.timestamp()),
+        "data_from": data_from,
+        **series,
+    }
 
 
 def fleet_summary(servers) -> dict:

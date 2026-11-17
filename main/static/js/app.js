@@ -125,26 +125,74 @@ document.addEventListener("submit", (e) => {
   if (form && !window.confirm(form.dataset.confirm)) e.preventDefault();
 });
 
-// Server page: highlight the section in view and add a hairline once the nav sticks.
+// Server page: sticky jump links. The active link is the last section whose top has passed
+// under the nav, so it's always the section you're reading (and the last one at page end).
 document.addEventListener("DOMContentLoaded", () => {
-  const nav = document.querySelector(".section-nav");
+  const nav = document.querySelector("[data-jump-nav]");
   if (!nav) return;
   const links = [...nav.querySelectorAll("a[href^='#']")];
-  const setActive = (id) => links.forEach((a) => a.classList.toggle("active", a.getAttribute("href") === "#" + id));
-  const visible = new Map();
-  const io = new IntersectionObserver((entries) => {
-    entries.forEach((en) => visible.set(en.target.id, en.isIntersecting ? en.intersectionRatio : 0));
-    const best = links.map((a) => a.getAttribute("href").slice(1)).find((id) => visible.get(id) > 0);
-    if (best) setActive(best);
-  }, { rootMargin: "-80px 0px -55% 0px", threshold: [0, 0.01] });
-  // Sections inside HTMX partials are replaced on refresh, so re-observe by id after swaps.
-  const observe = () => { io.disconnect(); links.forEach((a) => { const el = document.querySelector(a.getAttribute("href")); if (el) io.observe(el); }); };
-  observe();
-  document.addEventListener("htmx:afterSettle", observe);
+  let ticking = false;
+  const update = () => {
+    ticking = false;
+    if (pinned) return;
+    // Past scroll-margin-top (4.75rem), so a section you jumped to counts as current.
+    const line = nav.getBoundingClientRect().bottom + 40;
+    let current = links[0];
+    for (const a of links) {
+      const el = document.querySelector(a.getAttribute("href"));
+      if (el && el.getBoundingClientRect().top <= line) current = a;
+    }
+    links.forEach((a) => a.classList.toggle("active", a === current));
+    // Keep the active link visible in the nav on narrow screens (sideways only).
+    const l = current.offsetLeft, r = l + current.offsetWidth;
+    if (l < nav.scrollLeft || r > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = l - 16;
+  };
+  const queue = () => { if (!ticking) { ticking = true; requestAnimationFrame(update); } };
+  // Room after the last section so even a short one can scroll up under the nav; then
+  // every link (About included) lands its section at the top and lights up correctly.
+  const stack = document.querySelector(".stack");
+  const last = document.querySelector(links[links.length - 1].getAttribute("href"));
+  const pad = () => {
+    if (!stack || !last) return;
+    const margin = parseFloat(getComputedStyle(last).scrollMarginTop) || 0;
+    stack.style.paddingBottom = Math.max(0, window.innerHeight - margin - last.offsetHeight - 24) + "px";
+  };
+  pad();
+  window.addEventListener("resize", pad);
+  document.addEventListener("htmx:afterSettle", pad);
+  // A clicked link is current right away, not after the smooth scroll catches up.
+  let pinned = null;
+  nav.addEventListener("click", (e) => {
+    const a = e.target.closest("a[href^='#']");
+    if (!a) return;
+    pinned = a;
+    links.forEach((l) => l.classList.toggle("active", l === a));
+    clearTimeout(nav._unpin);
+    nav._unpin = setTimeout(() => { pinned = null; queue(); }, 1000);
+  });
+  window.addEventListener("scroll", queue, { passive: true });
+  window.addEventListener("resize", queue);
+  document.addEventListener("htmx:afterSettle", queue);
+  update();
   const sentinel = document.createElement("div");
   nav.before(sentinel);
   new IntersectionObserver(([en]) => nav.classList.toggle("is-stuck", !en.isIntersecting)).observe(sentinel);
 });
+
+// Process list: CPU / Memory order. The choice lives on the panel (outside the part that
+// refreshes every 10 s), so it survives each refresh.
+(function () {
+  const sync = (panel) => panel.querySelectorAll("[data-sort-set]").forEach((b) =>
+    b.setAttribute("aria-pressed", String(b.dataset.sortSet === panel.dataset.sort)));
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-sort-set]");
+    const panel = btn && btn.closest("[data-sort]");
+    if (!panel) return;
+    panel.dataset.sort = btn.dataset.sortSet;
+    sync(panel);
+  });
+  document.addEventListener("htmx:afterSettle", () => document.querySelectorAll("[data-sort]").forEach(sync));
+})();
 
 // "Use this chat" buttons fill a form field (Telegram chat discovery).
 document.addEventListener("click", (e) => {

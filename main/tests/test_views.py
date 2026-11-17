@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from django.urls import reverse
 
@@ -199,3 +201,48 @@ def test_old_server_urls_redirect_to_their_new_home(client, admin_user):
     resp = client.get(f"/servers/{server.pk}/edit/")
     assert resp["Location"] == f"/devices/servers/{server.pk}/edit/"
     assert client.get(resp["Location"]).status_code == 200
+
+
+def test_trendline_draws_the_last_hour():
+    from apps.core.templatetags.monitor import trendline
+
+    svg = str(trendline([[100, 10.0], [160, 55.5], [220, 90.0]], 100, 300))
+    assert 'class="trend"' in svg and "0.0,40" in svg and "120.0,40" in svg
+    assert "trend-empty" in str(trendline([[100, 10.0]], 100, 300))
+
+
+def test_server_page_sections_and_live_refresh(client, operator, agent, server_and_token):
+    agent.heartbeat()
+    agent.heartbeat()
+    client.force_login(operator)
+    url = reverse("fleet:server_detail", args=[server_and_token[0].pk])
+    html = client.get(url).content.decode()
+    # One column: every section is on the page, not behind a tab.
+    for section in (
+        "overview",
+        "charts",
+        "services",
+        "disks",
+        "processes",
+        "operate",
+        "activity",
+        "about",
+    ):
+        assert f'id="{section}"' in html and f'href="#{section}"' in html
+    live = client.get(url + "?part=live", HTTP_HX_REQUEST="true").content.decode()
+    # One poll refreshes every live region: tiles in place, the rest out of band.
+    for region in ("hero-seen", "services", "disks", "live-workloads"):
+        assert re.search(rf'id="{region}"[^>]*hx-swap-oob="true"', live), region
+
+
+def test_history_defaults_to_a_day_and_says_when_recording_began(
+    client, operator, agent, server_and_token
+):
+    agent.heartbeat()
+    client.force_login(operator)
+    url = reverse("fleet:server_detail", args=[server_and_token[0].pk])
+    html = client.get(url).content.decode()
+    pressed = re.findall(r'aria-pressed="true"\s+hx-get="[^"]*range=(\w+)"', html)
+    assert pressed == ["24h"]
+    # A server enrolled minutes ago has no older data: say so instead of a blank chart.
+    assert "Recording since" in html

@@ -118,6 +118,7 @@ ICONS = {
     "wifi": '<path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/>',
     "qr": '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/><path d="M14 14h3v3M21 14v.01M14 21h7v-4"/>',
     "home": '<path d="M3 11 12 3l9 8"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/>',
+    "info": '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
     "switch": '<path d="M7 4 3 8l4 4"/><path d="M3 8h14"/><path d="m17 20 4-4-4-4"/><path d="M21 16H7"/>',
 }
 
@@ -240,6 +241,50 @@ def ring(value, label=""):
         tone=_tone(v),
         label=label,
     )
+
+
+@register.filter
+def sub(value, other):
+    """a|sub:b -> a - b (e.g. a disk's free bytes from total and used); "" on bad input."""
+    try:
+        return max(0, value - other)
+    except TypeError:
+        return ""
+
+
+@register.filter
+def pct_tone(value):
+    """good / warning / critical for a percentage, the same thresholds as meters and rings."""
+    return "muted" if value is None else _tone(float(value))
+
+
+@register.simple_tag
+def trendline(points, start, end):
+    """A bare line for a metric tile: no axes, no labels, just the shape of the last hour.
+    Decorative (the tile prints the number), so it's hidden from assistive tech."""
+    if len(points or ()) < 2:
+        return mark_safe('<div class="trend trend-empty" aria-hidden="true"></div>')
+    span = max(1, end - start)
+    pts = " ".join(
+        f"{(t - start) / span * TREND_W:.1f},{TREND_H - min(v, 100) / 100 * TREND_H:.1f}"
+        for t, v in points
+    )
+    # format_html escapes its arguments to strings first, so numbers are formatted here.
+    first_x = f"{(points[0][0] - start) / span * TREND_W:.1f}"
+    last_x = f"{(points[-1][0] - start) / span * TREND_W:.1f}"
+    return format_html(
+        '<svg class="trend" viewBox="0 0 {w} {h}" preserveAspectRatio="none" aria-hidden="true">'
+        '<polygon class="trend-area" points="{first},{h} {pts} {last},{h}"/>'
+        '<polyline class="trend-line" points="{pts}" vector-effect="non-scaling-stroke"/></svg>',
+        w=TREND_W,
+        h=TREND_H,
+        pts=pts,
+        first=first_x,
+        last=last_x,
+    )
+
+
+TREND_W, TREND_H = 200, 40
 
 
 @register.filter

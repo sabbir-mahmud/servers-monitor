@@ -166,6 +166,10 @@ class ServerEnrollView(StaffViewMixin, TemplateView):
         return ctx
 
 
+# A day shows today's pattern at a glance; 1 h is one click away.
+DEFAULT_CHART_RANGE = "24h"
+
+
 class ServerDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
     permission_required = "fleet.view_server"
     template_name = "fleet/server_detail.html"
@@ -184,13 +188,22 @@ class ServerDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         server = self.object
-        range_key = self.request.GET.get("range", "1h")
+        range_key = self.request.GET.get("range", DEFAULT_CHART_RANGE)
         if range_key not in services.CHART_RANGES:
-            range_key = "1h"
+            range_key = DEFAULT_CHART_RANGE
+        # Each HTMX refresh only computes the series it renders: History polls `charts`,
+        # the metric tiles (always the last hour) poll `live`.
+        part = self.request.GET.get("part") if self.request.htmx else None
+        charts = trend = None
+        if part != "live":
+            charts = services.chart_series(server, range_key)
+        if part != "charts":
+            trend = charts if range_key == "1h" and charts else services.chart_series(server, "1h")
         ctx.update(
             range_key=range_key,
             ranges=list(services.CHART_RANGES),
-            charts=services.chart_series(server, range_key),
+            charts=charts,
+            trend=trend,
             open_alerts=server.alerts.filter(resolved_at__isnull=True),
             recent_commands=server.commands.select_related("job").order_by("-created_at")[:10],
             can_operate=self.request.user.has_perm("operations.add_job"),

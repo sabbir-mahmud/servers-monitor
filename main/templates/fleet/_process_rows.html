@@ -1,0 +1,6 @@
+{% for p in rows %}
+<tr><td><div class="fw-semibold">{{ p.name }} <span class="muted small fw-normal">{{ p.pid }}</span></div>{% if p.cmd %}<div class="row-sub mono text-wrap-any">{{ p.cmd }}</div>{% endif %}</td>
+  <td class="text-body-secondary text-nowrap">{{ p.user }}</td>
+  <td class="num">{% if p.cpu is not None %}{{ p.cpu|floatformat:1 }}%{% else %}—{% endif %}</td>
+  <td class="num text-body-secondary text-nowrap">{{ p.rss|filesizeformat }}</td></tr>
+{% endfor %}

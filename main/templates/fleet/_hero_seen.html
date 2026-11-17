@@ -1,0 +1,1 @@
+{% load monitor %}<span id="hero-seen" {% if oob %}hx-swap-oob="true"{% endif %} title="Expected every {{ server.report_interval|every }}">Reported {{ server.last_seen_at|ago }}</span>
