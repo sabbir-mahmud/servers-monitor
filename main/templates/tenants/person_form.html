@@ -1,15 +1,21 @@
 {% extends "base.html" %}
 {% load monitor %}
-{% block title %}{% if object %}{{ object.name }}{% else %}Add {{ ACCOUNT.person_label }}{% endif %}{% endblock %}
+{% block title %}{% if object %}Edit {{ object.name }}{% else %}Add {{ ACCOUNT.person_label }}{% endif %}{% endblock %}
 {% block content %}
-<a class="back-link" href="{% url 'tenants:people' %}">{% icon "arrow-left" 15 %} {{ ACCOUNT.people_label }}</a>
-<div class="page-head"><div><h1 class="page-title">{% if object %}{{ object.name }}{% else %}Add {{ ACCOUNT.person_label }}{% endif %}</h1></div></div>
-<form method="post" novalidate style="max-width: 40rem">{% csrf_token %}
-  <div class="card mb-3"><div class="card-body form-section">
-    {% if form.non_field_errors %}<div class="alert alert-danger mb-0" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+{% if object %}{% url 'tenants:person_detail' object.pk as back %}{% else %}{% url 'tenants:people' as back %}{% endif %}
+<a class="back-link" href="{{ back }}">{% icon "arrow-left" 15 %} {% if object %}{{ object.name }}{% else %}{{ ACCOUNT.people_label }}{% endif %}</a>
+<div class="page-head"><div>
+  <h1 class="page-title">{% if object %}Edit {{ ACCOUNT.person_label }}{% else %}Add {{ ACCOUNT.person_label }}{% endif %}</h1>
+  <p class="page-sub">{% if object %}Changes show everywhere at once. Their devices stay paired.{% elif ACCOUNT.kind == "family" %}Someone in your family whose devices you'll look after. Just a name is enough.{% else %}A staff member. Assign their company devices next.{% endif %}</p>
+</div></div>
+
+<div class="form-layout">
+  <form method="post" novalidate class="card form-card">{% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger m-3 mb-0" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+
     {% if form.kind %}
-    <fieldset>
-      <legend class="form-label">{{ form.kind.label }}</legend>
+    <fieldset class="form-step">
+      <legend class="form-step-head"><span class="form-step-num">1</span><span><span class="form-step-title">{{ form.kind.label }}</span><span class="form-step-sub">Only you see this. It helps tell people apart.</span></span></legend>
       <div class="platform-picker">
         {% for radio in form.kind %}
         <label class="kind-card platform-card">{{ radio.tag }}
@@ -22,14 +28,58 @@
       {% for e in form.kind.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
     </fieldset>
     {% endif %}
-    {% include "alerts/_field.html" with field=form.name %}
-    {% include "alerts/_field.html" with field=form.email %}
-    {% include "alerts/_field.html" with field=form.notes %}
-  </div></div>
-  <div class="d-flex gap-2 align-items-center">
-    <button class="btn btn-primary">{% if object %}Save{% else %}{% icon "plus" %} Add{% endif %}</button>
-    <a class="btn btn-link" href="{% url 'tenants:people' %}">Cancel</a>
-    {% if object and perms.tenants.delete_person %}<a class="btn btn-link text-danger ms-auto" href="{% url 'tenants:person_delete' object.pk %}">Remove</a>{% endif %}
-  </div>
-</form>
+
+    <div class="form-step">
+      <div class="form-step-head"><span class="form-step-num">{% if form.kind %}2{% else %}1{% endif %}</span><span><span class="form-step-title">Details</span><span class="form-step-sub">The name is all that's needed.</span></span></div>
+      <div class="name-row">
+        <span class="avatar avatar-xl avatar-tone-{% if object %}{{ object.pk|avatar_tone }}{% else %}0{% endif %}" data-avatar-preview aria-hidden="true">{% if object %}{{ object.initials }}{% else %}?{% endif %}</span>
+        <div class="flex-grow-1 min-w-0">
+          <label class="form-label" for="{{ form.name.id_for_label }}">{{ form.name.label }}</label>
+          {{ form.name }}
+          {% for e in form.name.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+        </div>
+      </div>
+      <div class="field-grid">
+        {% include "alerts/_field.html" with field=form.email %}
+        {% include "alerts/_field.html" with field=form.notes %}
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <a class="btn btn-outline-secondary" href="{{ back }}">Cancel</a>
+      <button class="btn btn-primary">{% if object %}Save changes{% else %}{% icon "plus" %} Add {{ ACCOUNT.person_label }}{% endif %}</button>
+    </div>
+  </form>
+
+  <aside class="form-aside">
+    {% if object %}
+    {% if devices is not None %}
+    <section class="card side-card">
+      <h2 class="side-title">Their devices</h2>
+      {% if devices %}
+      <ul class="mini-devices" role="list">
+        {% for d in devices %}<li><span class="device-icon is-{{ d.state }}" aria-hidden="true">{% icon d|device_icon 15 %}</span><span class="min-w-0 flex-grow-1 text-truncate">{{ d.name }}</span>{% device_badge d.state %}</li>{% endfor %}
+      </ul>
+      {% else %}<p class="small text-body-secondary mb-0">None yet. Add them from {{ object.name }}'s page.</p>{% endif %}
+    </section>
+    {% endif %}
+    {% if perms.tenants.delete_person %}
+    <section class="card side-card side-card-danger">
+      <h2 class="side-title">Remove {{ ACCOUNT.person_label }}</h2>
+      <p class="small text-body-secondary">{% if devices %}Their devices stay and become shared; remove those separately if you want them gone.{% else %}They're taken off the list. This can't be undone.{% endif %}</p>
+      <a class="btn btn-sm btn-outline-danger" href="{% url 'tenants:person_delete' object.pk %}">{% icon "trash" 14 %} Remove {{ object.name }}</a>
+    </section>
+    {% endif %}
+    {% else %}
+    <section class="card side-card">
+      <h2 class="side-title">What happens next</h2>
+      <ol class="next-steps">
+        <li><strong>Add them</strong><span>You'll land on their page.</span></li>
+        <li><strong>Add their devices</strong><span>Phones, tablets, Windows, Mac or Linux.</span></li>
+        <li><strong>Pair on each device</strong><span>Enter the code in the {{ SITE_NAME }} app. It never expires.</span></li>
+      </ol>
+    </section>
+    {% endif %}
+  </aside>
+</div>
 {% endblock %}

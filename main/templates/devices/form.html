@@ -2,35 +2,117 @@
 {% load monitor %}
 {% block title %}{% if object %}Edit {{ object.name }}{% else %}Add a device{% endif %}{% endblock %}
 {% block content %}
-<a class="back-link" href="{% if object %}{% url 'devices:detail' object.pk %}{% else %}{% url 'tenants:people' %}{% endif %}">{% icon "arrow-left" 15 %} {% if object %}{{ object.name }}{% else %}{{ ACCOUNT.people_label }}{% endif %}</a>
+{% if object %}{% url 'devices:detail' object.pk as back %}{% elif form.initial.person %}{% url 'tenants:person_detail' form.initial.person.pk as back %}{% else %}{% url 'tenants:people' as back %}{% endif %}
+<a class="back-link" href="{{ back }}">{% icon "arrow-left" 15 %} {% if object %}{{ object.name }}{% elif form.initial.person %}{{ form.initial.person.name }}{% else %}{{ ACCOUNT.people_label }}{% endif %}</a>
 <div class="page-head"><div>
-  <h1 class="page-title">{% if object %}Edit {{ object.name }}{% else %}Add a device{% endif %}</h1>
-  {% if not object %}<p class="page-sub">Next you'll get a pairing code. Enter it in the NexGuard app on the device itself: nothing is set up behind anyone's back, and the app always shows that the device is monitored.</p>{% endif %}
+  <h1 class="page-title">{% if object %}Edit device{% else %}Add a device{% endif %}</h1>
+  <p class="page-sub">{% if object %}Rename it or change whose it is. Its history and pairing stay as they are.{% else %}Three details now, then you'll pair it on the device itself.{% endif %}</p>
 </div></div>
-<form method="post" novalidate style="max-width: 44rem">{% csrf_token %}
-  <div class="card mb-3"><div class="card-body form-section">
-    {% if form.non_field_errors %}<div class="alert alert-danger mb-0" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
-    <fieldset {% if form.platform.field.disabled %}disabled{% endif %}>
-      <legend class="form-label">{{ form.platform.label }}</legend>
-      {% if form.platform.field.disabled %}<p class="form-text mt-0">The app on this device is for {{ object.get_platform_display }}. For another kind of device, add it separately.</p>{% endif %}
-      <div class="platform-picker">
-        {% for radio in form.platform %}
-        <label class="kind-card platform-card">{{ radio.tag }}
-          <span class="platform-card-icon">{% icon radio.data.value|device_icon 20 %}</span>
-          <span class="kind-title">{{ radio.choice_label }}</span>
-          <span class="kind-help">{% if radio.data.value == "android" or radio.data.value == "ios" %}Phone or tablet{% else %}Computer{% endif %}</span>
+
+<div class="form-layout">
+  <form method="post" novalidate class="card form-card" data-name-suggest
+        data-nouns='{"android": "phone", "ios": "iPhone", "windows": "PC", "macos": "Mac", "linux": "computer"}'
+        data-shared-prefix="{% if ACCOUNT.kind == 'family' %}Family{% else %}Shared{% endif %}">{% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger m-3 mb-0" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+
+    <fieldset class="form-step">
+      <legend class="form-step-head"><span class="form-step-num">1</span><span><span class="form-step-title">{{ form.person.label }}</span><span class="form-step-sub">Its alerts and location appear on their page.</span></span></legend>
+      {% if form.person.field.widget.input_type == "radio" %}
+      <div class="person-chips">
+        {% for radio in form.person %}
+        <label class="person-chip">{{ radio.tag }}
+          {% if radio.data.value %}
+          <span class="avatar avatar-tone-{{ radio.data.value|stringformat:'s'|avatar_tone }}" aria-hidden="true">{{ radio.choice_label|initials }}</span>
+          <span class="person-chip-name" data-person-name>{{ radio.choice_label }}</span>
+          {% else %}
+          <span class="avatar avatar-shared" aria-hidden="true">{% icon "users" 15 %}</span>
+          <span class="person-chip-name">Shared</span>
+          {% endif %}
         </label>
         {% endfor %}
       </div>
+      {% else %}{{ form.person }}{% endif %}
+      {% for e in form.person.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+    </fieldset>
+
+    <fieldset class="form-step">
+      <legend class="form-step-head"><span class="form-step-num">2</span><span><span class="form-step-title">{{ form.platform.label }}</span><span class="form-step-sub">{% if form.platform.field.disabled %}Fixed once paired: the app on it is for this system.{% else %}Picks the right app and pairing steps.{% endif %}</span></span></legend>
+      {% if form.platform.field.disabled %}
+      <div class="fixed-choice">
+        <span class="device-icon" aria-hidden="true">{% icon object|device_icon 18 %}</span>
+        <div class="min-w-0"><div class="fw-semibold">{{ object.get_platform_display }}</div><div class="small text-body-secondary">A different kind of device? Add it as a new one.</div></div>
+      </div>
+      {% else %}
+      <div class="platform-groups">
+        <div>
+          <div class="platform-group-label">{% icon "phone" 14 %} Phones and tablets</div>
+          <div class="platform-picker">
+            {% for radio in form.platform %}{% if radio.data.value == "android" or radio.data.value == "ios" %}
+            <label class="kind-card platform-card">{{ radio.tag }}
+              <span class="platform-card-icon">{% icon "phone" 20 %}</span>
+              <span class="kind-title">{{ radio.choice_label }}</span>
+              <span class="kind-help">Location, battery, last online</span>
+            </label>
+            {% endif %}{% endfor %}
+          </div>
+        </div>
+        <div>
+          <div class="platform-group-label">{% icon "laptop" 14 %} Computers</div>
+          <div class="platform-picker">
+            {% for radio in form.platform %}{% if radio.data.value != "android" and radio.data.value != "ios" %}
+            <label class="kind-card platform-card">{{ radio.tag }}
+              <span class="platform-card-icon">{% icon "laptop" 20 %}</span>
+              <span class="kind-title">{{ radio.choice_label }}</span>
+              <span class="kind-help">Battery, storage, last online</span>
+            </label>
+            {% endif %}{% endfor %}
+          </div>
+        </div>
+      </div>
+      {% endif %}
       {% for e in form.platform.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
     </fieldset>
-    {% include "alerts/_field.html" with field=form.name %}
-    {% include "alerts/_field.html" with field=form.person %}
-  </div></div>
-  <div class="d-flex gap-2 align-items-center">
-    <button class="btn btn-primary">{% if object %}Save{% else %}Continue {% icon "chevron" %}{% endif %}</button>
-    <a class="btn btn-link" href="{% if object %}{% url 'devices:detail' object.pk %}{% else %}{% url 'tenants:people' %}{% endif %}">Cancel</a>
-    {% if object and perms.devices.delete_device %}<a class="btn btn-link text-danger ms-auto" href="{% url 'devices:delete' object.pk %}">Remove device</a>{% endif %}
-  </div>
-</form>
+
+    <div class="form-step">
+      <div class="form-step-head"><span class="form-step-num">3</span><span><label class="form-step-title" for="{{ form.name.id_for_label }}">{{ form.name.label }}</label><span class="form-step-sub">{{ form.name.help_text }}</span></span></div>
+      {{ form.name }}
+      {% for e in form.name.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+    </div>
+
+    <div class="form-actions">
+      <a class="btn btn-outline-secondary" href="{{ back }}">Cancel</a>
+      <button class="btn btn-primary">{% if object %}Save changes{% else %}Continue to pairing {% icon "chevron" %}{% endif %}</button>
+    </div>
+  </form>
+
+  <aside class="form-aside">
+    {% if object %}
+    <section class="card side-card">
+      <h2 class="side-title">This device</h2>
+      <div class="d-flex align-items-center gap-2 mb-2">{% device_badge object.state %}<span class="small text-body-secondary">{% if object.last_seen_at %}last online {{ object.last_seen_at|ago }}{% else %}never checked in{% endif %}</span></div>
+      <dl class="kv-list mb-0">
+        {% if object.model %}<dt>Model</dt><dd>{{ object.model }}</dd>{% endif %}
+        <dt>Paired</dt><dd>{% if object.paired_at %}{{ object.paired_at|date:"j M Y" }}{% else %}Not yet{% endif %}</dd>
+      </dl>
+    </section>
+    {% if perms.devices.delete_device %}
+    <section class="card side-card side-card-danger">
+      <h2 class="side-title">Remove device</h2>
+      <p class="small text-body-secondary">It stops reporting at once, and its location history is deleted.</p>
+      <a class="btn btn-sm btn-outline-danger" href="{% url 'devices:delete' object.pk %}">{% icon "trash" 14 %} Remove {{ object.name }}</a>
+    </section>
+    {% endif %}
+    {% else %}
+    <section class="card side-card">
+      <h2 class="side-title">What happens next</h2>
+      <ol class="next-steps">
+        <li><strong>You get a pairing code</strong><span>It stays valid until it's used, so there's no rush.</span></li>
+        <li><strong>Install {{ SITE_NAME }} on the device</strong><span>From the App Store, Google Play, or the download for computers.</span></li>
+        <li><strong>Enter the code there</strong><span>The device appears here within a minute.</span></li>
+      </ol>
+      <p class="next-steps-note">{% icon "shield" 14 %} Nothing is set up behind anyone's back: the app always shows the device is monitored.</p>
+    </section>
+    {% endif %}
+  </aside>
+</div>
 {% endblock %}

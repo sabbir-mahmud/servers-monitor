@@ -360,7 +360,7 @@ def test_child_page_shows_map_recent_places_and_devices(client, parent, paired, 
     assert "Where Sara was last" in page and 'class="map-tile"' in page
     assert "23.7812, 90.4074" in page  # recent places
     assert "Sara&#x27;s phone: battery low" in page  # status line
-    assert "Add another" in page and "Full history" in page
+    assert "Add another" not in page and "Full history" in page  # adding is in the header menu
     assert 'class="alert-line is-warning"' in page  # low battery is called out up top
 
 
@@ -398,7 +398,7 @@ def test_computers_without_location_skip_the_history_card(client, parent, sara):
 # --------------------------------------------------------------------------- the people list
 
 
-def test_people_list_filters_searches_and_puts_problems_first(client, parent, family, paired):
+def test_people_list_searches_and_puts_problems_first(client, parent, family, paired):
     device, token = paired
     api_checkin(client, token, {"battery": {"percent": 5, "charging": False}})  # Sara: low
     Person.objects.create(account=family, kind="child", name="Abir")
@@ -409,16 +409,12 @@ def test_people_list_filters_searches_and_puts_problems_first(client, parent, fa
     # Sara needs a look, so she leads, ahead of alphabetical order.
     assert page.index(">Sara</a>") < page.index(">Abir</a>") < page.index(">Zayn</a>")
     assert 'title="1 need a look"' in page  # the red count on the sidebar link
+    assert "plist-filter" not in page  # no filter tabs, just search
 
-    page = client.get(url, {"show": "attention"}).content.decode()
-    assert ">Sara</a>" in page and ">Abir</a>" not in page and "1 of 3" in page
-    page = client.get(url, {"show": "none"}).content.decode()
-    assert ">Sara</a>" not in page and ">Abir</a>" in page and ">Zayn</a>" in page
     page = client.get(url, {"q": "zay"}).content.decode()
-    assert ">Zayn</a>" in page and ">Abir</a>" not in page
+    assert ">Zayn</a>" in page and ">Abir</a>" not in page and "1 of 3" in page
     page = client.get(url, {"q": "nobody"}).content.decode()
     assert "Nobody matches" in page
-    assert client.get(url, {"show": "bogus"}).status_code == 200  # unknown filter = all
 
 
 def test_child_with_only_a_computer_gets_a_short_location_hint(client, parent, sara):
@@ -443,3 +439,21 @@ def test_a_family_can_add_a_partner_but_not_staff(client, parent, family):
     assert resp.status_code == 200 and not Person.objects.filter(name="Bob").exists()
     page = client.get(reverse("tenants:people")).content.decode()
     assert '<h1 class="page-title">People</h1>' in page and "Spouse or partner" in page
+
+
+def test_add_device_form_has_no_blank_platform_and_offers_people_as_chips(client, parent, sara):
+    client.force_login(parent)
+    page = client.get(reverse("devices:create"), {"person": sara.pk}).content.decode()
+    assert "Select an option" not in page and "---------" not in page
+    assert 'class="person-chip"' in page and ">Sara</span>" in page and ">Shared</span>" in page
+    assert "What happens next" in page
+
+
+def test_adding_or_editing_a_person_lands_on_their_page(client, parent):
+    client.force_login(parent)
+    resp = client.post(reverse("tenants:person_create"), {"kind": "child", "name": "Mira"})
+    mira = Person.objects.get(name="Mira")
+    assert resp["Location"] == reverse("tenants:person_detail", args=[mira.pk])
+    resp = client.post(reverse("tenants:person_update", args=[mira.pk]),
+                       {"kind": "child", "name": "Mira K"})  # fmt: skip
+    assert resp["Location"] == reverse("tenants:person_detail", args=[mira.pk])

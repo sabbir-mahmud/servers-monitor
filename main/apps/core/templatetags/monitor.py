@@ -152,6 +152,13 @@ def avatar_tone(value) -> int:
 
 
 @register.filter
+def initials(name) -> str:
+    """'Sara Rahman' -> 'SR' (same rule as Person.initials, for a plain name)."""
+    parts = str(name).split()
+    return "".join(p[0] for p in parts[:2]).upper() or "?"
+
+
+@register.filter
 def map_link(obj) -> str:
     """OpenStreetMap at this device's (or location row's) position."""
     from apps.devices.maps import open_url

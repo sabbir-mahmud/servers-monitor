@@ -171,39 +171,15 @@ class PersonListView(StaffViewMixin, AccountScopedMixin, ListView):
             person.summary = summarize(person.devices.all() if show_devices else [])
         everything = [d for p in people for d in p.summary["devices"]] + unassigned
 
-        # Search and filter in Python: a family has a handful of people, a company a few
-        # hundred, and the states depend on the current time anyway.
+        # Search in Python: a family has a handful of people, a company a few hundred.
         query = self.request.GET.get("q", "").strip()
-        show = self.request.GET.get("show", "all")
-        tests = {
-            "all": lambda p: True,
-            "attention": lambda p: bool(p.summary["attention"]),
-            "online": lambda p: p.summary["online"] > 0,
-            "offline": lambda p: any(d.state == "offline" for d in p.summary["devices"]),
-            "none": lambda p: not p.summary["devices"],
-        }
-        if show not in tests or not show_devices:
-            show = "all"
-        matching = [p for p in people if not query or query.lower() in p.name.lower()]
-        filters = [
-            {"key": key, "label": label, "count": sum(1 for p in matching if tests[key](p))}
-            for key, label in (
-                ("all", "All"),
-                ("attention", "Needs a look"),
-                ("online", "Online"),
-                ("offline", "Offline"),
-                ("none", "No devices"),
-            )  # fmt: skip
-        ]
-        shown = [p for p in matching if tests[show](p)]
+        shown = [p for p in people if not query or query.lower() in p.name.lower()]
         # Whoever needs a look comes first; otherwise alphabetical.
         shown.sort(key=lambda p: (not p.summary["attention"], p.name.lower()))
         ctx.update(
             people=people,
             shown=shown,
             query=query,
-            show=show,
-            filters=filters if show_devices else [],
             unassigned=unassigned,
             show_devices=show_devices,
             family=self.request.account.kind == "family",
@@ -258,7 +234,17 @@ class _PersonFormMixin(AccountScopedMixin):
     model = Person
     form_class = PersonForm
     template_name = "tenants/person_form.html"
-    success_url = reverse_lazy("tenants:people")
+
+    def get_success_url(self):
+        # Their page is where the next step (adding their devices) happens.
+        return reverse("tenants:person_detail", args=[self.object.pk])
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        person = getattr(self, "object", None)
+        if person is not None and self.request.user.has_perm("devices.view_device"):
+            ctx["devices"] = list(person.devices.filter(account=self.request.account))
+        return ctx
 
 
 class PersonCreateView(StaffViewMixin, _PersonFormMixin, CreateView):

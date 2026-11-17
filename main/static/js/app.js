@@ -254,3 +254,37 @@ document.addEventListener("click", async (e) => {
     say("Couldn't subscribe: " + err.message, false);
   }
 });
+
+// Add/edit forms: a live avatar while typing a name, and a suggested device name
+// ("Sara's iPhone") that follows the choices until the user types their own.
+document.addEventListener("DOMContentLoaded", () => {
+  const initials = (s) => s.trim().split(/\s+/).slice(0, 2).map((w) => w[0] || "").join("").toUpperCase() || "?";
+  const preview = document.querySelector("[data-avatar-preview]");
+  const nameInput = preview && preview.closest("form").querySelector("input[name=name]");
+  if (preview && nameInput) nameInput.addEventListener("input", () => { preview.textContent = initials(nameInput.value); });
+
+  const form = document.querySelector("form[data-name-suggest]");
+  if (!form) return;
+  const name = form.querySelector("input[name=name]");
+  let nouns = {};
+  try { nouns = JSON.parse(form.dataset.nouns || "{}"); } catch (e) { /* keep empty */ }
+  let suggested = "";
+  let touched = name.value.trim() !== "";
+  const suggest = () => {
+    const platform = form.querySelector("input[name=platform]:checked");
+    const person = form.querySelector("input[name=person]:checked");
+    const select = form.querySelector("select[name=person]");
+    let who = "";
+    if (person && person.value) who = person.closest("label").querySelector("[data-person-name]").textContent.trim();
+    else if (select && select.value) who = select.options[select.selectedIndex].text.trim();
+    const noun = platform ? nouns[platform.value] || "device" : "device";
+    const owner = who ? (who.split(/\s+/)[0] + (/s$/i.test(who.split(/\s+/)[0]) ? "'" : "'s")) : form.dataset.sharedPrefix;
+    const next = `${owner} ${noun}`;
+    name.placeholder = next;
+    if (!touched || name.value === suggested) { name.value = next; touched = false; }
+    suggested = next;
+  };
+  name.addEventListener("input", () => { touched = name.value !== suggested; });
+  form.addEventListener("change", (e) => { if (e.target.name === "platform" || e.target.name === "person") suggest(); });
+  if (!touched) suggest(); else suggested = "";
+});

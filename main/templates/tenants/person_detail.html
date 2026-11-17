@@ -102,16 +102,7 @@
   <div class="dlist-empty">
     <span class="map-empty-icon">{% icon "phone" 20 %}</span>
     <div><div class="fw-semibold">No devices yet</div>
-      <p class="small text-body-secondary mb-0">Add {{ person.name }}'s phone or computer. You get a pairing code to enter on the device; it works until it's used.</p></div>
-  </div>
-  {% endif %}
-  {% if perms.devices.add_device %}
-  <div class="dlist-foot">
-    <span class="dlist-foot-label">{% if s.devices %}Add another{% else %}Add a device{% endif %}</span>
-    <div class="dlist-add">
-      {% for p in phones %}<a class="dadd" href="{% url 'devices:create' %}?person={{ person.pk }}&amp;platform={{ p.value }}">{% icon "phone" 14 %} {{ p.label }}</a>{% endfor %}
-      {% for p in computers %}<a class="dadd" href="{% url 'devices:create' %}?person={{ person.pk }}&amp;platform={{ p.value }}">{% icon "laptop" 14 %} {{ p.label }}</a>{% endfor %}
-    </div>
+      <p class="small text-body-secondary mb-0">Use <strong>Add device</strong> above for {{ person.name }}'s phone or computer. You get a pairing code to enter on the device; it works until it's used.</p></div>
   </div>
   {% endif %}
 </section>

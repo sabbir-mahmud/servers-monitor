@@ -37,17 +37,9 @@
 <div class="card plist">
   <div class="plist-toolbar">
     <form method="get" class="plist-search" role="search">
-      {% if show != "all" %}<input type="hidden" name="show" value="{{ show }}">{% endif %}
       <span class="plist-search-icon" aria-hidden="true">{% icon "search" 15 %}</span>
       <input class="form-control form-control-sm" type="search" name="q" value="{{ query }}" placeholder="Search {{ ACCOUNT.people_label|lower }}" aria-label="Search {{ ACCOUNT.people_label|lower }}">
     </form>
-    {% if filters %}
-    <nav class="plist-filters" aria-label="Filter">
-      {% for f in filters %}
-      <a class="plist-filter {% if f.key == show %}is-active{% endif %}{% if f.key == 'attention' and f.count %} is-alert{% endif %}" href="?{% if query %}q={{ query|urlencode }}&amp;{% endif %}show={{ f.key }}" {% if f.key == show %}aria-current="true"{% endif %}>{{ f.label }}<span class="plist-filter-count">{{ f.count }}</span></a>
-      {% endfor %}
-    </nav>
-    {% endif %}
   </div>
 
   {% if shown %}
@@ -100,13 +92,12 @@
   </ul>
   <div class="plist-foot">
     <span>{% if shown|length == people|length %}{{ people|length }} {% if people|length == 1 %}{{ ACCOUNT.person_label }}{% else %}{{ ACCOUNT.people_label|lower }}{% endif %}{% else %}{{ shown|length }} of {{ people|length }}{% endif %}</span>
-    {% if perms.tenants.add_person %}<a href="{% url 'tenants:person_create' %}">{% icon "plus" 14 %} Add {{ ACCOUNT.person_label }}</a>{% endif %}
   </div>
   {% else %}
   <div class="plist-empty">
     <span class="map-empty-icon">{% icon "search" 20 %}</span>
     <div><div class="fw-semibold">Nobody matches</div>
-      <p class="small text-body-secondary mb-0">{% if query %}No one called “{{ query }}”{% if show != "all" %} in this filter{% endif %}.{% else %}No one in this filter right now.{% endif %} <a href="{% url 'tenants:people' %}">Show everyone</a></p></div>
+      <p class="small text-body-secondary mb-0">No one called “{{ query }}”. <a href="{% url 'tenants:people' %}">Show everyone</a></p></div>
   </div>
   {% endif %}
 </div>
