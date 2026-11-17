@@ -11,7 +11,7 @@ from apps.core.mixins import StaffViewMixin
 from apps.tenants.models import Person
 from apps.tenants.scoping import AccountScopedMixin, scoped
 
-from . import maps, services
+from . import connect, maps, services
 from .forms import DeviceForm
 from .models import COMPUTERS, Device
 
@@ -78,11 +78,15 @@ class DevicePairView(StaffViewMixin, AccountScopedMixin, DetailView):
             stored = self.request.session.pop(CODE_SESSION_KEY.format(device.pk), None)
             code = crypto.decrypt(stored) if stored else None
         server = (settings.DASHBOARD_URL or self.request.build_absolute_uri("/")).rstrip("/")
+        is_computer = device.platform in COMPUTERS
+        if is_computer and code:
+            # The link to open on the computer, and the one line it shows (see connect.py).
+            ctx.update(connect.connect_context(server, code), only=device.platform)
         ctx.update(
             code=code,
             server_url=server,
-            qr=_qr(server, code) if code else "",
-            is_computer=device.platform in COMPUTERS,
+            qr=_qr(server, code) if code and not is_computer else "",
+            is_computer=is_computer,
             # Paired before and a new code is out: it's being moved to a new/reset device.
             repairing=device.paired_at is not None and bool(device.pairing_code_hash),
             back_url=_back_to(device),

@@ -1,0 +1,22 @@
+{% load monitor %}{# The one-line setup for a computer. `only` = a platform key to show just that system. #}
+<div class="connect" data-os-tabs>
+  {% if not only %}
+  <div class="segmented connect-os" role="group" aria-label="This computer runs">
+    {% for s in systems %}<button type="button" data-os="{{ s.key }}" aria-pressed="{% if forloop.first %}true{% else %}false{% endif %}">{{ s.label }}</button>{% endfor %}
+  </div>
+  {% endif %}
+  {% for s in systems %}{% if not only or only == s.key %}
+  <div class="connect-panel" data-os-panel="{{ s.key }}" {% if not only and not forloop.first %}hidden{% endif %}>
+    <ol class="connect-steps">
+      <li><strong>Open {{ s.app }}.</strong> <span>{{ s.open }}</span></li>
+      <li><strong>Copy this line and paste it in.</strong> <span>{{ s.paste }}</span>
+        <div class="connect-cmd">
+          <code id="cmd-{{ s.key }}{{ suffix }}">{{ s.command }}</code>
+          <button type="button" class="btn btn-primary btn-sm" data-copy="#cmd-{{ s.key }}{{ suffix }}">{% icon "copy" 14 %} <span data-copy-label>Copy</span></button>
+        </div>
+      </li>
+      <li><strong>Read the message, then type <kbd>y</kbd> and press Enter.</strong> <span>It says who will see this computer. Nothing is shared until you agree.</span></li>
+    </ol>
+  </div>
+  {% endif %}{% endfor %}
+</div>

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Connect this computer{% endblock %}
+{% block auth %}
+<div class="connect-page">
+  <div class="connect-top">
+    <div class="brand"><span class="brand-mark">{% icon "activity" 17 %}</span><span>{{ SITE_NAME }}</span></div>
+  </div>
+
+  <div class="connect-card card">
+    <div class="card-body">
+      <h1 class="connect-title">Connect this computer</h1>
+      <p class="connect-lead">Three steps, about a minute. You don't need to install anything first or be an administrator.</p>
+      {% include "devices/_connect_steps.html" with suffix="" %}
+      {% if is_plain_http %}<p class="small text-body-secondary mt-3 mb-0">{% icon "alert" 13 %} This dashboard uses a plain http:// address, so only do this on a network you trust.</p>{% endif %}
+    </div>
+  </div>
+
+  <div class="connect-notes">
+    <details>
+      <summary>What does it install?</summary>
+      <p>A small check-in that runs as you every 5 minutes and sends the battery level, free storage, and the system version. It doesn't read your files, see your screen or record keystrokes. You can see it in Task Scheduler on Windows, in <code>~/Library/LaunchAgents</code> on a Mac, or as a user timer on Linux.</p>
+    </details>
+    <details>
+      <summary>How do I remove it?</summary>
+      <p>Paste this the same way:</p>
+      <p><strong>Windows</strong> <code class="d-block mt-1">{{ uninstall.windows }}</code></p>
+      <p class="mb-0"><strong>Mac or Linux</strong> <code class="d-block mt-1">{{ uninstall.unix }}</code></p>
+    </details>
+    <details>
+      <summary>It says the code isn't valid</summary>
+      <p class="mb-0">Each code works once. Ask the person who sent the link to make a new one on their dashboard.</p>
+    </details>
+  </div>
+</div>
+{% endblock %}

@@ -151,6 +151,7 @@ Full reference: [docs/agent.md](docs/agent.md).
 | Guide | What's inside |
 |---|---|
 | [Deployment](docs/deployment.md) | `run.sh`, systemd and Raspberry Pi installs, HTTPS options, backups, upgrades, Redis cost |
+| [Devices](docs/devices.md) | Connecting Windows, Mac and Linux computers with one link, what gets installed, removing |
 | [Agent & smctl](docs/agent.md) | Installing on servers, the allowlist, every `smctl` command, upgrades, troubleshooting |
 | [Configuration](docs/configuration.md) | Every environment variable with its default, including single sign-on |
 | [REST API](docs/api.md) | Tokens, endpoints, running actions from CI, Prometheus scraping |

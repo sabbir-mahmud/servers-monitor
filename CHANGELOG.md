@@ -31,6 +31,15 @@ names).
   location history kept for `DEVICE_LOCATION_DAYS` (30). Devices check in over HTTPS at
   `/device/v1/pair` and `/device/v1/checkin`; `agent/nexguard_device.py` is a reference
   client for computers.
+- **Connect a computer with one link**, for people who aren't technical: the pair page
+  for a Windows, Mac or Linux device gives a link (`/d/K7PQ-3MXA`) to open on that
+  computer. It shows three steps for that system: open PowerShell or Terminal, paste one
+  line, type `y`. Nothing to install first, no Python, no administrator rights. The check-in
+  runs as the user every 5 minutes (Task Scheduler, a LaunchAgent, or a systemd user
+  timer/cron), and uninstalls itself when the device is deleted on the dashboard. See
+  [docs/devices.md](docs/devices.md).
+- `POST /device/v1/pair` with `"preview": true` shows who will see the device without
+  using the code, and `Accept: text/plain` answers as `key=value` lines for shell clients.
 - Sign-up (`ALLOW_SIGNUP`) asks for the account kind and makes the person its owner.
 - `OIDC_ACCOUNT`: which company account SSO users join.
 
@@ -58,6 +67,13 @@ names).
   renames a server to "name (2)" if it clashes with a device.
 - Solo developer accounts call them **Devices** and can add a Linux server or connect their
   own computer or phone from the same page.
+
+### Fixed
+- Declining on the device no longer uses up the pairing code: the computer client asks
+  first (a preview) and pairs only after a yes. Before, the code was spent even on a no,
+  despite the message saying it still worked.
+- The consent message on computers no longer claims they share location or network; it
+  names what they actually send (battery, storage and system version).
 
 ### Removed
 - **Docker**: `docker-compose.yml`, `main/Dockerfile`, `make docker-up`, the CI image build

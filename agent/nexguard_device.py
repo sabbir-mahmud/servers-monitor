@@ -258,11 +258,13 @@ def pair(server: str, code: str, *, accept=None) -> dict:
     """Pair and save the token. `accept(disclosure) -> bool` must agree before anything
     is stored; the default asks on the terminal."""
     server = check_server(server)
-    result = post(f"{server}/device/v1/pair", {"code": code, **device_info()})
-    disclosure = result.get("disclosure", "")
+    info = {"code": code, **device_info()}
+    # Ask before pairing: a preview doesn't use up the code, so declining changes nothing.
+    preview = post(f"{server}/device/v1/pair", {**info, "preview": True})
     accept = accept or _ask
-    if not accept(disclosure):
+    if not accept(preview.get("disclosure", "")):
         raise ClientError("Not paired: you declined. The code still works if you change your mind.")
+    result = post(f"{server}/device/v1/pair", info)
     data = {
         "server": server,
         "token": result["token"],

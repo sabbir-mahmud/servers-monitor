@@ -41,12 +41,15 @@ PAIRED = {
 
 def test_pair_asks_first_and_stores_the_token_privately(monkeypatch, config):
     server = FakeServer(monkeypatch)
-    server.replies = [dict(PAIRED)]
+    preview = {"disclosure": PAIRED["disclosure"], "device": PAIRED["device"]}
+    server.replies = [preview, dict(PAIRED)]
     seen = []
     data = vd.pair("nexguard.example.com", "K7PQ-3MXA", accept=lambda d: seen.append(d) or True)
-    url, payload, _ = server.calls[0]
-    assert url == "https://nexguard.example.com/device/v1/pair" and payload["code"] == "K7PQ-3MXA"
-    assert payload["platform"] in ("macos", "windows", "linux") and seen == [PAIRED["disclosure"]]
+    # First a preview (the code stays valid), and only after a yes the real pairing.
+    (url, asked, _), (_, paired, _) = server.calls
+    assert url == "https://nexguard.example.com/device/v1/pair" and asked["code"] == "K7PQ-3MXA"
+    assert asked["preview"] is True and "preview" not in paired
+    assert paired["platform"] in ("macos", "windows", "linux") and seen == [PAIRED["disclosure"]]
     assert (
         data["token"] == "ngd_abc" and vd.load_config()["server"] == "https://nexguard.example.com"
     )
@@ -54,11 +57,13 @@ def test_pair_asks_first_and_stores_the_token_privately(monkeypatch, config):
         assert stat.S_IMODE(config.stat().st_mode) == 0o600
 
 
-def test_declining_stores_nothing(monkeypatch, config):
-    FakeServer(monkeypatch).replies = [dict(PAIRED)]
+def test_declining_stores_nothing_and_never_pairs(monkeypatch, config):
+    server = FakeServer(monkeypatch)
+    server.replies = [{"disclosure": PAIRED["disclosure"], "device": PAIRED["device"]}]
     with pytest.raises(vd.ClientError, match="declined"):
         vd.pair("https://nexguard.example.com", "K7PQ-3MXA", accept=lambda d: False)
     assert not config.exists()
+    assert len(server.calls) == 1 and server.calls[0][1]["preview"] is True  # code not used
 
 
 def test_plain_http_only_on_this_machine_or_the_lan(monkeypatch):

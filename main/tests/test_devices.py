@@ -42,8 +42,14 @@ def add_device(client, person, platform="android", name="Sara's phone", with_pag
     device = Device.objects.get(name=name)
     assert resp["Location"] == reverse("devices:pair", args=[device.pk])
     page = client.get(resp["Location"]).content.decode()
-    code = page.split('id="pair-code">')[1].split("<")[0]
-    return (device, code, page) if with_page else (device, code)
+    return (device, code_on(page), page) if with_page else (device, code_on(page))
+
+
+def code_on(page: str) -> str:
+    """The pairing code on the pair page: shown for phones, inside the link for computers."""
+    if 'id="pair-code">' in page:
+        return page.split('id="pair-code">')[1].split("<")[0]
+    return page.split('id="connect-link">')[1].split("<")[0].rsplit("/d/", 1)[1]
 
 
 def api_pair(client, code, platform="android", **extra):
@@ -143,7 +149,7 @@ def test_a_reset_device_is_paired_again_and_the_old_token_dies(client, parent, s
     resp = client.post(reverse("devices:pair", args=[device.pk]), {"action": "new_code"})
     page = client.get(resp["Location"]).content.decode()
     assert "Pair Sara&#x27;s phone again" in page
-    new_code = page.split('id="pair-code">')[1].split("<")[0]
+    new_code = code_on(page)
     assert api_checkin(client, old, {}).status_code == 200
     new = api_pair(client, new_code).json()["token"]
     assert api_checkin(client, old, {}).status_code == 401
@@ -296,7 +302,7 @@ def test_solo_developer_connects_their_own_laptop(client, solo_dev):
     resp = client.post(reverse("devices:create"), {"platform": "macos", "name": "My Mac"})
     device = Device.objects.get(name="My Mac")
     assert device.person is None and device.account.kind == "solo"
-    code = client.get(resp["Location"]).content.decode().split('id="pair-code">')[1].split("<")[0]
+    code = code_on(client.get(resp["Location"]).content.decode())
     token = api_pair(client, code, platform="macos").json()["token"]
     api_checkin(client, token, {"battery": {"percent": 80}})
 

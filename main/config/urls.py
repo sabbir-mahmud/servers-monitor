@@ -9,6 +9,7 @@ from apps.api import ui as api_ui
 from apps.api import views as api_views
 from apps.core import pwa
 from apps.core import views as core_views
+from apps.devices import connect as device_connect
 from apps.devices.urls import api_urlpatterns as device_api_urls
 from apps.tenants import views as tenant_views
 from apps.users import views as user_views
@@ -59,6 +60,32 @@ urlpatterns = [
     ),
     path("api/v1/", include("apps.api.urls")),
     path("device/v1/", include(device_api_urls)),
+    # Connect a computer: the link a parent sends, and the scripts it tells you to run.
+    path(
+        "d/uninstall.sh",
+        device_connect.uninstall_script,
+        {"kind": "sh"},
+        name="device_uninstall_sh",
+    ),
+    path(
+        "d/uninstall.ps1",
+        device_connect.uninstall_script,
+        {"kind": "ps1"},
+        name="device_uninstall_ps1",
+    ),
+    path("d/<str:code>/", device_connect.page, name="device_connect"),
+    path(
+        "d/<str:code>/install.sh",
+        device_connect.install_script,
+        {"kind": "sh"},
+        name="device_install_sh",
+    ),
+    path(
+        "d/<str:code>/install.ps1",
+        device_connect.install_script,
+        {"kind": "ps1"},
+        name="device_install_ps1",
+    ),
     path("devices/", include("apps.devices.urls")),
     path("metrics", api_views.metrics, name="metrics"),
     path("manifest.webmanifest", pwa.manifest, name="manifest"),

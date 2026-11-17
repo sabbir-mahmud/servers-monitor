@@ -83,12 +83,51 @@ document.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-copy]");
   if (!btn) return;
   const el = document.querySelector(btn.dataset.copy);
-  navigator.clipboard.writeText(el.textContent.trim()).then(() => {
+  const text = el.textContent.trim();
+  const done = () => {
     const label = btn.querySelector("[data-copy-label]") || btn;
     const old = label.textContent; label.textContent = "Copied";
     setTimeout(() => (label.textContent = old), 1500);
-  });
+  };
+  // The Clipboard API only exists on https:// and localhost; a dashboard opened at a LAN
+  // address over http falls back to selecting the text and copying it the old way.
+  const fallback = () => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel.removeAllRanges(); sel.addRange(range);
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (err) { ok = false; }
+    if (ok) { sel.removeAllRanges(); done(); }  // else leave it selected for Ctrl/⌘ C
+  };
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(done, fallback);
+  else fallback();
 });
+
+// Connect a computer: show the steps for this visitor's system, with a switch for others.
+(function () {
+  const guess = () => {
+    const p = ((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent).toLowerCase();
+    if (p.includes("win")) return "windows";
+    if (p.includes("mac")) return "macos";
+    if (p.includes("linux") || p.includes("x11")) return "linux";
+    return null;
+  };
+  const choose = (box, os) => {
+    if (!box.querySelector(`[data-os-panel="${os}"]`)) return;
+    box.querySelectorAll("[data-os]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.os === os)));
+    box.querySelectorAll("[data-os-panel]").forEach((p) => { p.hidden = p.dataset.osPanel !== os; });
+  };
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-os]");
+    const box = btn && btn.closest("[data-os-tabs]");
+    if (box) choose(box, btn.dataset.os);
+  });
+  document.addEventListener("DOMContentLoaded", () => {
+    const os = guess();
+    if (os) document.querySelectorAll("[data-os-tabs]").forEach((box) => { if (box.querySelector("[data-os]")) choose(box, os); });
+  });
+})();
 
 // Sign-in: show/hide password, Caps Lock hint, and a busy state so a slow submit isn't double-clicked.
 document.addEventListener("click", (e) => {

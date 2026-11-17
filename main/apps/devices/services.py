@@ -35,19 +35,15 @@ def cancel_pairing_code(device: Device) -> None:
     device.save(update_fields=["pairing_code_hash"])
 
 
-@transaction.atomic
-def pair(code: str, info: dict, ip: str | None) -> tuple[Device, str]:
-    """Exchange a pairing code for a device token. The code is used up; a device already
-    paired under this entry (reset, or a replacement phone) loses its old token."""
+def _device_for_code(code: str, info: dict, *, lock: bool) -> Device:
+    """The device waiting for this code, checked against the platform asking for it."""
     normalized = pairing.normalize_code(code)
     if len(normalized) != pairing.CODE_LENGTH:
         raise PairingError("Enter the 8-character code from the parent's dashboard.")
-    device = (
-        Device.objects.select_for_update()
-        .select_related("account", "person")
-        .filter(pairing_code_hash=pairing.digest(normalized))
-        .first()
-    )
+    devices = Device.objects.select_related("account", "person")
+    if lock:
+        devices = devices.select_for_update()
+    device = devices.filter(pairing_code_hash=pairing.digest(normalized)).first()
     if device is None:
         raise PairingError("That code isn't valid. Ask for a new one on the dashboard.", 404)
     platform = str(info.get("platform", "")).lower()
@@ -55,6 +51,20 @@ def pair(code: str, info: dict, ip: str | None) -> tuple[Device, str]:
         expected = Platform(device.platform).label
         raise PairingError(f"This code is for {_article(expected)} {expected}. Use it on that "
                            "device, or add this one separately.", 409)  # fmt: skip
+    return device
+
+
+def preview(code: str, info: dict) -> Device:
+    """Who would see this device, before anything is stored: the device asks its user
+    first and pairs only on a yes. The code stays valid either way."""
+    return _device_for_code(code, info, lock=False)
+
+
+@transaction.atomic
+def pair(code: str, info: dict, ip: str | None) -> tuple[Device, str]:
+    """Exchange a pairing code for a device token. The code is used up; a device already
+    paired under this entry (reset, or a replacement phone) loses its old token."""
+    device = _device_for_code(code, info, lock=True)
     raw, token_hash = pairing.new_token()
     now = timezone.now()
     device.token_hash = token_hash
