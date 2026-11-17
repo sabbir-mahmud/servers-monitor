@@ -276,11 +276,36 @@ def test_guardian_manages_devices(client, django_user_model, family, sara):
     add_device(client, sara, platform="macos", name="Sara's MacBook")
 
 
-def test_solo_accounts_have_no_devices_yet(client, django_user_model):
+@pytest.fixture
+def solo_dev(client, django_user_model):
     me = django_user_model.objects.create_user("dev", "dev@example.com", "pw-x-1234567")
     add_member(me, "owner", make_account("Me", kind="solo"))
     client.force_login(me)
-    assert client.get(reverse("devices:create")).status_code == 403
+    return me
+
+
+def test_solo_devices_page_offers_a_server_or_a_computer_or_phone(client, solo_dev):
+    page = client.get(reverse("fleet:dashboard")).content.decode()
+    assert "No servers or devices connected yet." in page
+    assert reverse("fleet:server_create") in page and reverse("devices:create") in page
+
+
+def test_solo_developer_connects_their_own_laptop(client, solo_dev):
+    form = client.get(reverse("devices:create")).content.decode()
+    assert "Whose is it?" not in form and "Connect a computer or phone" in form
+    resp = client.post(reverse("devices:create"), {"platform": "macos", "name": "My Mac"})
+    device = Device.objects.get(name="My Mac")
+    assert device.person is None and device.account.kind == "solo"
+    code = client.get(resp["Location"]).content.decode().split('id="pair-code">')[1].split("<")[0]
+    token = api_pair(client, code, platform="macos").json()["token"]
+    api_checkin(client, token, {"battery": {"percent": 80}})
+
+    page = client.get(reverse("fleet:dashboard")).content.decode()
+    assert ">My Mac</a>" in page and "80%" in page
+    detail = client.get(reverse("devices:detail", args=[device.pk])).content.decode()
+    assert f'href="{reverse("fleet:dashboard")}"' in detail and "Belongs to" not in detail
+    resp = client.post(reverse("devices:delete", args=[device.pk]))
+    assert resp["Location"] == reverse("fleet:dashboard")
 
 
 def test_another_familys_device_is_invisible(client, django_user_model, paired):

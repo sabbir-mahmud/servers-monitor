@@ -187,3 +187,15 @@ def test_dashboard_and_agent_versions_agree(settings):
     agent = (Path(__file__).resolve().parents[2] / "agent" / "server_monitor_agent.py").read_text()
     agent_version = next(ln.split('"')[1] for ln in agent.splitlines() if ln.startswith("VERSION"))
     assert settings.APP_VERSION == agent_version  # bump both (VERSION file + agent) together
+
+
+def test_old_server_urls_redirect_to_their_new_home(client, admin_user):
+    server, _ = make_server("web-01")
+    client.force_login(admin_user)
+    assert reverse("fleet:dashboard") == "/devices/"
+    assert reverse("fleet:server_detail", args=[server.pk]) == f"/devices/servers/{server.pk}/"
+    resp = client.get("/servers/?health=offline")
+    assert resp.status_code == 301 and resp["Location"] == "/devices/?health=offline"
+    resp = client.get(f"/servers/{server.pk}/edit/")
+    assert resp["Location"] == f"/devices/servers/{server.pk}/edit/"
+    assert client.get(resp["Location"]).status_code == 200

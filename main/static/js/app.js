@@ -288,3 +288,14 @@ document.addEventListener("DOMContentLoaded", () => {
   form.addEventListener("change", (e) => { if (e.target.name === "platform" || e.target.name === "person") suggest(); });
   if (!touched) suggest(); else suggested = "";
 });
+
+// Server form: interval presets fill the number box; the matching preset stays highlighted.
+document.addEventListener("DOMContentLoaded", () => {
+  const presets = document.querySelectorAll("[data-interval]");
+  if (!presets.length) return;
+  const input = document.getElementById(presets[0].dataset.target);
+  const sync = () => presets.forEach((b) => b.classList.toggle("is-active", b.dataset.interval === String(input.value)));
+  presets.forEach((b) => b.addEventListener("click", () => { input.value = b.dataset.interval; sync(); }));
+  input.addEventListener("input", sync);
+  sync();
+});

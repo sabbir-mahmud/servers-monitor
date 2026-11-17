@@ -47,6 +47,18 @@ names).
 - After sign-in you land on Home: servers if the account has them, otherwise people.
   The server dashboard moved to `/servers/`.
 
+### Changed
+- The server pages moved from `/servers/…` to `/devices/` (the list) and `/devices/servers/…`
+  (each server). Old links, including those in alert emails already sent, redirect
+  permanently. The API keeps `/api/v1/servers`.
+- Servers and computers/phones now share one table, `devices_machine` (name, account,
+  hostname, last seen). Server and device details stay in `fleet_server` and
+  `devices_device`, linked by the same id, so existing links, commands, alerts and history
+  are unchanged. Names are unique per account across both, ignoring case; the migration
+  renames a server to "name (2)" if it clashes with a device.
+- Solo developer accounts call them **Devices** and can add a Linux server or connect their
+  own computer or phone from the same page.
+
 ### Removed
 - **Status pages** (public pages published to GitHub Pages or Cloudflare Pages). Migration
   `core.0003_drop_status_pages` drops their tables and permissions: export anything you

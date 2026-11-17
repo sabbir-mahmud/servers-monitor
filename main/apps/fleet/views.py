@@ -14,6 +14,7 @@ from apps.alerts.services import resolve_all
 from apps.audit.services import record
 from apps.core import crypto
 from apps.core.mixins import HtmxTemplateMixin, StaffViewMixin
+from apps.devices.models import Machine, MachineKind
 from apps.tenants.scoping import AccountScopedMixin, get_scoped_or_404, scoped
 
 from . import agentdist, services
@@ -25,42 +26,87 @@ MUTE_CHOICES = [(60, "Mute for 1 hour"), (240, "Mute for 4 hours"), (1440, "Mute
 
 
 class DashboardView(StaffViewMixin, AccountScopedMixin, HtmxTemplateMixin, ListView):
-    """Fleet overview. The `fleet` partial re-renders every 10 s via HTMX polling."""
+    """Everything the account watches, in one table: servers and, for a solo developer,
+    their own computers and phones. One query on the shared Machine table joins each
+    row's details. The `fleet` partial re-renders every 10 s via HTMX polling."""
 
     permission_required = "fleet.view_server"
     template_name = "fleet/dashboard.html"
     htmx_partial = "fleet"
-    context_object_name = "servers"
-    model = Server
+    context_object_name = "machines"
+    model = Machine
+
+    @property
+    def with_devices(self) -> bool:
+        # A family or company sees computers and phones under People instead.
+        return self.request.account.kind == "solo" and self.request.user.has_perm(
+            "devices.view_device"
+        )
 
     def get_queryset(self):
-        qs = super().get_queryset().prefetch_related("groups")
+        qs = (
+            super()
+            .get_queryset()
+            .select_related("server", "device")
+            .prefetch_related("server__groups")
+        )
         g = self.request.GET
+        kind = g.get("kind") if self.with_devices else MachineKind.SERVER
+        if kind in MachineKind.values:
+            qs = qs.filter(kind=kind)
+        # Environment and group are server settings: picking one narrows to servers.
         if env := g.get("environment"):
-            qs = qs.filter(environment=env)
+            qs = qs.filter(server__environment=env)
         if group := g.get("group"):
-            qs = qs.filter(groups__name=group)
+            qs = qs.filter(server__groups__name=group)
         if q := g.get("q", "").strip():
             qs = qs.filter(name__icontains=q)
-        return qs
+        return qs.order_by("name")
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        servers = list(ctx["servers"])
         now = timezone.now()
-        for s in servers:
-            s.current_health = s.health_at(now)
+        rows = []
+        for m in ctx["machines"]:
+            row = m.details
+            # One status vocabulary for the table: a device waiting to pair is "pending".
+            if m.kind == MachineKind.SERVER:
+                row.status = row.health_at(now)
+            else:
+                row.status = Health.PENDING if row.state == "waiting" else row.state
+            rows.append(row)
+
+        counts = {h.value: 0 for h in Health}
+        for r in rows:
+            counts[r.status] += 1
+        seen = [r.last_seen_at for r in rows if r.last_seen_at]
+        low_battery = sum(
+            1 for r in rows if r.kind == MachineKind.DEVICE and r.attention == "Battery low"
+        )
+        overview = {
+            **counts,
+            "total": len(rows),
+            "servers": sum(1 for r in rows if r.kind == MachineKind.SERVER),
+            "low_battery": low_battery,
+            "attention": counts["offline"] + counts["late"] + low_battery,
+            "last_seen": max(seen, default=None),
+        }
         # Health is derived from last_seen_at, so this filter runs in Python on the
-        # already-fetched page rather than as SQL.
+        # already-fetched rows rather than as SQL.
         if health := self.request.GET.get("health"):
-            servers = [s for s in servers if s.current_health == health]
+            rows = [r for r in rows if r.status == health]
         ctx.update(
-            servers=servers,
-            summary=services.fleet_summary(ctx["servers"]),
+            rows=rows,
+            overview=overview,
+            with_devices=self.with_devices,
+            filtering=any(
+                self.request.GET.get(k) for k in ("q", "environment", "group", "health", "kind")
+            ),
             open_alerts=scoped(self.request, Alert).filter(resolved_at__isnull=True).count(),
             environments=Environment.choices,
             groups=scoped(self.request, ServerGroup),
             healths=Health.choices,
+            kinds=MachineKind.choices,
             filters=self.request.GET,
         )
         return ctx

@@ -2,19 +2,22 @@
 {% load monitor %}
 {% block title %}{% if object %}Edit {{ object.name }}{% else %}Add a device{% endif %}{% endblock %}
 {% block content %}
-{% if object %}{% url 'devices:detail' object.pk as back %}{% elif form.initial.person %}{% url 'tenants:person_detail' form.initial.person.pk as back %}{% else %}{% url 'tenants:people' as back %}{% endif %}
-<a class="back-link" href="{{ back }}">{% icon "arrow-left" 15 %} {% if object %}{{ object.name }}{% elif form.initial.person %}{{ form.initial.person.name }}{% else %}{{ ACCOUNT.people_label }}{% endif %}</a>
+{% if object %}{% url 'devices:detail' object.pk as back %}{% elif form.initial.person %}{% url 'tenants:person_detail' form.initial.person.pk as back %}{% elif ACCOUNT.kind == "solo" %}{% url 'fleet:dashboard' as back %}{% else %}{% url 'tenants:people' as back %}{% endif %}
+<a class="back-link" href="{{ back }}">{% icon "arrow-left" 15 %} {% if object %}{{ object.name }}{% elif form.initial.person %}{{ form.initial.person.name }}{% elif ACCOUNT.kind == "solo" %}Devices{% else %}{{ ACCOUNT.people_label }}{% endif %}</a>
 <div class="page-head"><div>
-  <h1 class="page-title">{% if object %}Edit device{% else %}Add a device{% endif %}</h1>
-  <p class="page-sub">{% if object %}Rename it or change whose it is. Its history and pairing stay as they are.{% else %}Three details now, then you'll pair it on the device itself.{% endif %}</p>
+  <h1 class="page-title">{% if object %}Edit device{% elif ACCOUNT.kind == "solo" %}Connect a computer or phone{% else %}Add a device{% endif %}</h1>
+  <p class="page-sub">{% if object %}Rename it or change whose it is. Its history and pairing stay as they are.{% elif ACCOUNT.kind == "solo" %}Your own laptop, desktop or phone: last online, battery, storage and, on phones, location.{% else %}Three details now, then you'll pair it on the device itself.{% endif %}</p>
 </div></div>
+
+{% if not object and ACCOUNT.kind == "solo" and perms.fleet.add_server %}{% include "fleet/_add_switch.html" with current="device" %}{% endif %}
 
 <div class="form-layout">
   <form method="post" novalidate class="card form-card" data-name-suggest
         data-nouns='{"android": "phone", "ios": "iPhone", "windows": "PC", "macos": "Mac", "linux": "computer"}'
-        data-shared-prefix="{% if ACCOUNT.kind == 'family' %}Family{% else %}Shared{% endif %}">{% csrf_token %}
+        data-shared-prefix="{% if ACCOUNT.kind == 'family' %}Family{% elif ACCOUNT.kind == 'solo' %}My{% else %}Shared{% endif %}">{% csrf_token %}
     {% if form.non_field_errors %}<div class="alert alert-danger m-3 mb-0" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
 
+    {% if form.person %}
     <fieldset class="form-step">
       <legend class="form-step-head"><span class="form-step-num">1</span><span><span class="form-step-title">{{ form.person.label }}</span><span class="form-step-sub">Its alerts and location appear on their page.</span></span></legend>
       {% if form.person.field.widget.input_type == "radio" %}
@@ -34,9 +37,10 @@
       {% else %}{{ form.person }}{% endif %}
       {% for e in form.person.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
     </fieldset>
+    {% endif %}
 
     <fieldset class="form-step">
-      <legend class="form-step-head"><span class="form-step-num">2</span><span><span class="form-step-title">{{ form.platform.label }}</span><span class="form-step-sub">{% if form.platform.field.disabled %}Fixed once paired: the app on it is for this system.{% else %}Picks the right app and pairing steps.{% endif %}</span></span></legend>
+      <legend class="form-step-head"><span class="form-step-num">{% if form.person %}2{% else %}1{% endif %}</span><span><span class="form-step-title">{{ form.platform.label }}</span><span class="form-step-sub">{% if form.platform.field.disabled %}Fixed once paired: the app on it is for this system.{% else %}Picks the right app and pairing steps.{% endif %}</span></span></legend>
       {% if form.platform.field.disabled %}
       <div class="fixed-choice">
         <span class="device-icon" aria-hidden="true">{% icon object|device_icon 18 %}</span>
@@ -74,7 +78,7 @@
     </fieldset>
 
     <div class="form-step">
-      <div class="form-step-head"><span class="form-step-num">3</span><span><label class="form-step-title" for="{{ form.name.id_for_label }}">{{ form.name.label }}</label><span class="form-step-sub">{{ form.name.help_text }}</span></span></div>
+      <div class="form-step-head"><span class="form-step-num">{% if form.person %}3{% else %}2{% endif %}</span><span><label class="form-step-title" for="{{ form.name.id_for_label }}">{{ form.name.label }}</label><span class="form-step-sub">{{ form.name.help_text }}</span></span></div>
       {{ form.name }}
       {% for e in form.name.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
     </div>

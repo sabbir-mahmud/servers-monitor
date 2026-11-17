@@ -12,7 +12,7 @@ class DeviceForm(AccountFormMixin, forms.ModelForm):
         fields = ["platform", "name", "person"]
         widgets = {"platform": forms.RadioSelect}
         labels = {"platform": "What kind of device?", "name": "Device name"}
-        help_texts = {"name": 'As you\'d say it: "Sara\'s iPhone", "Family laptop".'}
+        help_texts = {"name": 'As you\'d say it: "Sara\'s iPhone", "Work laptop".'}
 
     # A family picks from avatars; past this many people a dropdown is easier to use.
     MAX_PERSON_CHIPS = 12
@@ -22,7 +22,10 @@ class DeviceForm(AccountFormMixin, forms.ModelForm):
         # No "---------" card: a device is always one of the platforms.
         self.fields["platform"].choices = list(Platform.choices)
         person = self.fields["person"]
-        if self.account is not None:
+        if self.account is not None and self.account.kind == "solo":
+            del self.fields["person"]  # just you: nobody to assign it to
+            self.fields["name"].help_text = 'As you\'d say it: "Work laptop", "My Pixel".'
+        elif self.account is not None:
             person.label = "Whose is it?" if self.account.kind == "family" else "Assigned to"
             person.empty_label = "Shared"
             if person.queryset.count() <= self.MAX_PERSON_CHIPS:

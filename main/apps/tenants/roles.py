@@ -86,6 +86,7 @@ FEATURES_BY_KIND = {
         "alerts",
         "notifications",
         "audit",
+        "devices",  # their own laptop and phone, next to their servers
     },  # fmt: skip
     Kind.COMPANY: {
         "servers",

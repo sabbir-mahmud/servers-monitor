@@ -1,4 +1,3 @@
-import uuid
 from datetime import datetime, timedelta
 
 from django.conf import settings
@@ -6,6 +5,8 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone
+
+from apps.devices.models import Machine, MachineKind
 
 
 class Environment(models.TextChoices):
@@ -43,10 +44,19 @@ class ServerGroup(models.Model):
         return self.name
 
 
-class Server(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
-    account = models.ForeignKey("tenants.Account", on_delete=models.CASCADE, related_name="servers")
-    name = models.CharField(max_length=100)
+class Server(Machine):
+    """A Linux server running the agent. Name, account and last-seen live on Machine."""
+
+    KIND = MachineKind.SERVER
+
+    machine_ptr = models.OneToOneField(
+        Machine,
+        on_delete=models.CASCADE,
+        parent_link=True,
+        primary_key=True,
+        db_column="id",  # the id it had before the base table existed
+        related_name="server",
+    )
     environment = models.CharField(
         max_length=20, choices=Environment.choices, default=Environment.PRODUCTION
     )
@@ -79,7 +89,6 @@ class Server(models.Model):
     token_prefix = models.CharField(max_length=8, editable=False)
 
     # Reported by the agent.
-    hostname = models.CharField(max_length=255, blank=True)
     platform = models.CharField(max_length=255, blank=True)
     agent_version = models.CharField(max_length=32, blank=True)
     cpu_count = models.PositiveIntegerField(null=True, blank=True)
@@ -93,7 +102,6 @@ class Server(models.Model):
     inventory = models.JSONField(default=dict, blank=True)
 
     # Latest snapshot, denormalised so the dashboard is one query with no subqueries.
-    last_seen_at = models.DateTimeField(null=True, blank=True)
     cpu_percent = models.FloatField(null=True, blank=True)
     memory_percent = models.FloatField(null=True, blank=True)
     disk_percent = models.FloatField(null=True, blank=True)
@@ -107,21 +115,11 @@ class Server(models.Model):
     # exists so offline alerts fire on the transition, not on every sweep.
     last_health = models.CharField(max_length=20, choices=Health.choices, default=Health.PENDING)
 
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["name"]
-        indexes = [models.Index(fields=["account", "environment", "name"])]
         constraints = [
-            models.UniqueConstraint(
-                fields=["account", "name"],
-                name="server_name_per_account",
-                violation_error_message="A server with this name already exists.",
-            ),
             models.CheckConstraint(
                 condition=Q(report_interval__gte=5, report_interval__lte=3600),
                 name="server_report_interval_range",
@@ -131,9 +129,6 @@ class Server(models.Model):
                 name="server_poll_interval_range",
             ),
         ]
-
-    def __str__(self):
-        return self.name
 
     # -- health -----------------------------------------------------------------------
 

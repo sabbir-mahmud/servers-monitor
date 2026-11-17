@@ -2,7 +2,7 @@
 {% load monitor %}
 {% block title %}{{ device.name }}{% endblock %}
 {% block content %}
-<a class="back-link" href="{{ back_url }}">{% icon "arrow-left" 15 %} {% if device.person %}{{ device.person.name }}{% else %}{{ ACCOUNT.people_label }}{% endif %}</a>
+<a class="back-link" href="{{ back_url }}">{% icon "arrow-left" 15 %} {% if device.person %}{{ device.person.name }}{% elif ACCOUNT.kind == "solo" %}Devices{% else %}{{ ACCOUNT.people_label }}{% endif %}</a>
 
 <header class="profile-head">
   <span class="device-icon device-icon-xl is-{{ device.state }}" aria-hidden="true">{% icon device|device_icon 28 %}</span>
@@ -11,7 +11,7 @@
     <div class="profile-sub">
       {% device_badge device.state %}
       <span>{{ device.get_platform_display }}{% if device.os_version %} · {{ device.os_version }}{% endif %}</span>
-      {% if device.person %}<a href="{% url 'tenants:person_detail' device.person.pk %}">{% icon "user" 13 %} {{ device.person.name }}</a>{% else %}<span>Shared device</span>{% endif %}
+      {% if device.person %}<a href="{% url 'tenants:person_detail' device.person.pk %}">{% icon "user" 13 %} {{ device.person.name }}</a>{% elif ACCOUNT.kind != "solo" %}<span>Shared device</span>{% endif %}
     </div>
   </div>
   <div class="page-actions">
@@ -112,7 +112,7 @@
     <div><dt>Model</dt><dd>{{ device.model|default:"—" }}</dd></div>
     <div><dt>System</dt><dd>{{ device.os_version|default:"—" }}</dd></div>
     <div><dt>Name on device</dt><dd class="text-truncate" title="{{ device.hostname }}">{{ device.hostname|default:"—" }}</dd></div>
-    <div><dt>Belongs to</dt><dd>{% if device.person %}<a href="{% url 'tenants:person_detail' device.person.pk %}">{{ device.person.name }}</a>{% else %}Shared{% endif %}</dd></div>
+    {% if ACCOUNT.kind != "solo" %}<div><dt>Belongs to</dt><dd>{% if device.person %}<a href="{% url 'tenants:person_detail' device.person.pk %}">{{ device.person.name }}</a>{% else %}Shared{% endif %}</dd></div>{% else %}<div><dt>Checks in</dt><dd>Every {{ device.checkin_seconds|every }}</dd></div>{% endif %}
     <div><dt>Paired</dt><dd>{% if device.paired_at %}{{ device.paired_at|date:"j M Y, H:i" }}{% else %}Not yet{% endif %}</dd></div>
     <div><dt>App</dt><dd>{{ device.app_version|default:"—" }}</dd></div>
     <div><dt>Last address</dt><dd class="num">{{ device.last_ip|default:"—" }}</dd></div>

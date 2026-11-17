@@ -2,7 +2,7 @@
 {% load monitor %}
 {% block title %}Pair {{ device.name }}{% endblock %}
 {% block content %}
-<a class="back-link" href="{{ back_url }}">{% icon "arrow-left" 15 %} {% if device.person %}{{ device.person.name }}{% else %}{{ ACCOUNT.people_label }}{% endif %}</a>
+<a class="back-link" href="{{ back_url }}">{% icon "arrow-left" 15 %} {% if device.person %}{{ device.person.name }}{% elif ACCOUNT.kind == "solo" %}Devices{% else %}{{ ACCOUNT.people_label }}{% endif %}</a>
 <div class="page-head"><div>
   <h1 class="page-title">{% if repairing %}Pair {{ device.name }} again{% else %}Pair {{ device.name }}{% endif %}</h1>
   <p class="page-sub">{% if repairing %}For a device that was reset, or a replacement. Once the new pairing is done, the old one stops reporting.{% else %}Do this on the {{ device.get_platform_display }} itself. It takes a minute.{% endif %}</p>

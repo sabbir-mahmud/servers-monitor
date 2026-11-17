@@ -130,7 +130,9 @@ def _link(alert) -> str:
         return ""
     if alert.monitor_id:
         return f"{base}/apps/{alert.monitor_id}/"
-    return f"{base}/servers/{alert.server_id}/"
+    from django.urls import reverse
+
+    return base + reverse("fleet:server_detail", args=[alert.server_id])
 
 
 def compose(alert: Alert, event: str, note: str = "") -> Message:

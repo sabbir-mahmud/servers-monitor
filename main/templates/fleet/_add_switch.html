@@ -1,0 +1,7 @@
+{% load monitor %}
+<nav class="add-switch" aria-label="What are you adding?">
+  <a class="add-switch-opt {% if current == 'server' %}is-active{% endif %}" href="{% url 'fleet:server_create' %}" {% if current == 'server' %}aria-current="page"{% endif %}>
+    {% icon "server" 18 %}<span><strong>Linux server</strong><small>Health, services, logs, commands</small></span></a>
+  <a class="add-switch-opt {% if current == 'device' %}is-active{% endif %}" href="{% url 'devices:create' %}" {% if current == 'device' %}aria-current="page"{% endif %}>
+    {% icon "laptop" 18 %}<span><strong>Computer or phone</strong><small>Online, battery, storage, location</small></span></a>
+</nav>

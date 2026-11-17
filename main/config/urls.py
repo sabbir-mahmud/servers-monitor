@@ -2,7 +2,8 @@ from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import PermissionDenied
-from django.urls import include, path, reverse
+from django.http import HttpResponsePermanentRedirect
+from django.urls import include, path, re_path, reverse
 
 from apps.api import ui as api_ui
 from apps.api import views as api_views
@@ -24,6 +25,16 @@ def _admin_login(request, extra_context=None):
 
 
 admin.site.login = _admin_login
+
+
+def legacy_server_url(request, rest):
+    """/servers/ → /devices/, /servers/<id>/… → /devices/servers/<id>/… (query kept).
+    Always a path on this site, so it can't be turned into an open redirect."""
+    target = reverse("fleet:dashboard") + (f"servers/{rest}" if rest else "")
+    if request.META.get("QUERY_STRING"):
+        target += "?" + request.META["QUERY_STRING"]
+    return HttpResponsePermanentRedirect(target)
+
 
 urlpatterns = [
     path(settings.ADMIN_URL, admin.site.urls),
@@ -62,6 +73,9 @@ urlpatterns = [
     path("", tenant_views.HomeView.as_view(), name="home"),
     path("", include("apps.tenants.urls")),
     path("", include("apps.fleet.urls")),
+    # Before 3.0 the server pages lived under /servers/: keep old bookmarks and the links
+    # in alert emails already sent working.
+    re_path(r"^servers/(?P<rest>.*)$", legacy_server_url),
 ]
 if settings.OIDC_ENABLED:  # its views read the provider's endpoints when they're created
     urlpatterns.insert(0, path("oidc/", include("mozilla_django_oidc.urls")))

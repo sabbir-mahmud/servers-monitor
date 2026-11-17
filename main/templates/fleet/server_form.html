@@ -1,35 +1,120 @@
 {% extends "base.html" %}
 {% load monitor %}
-{% block title %}{% if object %}Edit {{ object }}{% else %}Add {{ MACHINE }}{% endif %}{% endblock %}
+{% block title %}{% if object %}Edit {{ object }}{% else %}Add a server{% endif %}{% endblock %}
 {% block content %}
-<a class="back-link" href="{% if object %}{% url 'fleet:server_detail' object.pk %}{% else %}{% url 'fleet:dashboard' %}{% endif %}">{% icon "arrow-left" 15 %} {% if object %}{{ object }}{% else %}{{ MACHINES|capfirst }}{% endif %}</a>
-<div class="page-head">
-  <div>
-    <h1 class="page-title">{% if object %}Edit {{ object }}{% else %}Add {{ MACHINE }}{% endif %}</h1>
-    {% if not object %}<p class="page-sub">After you create the {{ MACHINE }} you'll get a one-line install command and its agent token.</p>{% endif %}
-  </div>
-</div>
-<div class="card" style="max-width: 44rem"><div class="card-body p-4">
-  <form method="post" novalidate class="form-section">{% csrf_token %}
-    {% if form.non_field_errors %}<div class="alert alert-danger mb-0" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
-    {% for field in form %}
-      <div>
-        {% if field.widget_type == "checkbox" %}
-          <div class="form-check">{{ field }} <label class="form-check-label fw-medium" for="{{ field.id_for_label }}">{{ field.label }}</label></div>
-        {% else %}
-          <label class="form-label" {% if field.widget_type != "checkboxselectmultiple" %}for="{{ field.id_for_label }}"{% endif %}>{{ field.label }}</label>
-          {% if field.widget_type == "checkboxselectmultiple" %}
-            <div class="d-flex flex-wrap gap-2">{% for cb in field %}<label class="check-tile py-2">{{ cb.tag }} <span class="check-tile-name">{{ cb.choice_label }}</span></label>{% empty %}<span class="muted small">No groups yet. Create some below.</span>{% endfor %}</div>
-          {% else %}{{ field }}{% endif %}
-        {% endif %}
-        {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
-        {% for e in field.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+{% if object %}{% url 'fleet:server_detail' object.pk as back %}{% else %}{% url 'fleet:dashboard' as back %}{% endif %}
+<a class="back-link" href="{{ back }}">{% icon "arrow-left" 15 %} {% if object %}{{ object }}{% else %}{{ MACHINES|capfirst }}{% endif %}</a>
+<div class="page-head"><div>
+  <h1 class="page-title">{% if object %}Edit server{% else %}Add a Linux server{% endif %}</h1>
+  <p class="page-sub">{% if object %}Changes reach the agent at its next heartbeat. Its history, token and commands stay as they are.{% else %}Name it now; next you get a one-line install command for the server. No SSH and no open ports.{% endif %}</p>
+</div></div>
+
+{% if not object and ACCOUNT.kind == "solo" and perms.devices.add_device %}{% include "fleet/_add_switch.html" with current="server" %}{% endif %}
+
+<div class="form-layout">
+  <form method="post" novalidate class="card form-card">{% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger m-3 mb-0" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+
+    <div class="form-step">
+      <div class="form-step-head"><span class="form-step-num">1</span><span><span class="form-step-title">Name it</span><span class="form-step-sub">How it shows in lists, alerts and notifications.</span></span></div>
+      <div class="field-grid">
+        <div>
+          <label class="form-label" for="{{ form.name.id_for_label }}">{{ form.name.label }}</label>
+          {{ form.name }}
+          {% for e in form.name.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+        </div>
+        <div>
+          <label class="form-label" for="{{ form.description.id_for_label }}">Description <span class="text-body-secondary fw-normal">· optional</span></label>
+          {{ form.description }}
+          {% for e in form.description.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+        </div>
       </div>
-    {% endfor %}
-    <div class="d-flex gap-2 pt-2 border-top" style="border-color: var(--line) !important; padding-top: 1.25rem !important">
-      <button class="btn btn-primary">{% if object %}Save changes{% else %}Create and get install command{% endif %}</button>
-      <a class="btn btn-link" href="{% if object %}{% url 'fleet:server_detail' object.pk %}{% else %}{% url 'fleet:dashboard' %}{% endif %}">Cancel</a>
+    </div>
+
+    <fieldset class="form-step">
+      <legend class="form-step-head"><span class="form-step-num">2</span><span><span class="form-step-title">Where it runs</span><span class="form-step-sub">Filter by these on the {{ MACHINES }} page, and target them with jobs.</span></span></legend>
+      <div class="form-label">Environment</div>
+      <div class="env-picker">
+        {% for radio in form.environment %}
+        <label class="kind-card env-card env-{{ radio.data.value }}">{{ radio.tag }}
+          <span class="env-dot" aria-hidden="true"></span>
+          <span class="kind-title">{{ radio.choice_label }}</span>
+          <span class="kind-help">{% if radio.data.value == "production" %}Real users depend on it{% elif radio.data.value == "staging" %}Final checks before release{% else %}Experiments and dev boxes{% endif %}</span>
+        </label>
+        {% endfor %}
+      </div>
+      {% for e in form.environment.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+
+      <div class="form-label mt-3">Groups <span class="text-body-secondary fw-normal">· optional</span></div>
+      {% if form.groups.field.queryset.exists %}
+      <div class="group-chips">
+        {% for cb in form.groups %}<label class="group-chip">{{ cb.tag }}<span>{{ cb.choice_label }}</span></label>{% endfor %}
+      </div>
+      {% endif %}
+      <div class="mt-2" style="max-width: 30rem">
+        {{ form.new_groups }}
+        <div class="form-text">{% if form.groups.field.queryset.exists %}Or create new ones: {% endif %}comma-separated, e.g. <code>api, workers</code>.</div>
+        {% for e in form.new_groups.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+      </div>
+    </fieldset>
+
+    <div class="form-step">
+      <div class="form-step-head"><span class="form-step-num">3</span><span><span class="form-step-title">Reporting</span><span class="form-step-sub">How often the agent sends a heartbeat. Shorter spots trouble sooner; longer uses fewer relay requests.</span></span></div>
+      <div class="interval-row">
+        <div class="interval-presets" role="group" aria-label="Common intervals">
+          {% for value, label in form.INTERVAL_PRESETS %}<button type="button" class="interval-preset" data-interval="{{ value }}" data-target="{{ form.report_interval.id_for_label }}">{{ label }}</button>{% endfor %}
+        </div>
+        <div class="interval-input">
+          {{ form.report_interval }}<span class="interval-unit">seconds</span>
+        </div>
+      </div>
+      {% for e in form.report_interval.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+      <div class="form-text">Between 5 and 3600. Offline is flagged after about three missed heartbeats.</div>
+
+      {% if form.is_enabled %}
+      <label class="switch-row mt-3" for="{{ form.is_enabled.id_for_label }}">
+        <span class="min-w-0"><span class="fw-semibold d-block">{{ form.is_enabled.label }}</span><span class="small text-body-secondary">{{ form.is_enabled.help_text }}</span></span>
+        <span class="form-switch m-0">{{ form.is_enabled }}</span>
+      </label>
+      {% endif %}
+    </div>
+
+    <div class="form-actions">
+      <a class="btn btn-outline-secondary" href="{{ back }}">Cancel</a>
+      <button class="btn btn-primary">{% if object %}Save changes{% else %}Create and get install command {% icon "chevron" %}{% endif %}</button>
     </div>
   </form>
-</div></div>
+
+  <aside class="form-aside">
+    {% if object %}
+    <section class="card side-card">
+      <h2 class="side-title">This server</h2>
+      <div class="d-flex flex-column align-items-start gap-1 mb-2">{% health_badge object.health %}<span class="small text-body-secondary">{% if object.last_seen_at %}reported {{ object.last_seen_at|ago }}{% else %}agent not connected yet{% endif %}</span></div>
+      <dl class="kv-list mb-0">
+        {% if object.hostname %}<dt>Host</dt><dd class="text-truncate">{{ object.hostname }}</dd>{% endif %}
+        <dt>Agent</dt><dd>{% if object.agent_version %}v{{ object.agent_version }}{% else %}—{% endif %}</dd>
+        {% if object.platform %}<dt>System</dt><dd class="text-truncate">{{ object.platform }}</dd>{% endif %}
+      </dl>
+      {% if not object.last_seen_at %}<a class="btn btn-sm btn-outline-secondary w-100 mt-3" href="{% url 'fleet:server_enroll' object.pk %}">{% icon "terminal" 14 %} Install command</a>{% endif %}
+    </section>
+    {% if perms.fleet.delete_server %}
+    <section class="card side-card side-card-danger">
+      <h2 class="side-title">Delete server</h2>
+      <p class="small text-body-secondary">Removes it and its history, and revokes its relay access. Uninstall the agent on the machine too.</p>
+      <a class="btn btn-sm btn-outline-danger" href="{% url 'fleet:server_delete' object.pk %}">{% icon "trash" 14 %} Delete {{ object }}</a>
+    </section>
+    {% endif %}
+    {% else %}
+    <section class="card side-card">
+      <h2 class="side-title">What happens next</h2>
+      <ol class="next-steps">
+        <li><strong>You get an install command</strong><span>One line with this server's own credentials, shown once.</span></li>
+        <li><strong>Run it on the server</strong><span>Any Linux with Python 3. It installs the agent as a system service.</span></li>
+        <li><strong>It reports in</strong><span>Health, services and logs appear here within seconds.</span></li>
+      </ol>
+      <p class="next-steps-note">{% icon "shield" 14 %} The agent dials out to your relay. Nothing on the server listens for connections, and it only runs what it allows.</p>
+    </section>
+    {% endif %}
+  </aside>
+</div>
 {% endblock %}

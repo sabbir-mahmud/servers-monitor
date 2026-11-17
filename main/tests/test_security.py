@@ -147,8 +147,8 @@ def test_7_next_cannot_leave_the_site(client, operator):
     for evil in ("https://evil.example/phish", "//evil.example", "javascript:alert(1)"):
         resp = client.post(reverse("alerts:acknowledge", args=[alert.pk]), {"next": evil})
         assert resp["Location"] == reverse("alerts:list")
-    ok = client.post(reverse("alerts:acknowledge", args=[alert.pk]), {"next": "/servers/"})
-    assert ok["Location"] == "/servers/"
+    ok = client.post(reverse("alerts:acknowledge", args=[alert.pk]), {"next": "/devices/"})
+    assert ok["Location"] == "/devices/"
 
 
 # 8 — email change without password ------------------------------------------------------

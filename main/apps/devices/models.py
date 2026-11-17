@@ -38,9 +38,75 @@ class DeviceState(models.TextChoices):
     OFFLINE = "offline", "Offline"
 
 
-class Device(models.Model):
+class MachineKind(models.TextChoices):
+    SERVER = "server", "Linux server"
+    DEVICE = "device", "Computer or phone"
+
+
+class Machine(models.Model):
+    """Everything an account watches, in one table: a Linux server (fleet.Server, through
+    the agent and relay) or a computer or phone (Device, through the app).
+
+    What each kind needs on top lives in its own table, joined one-to-one on the same id
+    (multi-table inheritance), so `Machine.objects` lists both in one query while commands,
+    metrics and alerts keep pointing at servers and location history at devices.
+    """
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
-    account = models.ForeignKey("tenants.Account", on_delete=models.CASCADE, related_name="devices")
+    account = models.ForeignKey(
+        "tenants.Account", on_delete=models.CASCADE, related_name="machines"
+    )
+    kind = models.CharField(max_length=10, choices=MachineKind.choices, editable=False)
+    name = models.CharField(max_length=100)
+    hostname = models.CharField(max_length=255, blank=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # Each subclass names its kind; save() stamps it so the base row always says which
+    # details table to join.
+    KIND = ""
+
+    class Meta:
+        ordering = ["name"]
+        indexes = [models.Index(fields=["account", "kind", "name"], name="machine_account_kind")]
+        constraints = [
+            # One name per account across servers, computers and phones: they share a list.
+            models.UniqueConstraint(
+                "account",
+                Lower("name"),
+                name="machine_name_unique_per_account",
+                violation_error_message="Another device or server in this account has that name.",
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        if self.KIND:
+            self.kind = self.KIND
+        super().save(*args, **kwargs)
+
+    @property
+    def details(self):
+        """The Server or Device behind this row (select_related("server", "device"))."""
+        return self.server if self.kind == MachineKind.SERVER else self.device
+
+
+class Device(Machine):
+    KIND = MachineKind.DEVICE
+
+    machine_ptr = models.OneToOneField(
+        Machine,
+        on_delete=models.CASCADE,
+        parent_link=True,
+        primary_key=True,
+        db_column="id",  # the id it had before the base table existed
+        related_name="device",
+    )
     # Removing a person leaves their devices in the account, unassigned.
     person = models.ForeignKey(
         "tenants.Person",
@@ -49,7 +115,6 @@ class Device(models.Model):
         on_delete=models.SET_NULL,
         related_name="devices",
     )
-    name = models.CharField(max_length=100)
     platform = models.CharField(max_length=10, choices=Platform.choices)
 
     # Pairing (see pairing.py). Empty: no code outstanding / not paired.
@@ -57,12 +122,10 @@ class Device(models.Model):
     token_hash = models.CharField(max_length=64, blank=True, editable=False)
     paired_at = models.DateTimeField(null=True, blank=True)
 
-    # Reported by the device.
-    last_seen_at = models.DateTimeField(null=True, blank=True)
+    # Reported by the device (last_seen_at and hostname live on Machine).
     last_ip = models.GenericIPAddressField(null=True, blank=True)
     os_version = models.CharField(max_length=100, blank=True)
     model = models.CharField(max_length=100, blank=True)
-    hostname = models.CharField(max_length=100, blank=True)
     app_version = models.CharField(max_length=30, blank=True)
     battery_percent = models.PositiveSmallIntegerField(null=True, blank=True)
     charging = models.BooleanField(null=True, blank=True)
@@ -75,20 +138,9 @@ class Device(models.Model):
     location_accuracy_m = models.PositiveIntegerField(null=True, blank=True)
     location_at = models.DateTimeField(null=True, blank=True)
 
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-
     class Meta:
         ordering = ["name"]
         constraints = [
-            models.UniqueConstraint(
-                "account",
-                Lower("name"),
-                name="device_name_unique_per_account",
-                violation_error_message="Another device in this account has that name.",
-            ),
             # Lookups by code / token must hit exactly one device.
             models.UniqueConstraint(
                 fields=["pairing_code_hash"],
@@ -103,10 +155,6 @@ class Device(models.Model):
                 name="device_platform_valid",
             ),
         ]
-        indexes = [models.Index(fields=["account", "person"], name="device_account_person")]
-
-    def __str__(self):
-        return self.name
 
     @property
     def is_phone(self) -> bool:
