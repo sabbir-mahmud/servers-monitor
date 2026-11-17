@@ -170,8 +170,40 @@ class PersonListView(StaffViewMixin, AccountScopedMixin, ListView):
         for person in people:
             person.summary = summarize(person.devices.all() if show_devices else [])
         everything = [d for p in people for d in p.summary["devices"]] + unassigned
+
+        # Search and filter in Python: a family has a handful of people, a company a few
+        # hundred, and the states depend on the current time anyway.
+        query = self.request.GET.get("q", "").strip()
+        show = self.request.GET.get("show", "all")
+        tests = {
+            "all": lambda p: True,
+            "attention": lambda p: bool(p.summary["attention"]),
+            "online": lambda p: p.summary["online"] > 0,
+            "offline": lambda p: any(d.state == "offline" for d in p.summary["devices"]),
+            "none": lambda p: not p.summary["devices"],
+        }
+        if show not in tests or not show_devices:
+            show = "all"
+        matching = [p for p in people if not query or query.lower() in p.name.lower()]
+        filters = [
+            {"key": key, "label": label, "count": sum(1 for p in matching if tests[key](p))}
+            for key, label in (
+                ("all", "All"),
+                ("attention", "Needs a look"),
+                ("online", "Online"),
+                ("offline", "Offline"),
+                ("none", "No devices"),
+            )  # fmt: skip
+        ]
+        shown = [p for p in matching if tests[show](p)]
+        # Whoever needs a look comes first; otherwise alphabetical.
+        shown.sort(key=lambda p: (not p.summary["attention"], p.name.lower()))
         ctx.update(
             people=people,
+            shown=shown,
+            query=query,
+            show=show,
+            filters=filters if show_devices else [],
             unassigned=unassigned,
             show_devices=show_devices,
             family=self.request.account.kind == "family",

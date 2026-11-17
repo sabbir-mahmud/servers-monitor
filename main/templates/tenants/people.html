@@ -5,110 +5,109 @@
 <div class="page-head">
   <div>
     <h1 class="page-title">{{ ACCOUNT.people_label }}</h1>
-    <p class="page-sub">{% if family %}Everyone at a glance: who's online, where their phone was last, and anything that needs you.{% else %}Staff and the company devices assigned to them, so you see whose laptop went quiet.{% endif %}</p>
+    <p class="page-sub">{% if family %}Who's online, where their phone was last, and anything that needs you.{% else %}Staff and the company devices assigned to them.{% endif %}</p>
   </div>
   {% if perms.tenants.add_person and people %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'tenants:person_create' %}">{% icon "plus" %} Add {{ ACCOUNT.person_label }}</a></div>{% endif %}
 </div>
 
 {% if people %}
 {% if show_devices and totals.total %}
-<section class="glance" aria-label="Summary">
-  <div class="glance-item">
-    <span class="glance-icon is-{% if totals.online %}good{% else %}muted{% endif %}">{% icon "wifi" 18 %}</span>
-    <div><div class="glance-value">{{ totals.online }} <span class="glance-of">of {{ totals.total }}</span></div><div class="glance-label">device{{ totals.total|pluralize }} online</div></div>
+<section class="statbar" aria-label="Summary">
+  <div class="statbar-item">
+    <span class="statbar-label">Devices online</span>
+    <span class="statbar-value">{{ totals.online }}<span class="statbar-of"> / {{ totals.total }}</span></span>
   </div>
-  <div class="glance-item">
-    {% with n=totals.attention|length %}
-    <span class="glance-icon is-{% if n %}{{ totals.tone }}{% else %}good{% endif %}">{% if n %}{% icon "alert" 18 %}{% else %}{% icon "check" 18 %}{% endif %}</span>
-    <div><div class="glance-value">{% if n %}{{ n }}{% else %}All good{% endif %}</div><div class="glance-label">{% if n %}need{{ n|pluralize:"s," }} a look{% else %}nothing needs you{% endif %}</div></div>
-    {% endwith %}
+  <div class="statbar-item">
+    <span class="statbar-label">Devices to check</span>
+    {% with n=totals.attention|length %}<span class="statbar-value {% if n %}text-critical{% else %}text-good{% endif %}">{% if n %}{{ n }}{% else %}None{% endif %}</span>{% endwith %}
   </div>
-  <div class="glance-item">
-    <span class="glance-icon is-info">{% icon "clock" 18 %}</span>
-    {% with d=totals.last_active %}
-    <div class="min-w-0"><div class="glance-value">{% if d %}{% if d.state == "online" %}Now{% else %}{{ d.last_seen_at|ago }}{% endif %}{% else %}—{% endif %}</div>
-      <div class="glance-label text-truncate">{% if d %}last active · {{ d.name }}{% else %}nobody active yet{% endif %}</div></div>
-    {% endwith %}
+  <div class="statbar-item">
+    <span class="statbar-label">Last active</span>
+    {% with d=totals.last_active %}<span class="statbar-value">{% if d %}{% if d.state == "online" %}Now{% else %}{{ d.last_seen_at|ago }}{% endif %}{% else %}—{% endif %}</span>
+    {% if d %}<span class="statbar-sub text-truncate">{{ d.name }}</span>{% endif %}{% endwith %}
   </div>
-  <div class="glance-item">
-    <span class="glance-icon is-accent">{% icon "map-pin" 18 %}</span>
-    {% with d=totals.last_location %}
-    <div class="min-w-0"><div class="glance-value">{% if d %}{{ d.location_at|ago }}{% else %}—{% endif %}</div>
-      <div class="glance-label text-truncate">{% if d %}last location · <a href="{% url 'devices:detail' d.pk %}">{{ d.name }}</a>{% else %}no locations yet{% endif %}</div></div>
-    {% endwith %}
+  <div class="statbar-item">
+    <span class="statbar-label">Last location</span>
+    {% with d=totals.last_location %}<span class="statbar-value">{% if d %}{{ d.location_at|ago }}{% else %}—{% endif %}</span>
+    {% if d %}<a class="statbar-sub text-truncate" href="{% url 'devices:detail' d.pk %}">{{ d.name }}</a>{% endif %}{% endwith %}
   </div>
 </section>
 {% endif %}
 
-<div class="child-grid">
-  {% for p in people %}{% with s=p.summary %}
-  <article class="card child-card {% if s.attention %}has-attention is-{{ s.tone }}{% endif %}" aria-labelledby="person-{{ p.pk }}">
-    <header class="child-head">
-      <a class="avatar avatar-lg avatar-tone-{{ p.pk|avatar_tone }}" href="{% url 'tenants:person_detail' p.pk %}" aria-hidden="true" tabindex="-1">{{ p.initials }}</a>
-      <div class="min-w-0 flex-grow-1">
-        <h2 class="child-name" id="person-{{ p.pk }}"><a href="{% url 'tenants:person_detail' p.pk %}">{{ p.name }}</a></h2>
-        {% if show_devices %}<div class="child-status status-{{ s.tone }}"><span class="status-dot" aria-hidden="true"></span>{{ s.headline }}</div>
-        {% elif p.notes %}<div class="child-note">{{ p.notes }}</div>{% endif %}
-      </div>
-      {% if perms.tenants.change_person %}<a class="icon-btn" href="{% url 'tenants:person_update' p.pk %}" title="Edit {{ p.name }}" aria-label="Edit {{ p.name }}">{% icon "edit" 16 %}</a>{% endif %}
-    </header>
-    {% if show_devices and p.notes %}<p class="child-note mb-0">{{ p.notes }}</p>{% endif %}
-
-    {% if show_devices %}
-    {% if s.last_active or s.last_location %}
-    <dl class="child-facts">
-      <div class="child-fact"><dt>{% icon "clock" 14 %} Last active</dt>
-        <dd>{% with d=s.last_active %}{% if d %}{% if d.state == "online" %}Now{% else %}{{ d.last_seen_at|ago }}{% endif %} <span class="fact-sub">on {{ d.name }}</span>{% else %}—{% endif %}{% endwith %}</dd></div>
-      <div class="child-fact"><dt>{% icon "map-pin" 14 %} Last location</dt>
-        <dd>{% with d=s.last_location %}{% if d %}{{ d.location_at|ago }} <a class="fact-link" href="https://www.openstreetmap.org/?mlat={{ d.latitude }}&mlon={{ d.longitude }}#map=17/{{ d.latitude }}/{{ d.longitude }}" target="_blank" rel="noopener noreferrer" aria-label="Open {{ p.name }}'s last location on a map (opens a new tab)">Map ↗</a>{% else %}<span class="fact-sub">Not shared yet</span>{% endif %}{% endwith %}</dd></div>
-    </dl>
-    {% endif %}
-
-    {% if s.devices %}
-    <ul class="child-devices" role="list">
-      {% for device in s.devices %}
-      <li><a class="cdev is-{{ device.state }}{% if device.attention %} needs-look{% endif %}" href="{% if device.is_paired %}{% url 'devices:detail' device.pk %}{% else %}{% url 'devices:pair' device.pk %}{% endif %}">
-        <span class="device-icon is-{{ device.state }}" aria-hidden="true">{% icon device|device_icon 17 %}</span>
-        <span class="cdev-main">
-          <span class="cdev-name">{{ device.name }}</span>
-          <span class="cdev-meta">{{ device.get_platform_display }} · {% if device.state == "waiting" %}waiting to pair{% elif device.state == "online" %}<span class="text-good">online</span>{% else %}<span class="text-critical">offline</span> {{ device.last_seen_at|ago }}{% endif %}</span>
-        </span>
-        {% if device.battery_percent is not None and device.is_paired %}
-        <span class="batt {% if device.battery_low %}is-low{% elif device.charging %}is-charging{% endif %}" title="Battery {{ device.battery_percent }}%{% if device.charging %}, charging{% endif %}">
-          <span class="batt-body" aria-hidden="true"><span class="batt-fill" style="width: {{ device.battery_percent }}%"></span></span>
-          <span class="batt-text">{% if device.charging %}<span class="batt-bolt" aria-label="charging">{% icon "bolt" 11 %}</span>{% endif %}{{ device.battery_percent }}%</span>
-        </span>
-        {% elif device.state == "waiting" %}<span class="cdev-cta">Pair {% icon "chevron" 13 %}</span>{% endif %}
-      </a></li>
+<div class="card plist">
+  <div class="plist-toolbar">
+    <form method="get" class="plist-search" role="search">
+      {% if show != "all" %}<input type="hidden" name="show" value="{{ show }}">{% endif %}
+      <span class="plist-search-icon" aria-hidden="true">{% icon "search" 15 %}</span>
+      <input class="form-control form-control-sm" type="search" name="q" value="{{ query }}" placeholder="Search {{ ACCOUNT.people_label|lower }}" aria-label="Search {{ ACCOUNT.people_label|lower }}">
+    </form>
+    {% if filters %}
+    <nav class="plist-filters" aria-label="Filter">
+      {% for f in filters %}
+      <a class="plist-filter {% if f.key == show %}is-active{% endif %}{% if f.key == 'attention' and f.count %} is-alert{% endif %}" href="?{% if query %}q={{ query|urlencode }}&amp;{% endif %}show={{ f.key }}" {% if f.key == show %}aria-current="true"{% endif %}>{{ f.label }}<span class="plist-filter-count">{{ f.count }}</span></a>
       {% endfor %}
-    </ul>
-    {% elif perms.devices.add_device %}
-    <div class="child-empty">
-      <p class="mb-2"><strong>Add {{ p.name }}'s first device.</strong> You'll get a code to enter on it; it works until it's used.</p>
-      <div class="platform-chips">
-        {% for pl in platforms %}<a class="platform-chip" href="{% url 'devices:create' %}?person={{ p.pk }}&platform={{ pl.value }}">{% icon pl.value|device_icon 15 %} {{ pl.label }}</a>{% endfor %}
+    </nav>
+    {% endif %}
+  </div>
+
+  {% if shown %}
+  <div class="prow prow-head" aria-hidden="true">
+    <span>Name</span>
+    {% if show_devices %}<span>Status</span><span>Devices</span><span>Last active</span><span>Location</span><span>Battery</span>{% else %}<span class="prow-span">Note</span>{% endif %}
+    <span></span>
+  </div>
+  <ul class="plist-rows" role="list">
+    {% for p in shown %}{% with s=p.summary %}
+    <li class="prow{% if s.attention %} is-{{ s.tone }}{% endif %}">
+      <div class="pcell-name">
+        <span class="avatar avatar-tone-{{ p.pk|avatar_tone }}" aria-hidden="true">{{ p.initials }}</span>
+        <div class="min-w-0">
+          <a class="prow-link" href="{% url 'tenants:person_detail' p.pk %}">{{ p.name }}</a>
+          {% if p.notes %}<div class="prow-note text-truncate">{{ p.notes }}</div>{% endif %}
+        </div>
       </div>
-    </div>
-    {% else %}
-    <p class="child-note mb-0">No devices yet.</p>
-    {% endif %}
-
-    {% if s.devices %}
-    <footer class="child-foot">
-      {% if perms.devices.add_device %}<a class="btn btn-sm btn-outline-secondary" href="{% url 'devices:create' %}?person={{ p.pk }}">{% icon "plus" 14 %} Add device</a>{% endif %}
-      <a class="child-open" href="{% url 'tenants:person_detail' p.pk %}">Open {{ p.name }} {% icon "chevron" 14 %}</a>
-    </footer>
-    {% endif %}
-    {% endif %}
-  </article>
-  {% endwith %}{% endfor %}
-
-  {% if perms.tenants.add_person %}
-  <a class="child-add" href="{% url 'tenants:person_create' %}">
-    <span class="child-add-icon">{% icon "plus" 20 %}</span>
-    <span class="fw-semibold">Add {{ ACCOUNT.person_label }}</span>
-    <span class="small text-body-secondary">{% if family %}Each child gets their own card and devices.{% else %}Then assign their devices.{% endif %}</span>
-  </a>
+      {% if show_devices %}
+      <div class="prow-meta">
+        <div class="pcell-status"><span class="child-status status-{{ s.tone }}"><span class="status-dot" aria-hidden="true"></span><span class="text-truncate">{{ s.headline }}</span></span></div>
+        <div class="pcell-devices">
+          {% for d in s.devices|slice:":4" %}<a class="dchip is-{{ d.state }}" href="{% if d.is_paired %}{% url 'devices:detail' d.pk %}{% else %}{% url 'devices:pair' d.pk %}{% endif %}" title="{{ d.name }} · {{ d.state_label }}" aria-label="{{ d.name }}, {{ d.state_label }}">{% icon d|device_icon 14 %}</a>{% endfor %}
+          {% if s.total > 4 %}<span class="dchip dchip-more">+{{ s.total|add:"-4" }}</span>{% endif %}
+          {% if not s.devices %}{% if perms.devices.add_device %}<a class="dchip-add" href="{% url 'devices:create' %}?person={{ p.pk }}">{% icon "plus" 13 %} Add device</a>{% else %}<span class="prow-muted">—</span>{% endif %}{% endif %}
+        </div>
+        <div class="pcell-when{% if not s.last_active %} is-empty{% endif %}">
+          {% with d=s.last_active %}{% if d %}<span class="prow-strong">{% if d.state == "online" %}Now{% else %}{{ d.last_seen_at|ago }}{% endif %}</span><span class="prow-sub text-truncate">{{ d.name }}</span>{% else %}<span class="prow-muted">—</span>{% endif %}{% endwith %}
+        </div>
+        <div class="pcell-where{% if not s.last_location %} is-empty{% endif %}">
+          {% with d=s.last_location %}{% if d %}<span class="prow-strong">{{ d.location_at|ago }}</span><a class="prow-sub prow-map" href="{{ d|map_link }}" target="_blank" rel="noopener noreferrer" aria-label="{{ p.name }}'s last location on a map (new tab)">{% icon "map-pin" 12 %} Map</a>{% else %}<span class="prow-muted">—</span>{% endif %}{% endwith %}
+        </div>
+        <div class="pcell-battery{% if not s.lowest_battery %} is-empty{% endif %}">
+          {% with d=s.lowest_battery %}{% if d %}
+          <span class="batt {% if d.battery_low %}is-low{% elif d.charging %}is-charging{% endif %}" title="{{ d.name }}: {{ d.battery_percent }}%{% if d.charging %}, charging{% endif %}">
+            <span class="batt-body" aria-hidden="true"><span class="batt-fill" style="width: {{ d.battery_percent }}%"></span></span>
+            <span class="batt-text">{% if d.charging %}<span class="batt-bolt">{% icon "bolt" 11 %}</span>{% endif %}{{ d.battery_percent }}%</span>
+          </span>{% else %}<span class="prow-muted">—</span>{% endif %}{% endwith %}
+        </div>
+      </div>
+      {% else %}
+      <div class="prow-meta"><div class="prow-span prow-note text-truncate">{{ p.notes|default:"—" }}</div></div>
+      {% endif %}
+      <div class="pcell-actions">
+        {% if perms.tenants.change_person %}<a class="icon-btn icon-btn-sm" href="{% url 'tenants:person_update' p.pk %}" title="Edit {{ p.name }}" aria-label="Edit {{ p.name }}">{% icon "edit" 15 %}</a>{% endif %}
+        <span class="prow-chevron" aria-hidden="true">{% icon "chevron" 16 %}</span>
+      </div>
+    </li>
+    {% endwith %}{% endfor %}
+  </ul>
+  <div class="plist-foot">
+    <span>{% if shown|length == people|length %}{{ people|length }} {% if people|length == 1 %}{{ ACCOUNT.person_label }}{% else %}{{ ACCOUNT.people_label|lower }}{% endif %}{% else %}{{ shown|length }} of {{ people|length }}{% endif %}</span>
+    {% if perms.tenants.add_person %}<a href="{% url 'tenants:person_create' %}">{% icon "plus" 14 %} Add {{ ACCOUNT.person_label }}</a>{% endif %}
+  </div>
+  {% else %}
+  <div class="plist-empty">
+    <span class="map-empty-icon">{% icon "search" 20 %}</span>
+    <div><div class="fw-semibold">Nobody matches</div>
+      <p class="small text-body-secondary mb-0">{% if query %}No one called “{{ query }}”{% if show != "all" %} in this filter{% endif %}.{% else %}No one in this filter right now.{% endif %} <a href="{% url 'tenants:people' %}">Show everyone</a></p></div>
+  </div>
   {% endif %}
 </div>
 
@@ -128,7 +127,7 @@
     <ol class="onboarding-steps">
       <li><span class="onboarding-num">1</span><div><strong>Add {% if family %}a child{% else %}a staff member{% endif %}</strong><span>Just a name. Email is optional.</span></div></li>
       <li><span class="onboarding-num">2</span><div><strong>Add their devices</strong><span>Phones, tablets, Windows, Mac or Linux.</span></div></li>
-      <li><span class="onboarding-num">3</span><div><strong>Pair on the device</strong><span>Enter the code in the NexGuard app. It never expires.</span></div></li>
+      <li><span class="onboarding-num">3</span><div><strong>Pair on the device</strong><span>Enter the code in the {{ SITE_NAME }} app. It never expires.</span></div></li>
     </ol>
     {% if perms.tenants.add_person %}<a class="btn btn-primary btn-lg" href="{% url 'tenants:person_create' %}">{% icon "plus" %} Add {{ ACCOUNT.person_label }}</a>{% endif %}
   </div>

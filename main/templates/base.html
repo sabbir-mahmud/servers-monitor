@@ -32,90 +32,30 @@
     </div>
 
     <div class="collapse d-lg-flex sidebar-body" id="sidenav">
-      {% if ACCOUNT %}
-      <details class="account-switch">
-        <summary class="account-switch-head" title="Switch account">
-          <span class="account-mark">{{ ACCOUNT.name|slice:":1"|upper }}</span>
-          <span class="account-text"><span class="account-name">{{ ACCOUNT.name }}</span><span class="account-kind">{{ ACCOUNT.get_kind_display }}</span></span>
-          {% icon "chevron" 14 %}
-        </summary>
-        <div class="account-switch-body">
-          {% for m in MEMBERSHIPS %}
-            <form method="post" action="{% url 'tenants:switch' %}">{% csrf_token %}<input type="hidden" name="account" value="{{ m.account_id }}">
-              <button class="account-option {% if m.account_id == ACCOUNT.pk %}is-current{% endif %}" {% if m.account_id == ACCOUNT.pk %}aria-current="true"{% endif %}>
-                <span class="account-mark">{{ m.account.name|slice:":1"|upper }}</span>
-                <span class="account-text"><span class="account-name">{{ m.account.name }}</span><span class="account-kind">{{ m.account.get_kind_display }} · {{ m.role_label }}</span></span>
-                {% if m.account_id == ACCOUNT.pk %}{% icon "check" 14 %}{% endif %}
-              </button></form>
-          {% endfor %}
-          <a class="account-option" href="{% url 'tenants:settings' %}">{% icon "wrench" 15 %}<span class="account-text"><span class="account-name">Account settings</span></span></a>
-          {% if ALLOW_ACCOUNT_CREATE %}<a class="account-option" href="{% url 'tenants:create' %}">{% icon "plus" 15 %}<span class="account-text"><span class="account-name">New account</span></span></a>{% endif %}
-        </div>
-      </details>
-      {% endif %}
       <nav class="side-nav" aria-label="Main">
         {% if perms.tenants.view_person %}
-        <details class="nav-group" data-nav-group="people" {% if url_name == 'people' or 'person' in url_name or ns == 'devices' %}data-active{% endif %} open>
-          <summary class="nav-group-head"><span>{% if ACCOUNT.kind == "family" %}Family{% else %}People{% endif %}</span>{% icon "chevron" 14 %}</summary>
-          <div class="nav-group-body">
-            <a class="side-link {% if url_name == 'people' or 'person' in url_name or ns == 'devices' %}active{% endif %}" href="{% url 'tenants:people' %}" {% if url_name == 'people' %}aria-current="page"{% endif %}>{% icon "users" %}<span class="side-text">{{ ACCOUNT.people_label }}</span>
-              {% if NAV.people %}<span class="nav-badge">{{ NAV.people }}</span>{% endif %}</a>
-          </div>
-        </details>
+        <a class="side-link {% if url_name == 'people' or 'person' in url_name or ns == 'devices' %}active{% endif %}" href="{% url 'tenants:people' %}" {% if url_name == 'people' %}aria-current="page"{% endif %}>{% icon "users" %}<span class="side-text">{{ ACCOUNT.people_label }}</span>
+          {% if NAV.people_attention %}<span class="nav-badge is-critical" title="{{ NAV.people_attention }} need a look">{{ NAV.people_attention }}</span>{% elif NAV.people %}<span class="nav-badge">{{ NAV.people }}</span>{% endif %}</a>
         {% endif %}
-
-        {% if perms.fleet.view_server or perms.monitors.view_monitor %}
-        <details class="nav-group" data-nav-group="infrastructure" {% if ns == 'fleet' or ns == 'monitors' or ns == 'status' %}data-active{% endif %} open>
-          <summary class="nav-group-head"><span>Infrastructure</span>
-            {% if NAV.servers_offline or NAV.apps_down %}<span class="nav-group-dot" title="Something needs attention"></span>{% endif %}
-            {% icon "chevron" 14 %}</summary>
-          <div class="nav-group-body">
-            {% if perms.fleet.view_server %}<a class="side-link {% if ns == 'fleet' %}active{% endif %}" href="{% url 'fleet:dashboard' %}" {% if ns == 'fleet' %}aria-current="page"{% endif %}>{% icon "server" %}<span class="side-text">Servers</span>
-              {% if NAV.servers_offline %}<span class="nav-badge is-critical" title="{{ NAV.servers_offline }} offline">{{ NAV.servers_offline }}</span>{% elif NAV.servers %}<span class="nav-badge">{{ NAV.servers }}</span>{% endif %}</a>{% endif %}
-            {% if perms.monitors.view_monitor %}<a class="side-link {% if ns == 'monitors' %}active{% endif %}" href="{% url 'monitors:list' %}" {% if ns == 'monitors' %}aria-current="page"{% endif %}>{% icon "globe" %}<span class="side-text">Applications</span>
-              {% if NAV.apps_down %}<span class="nav-badge is-critical" title="{{ NAV.apps_down }} down">{{ NAV.apps_down }}</span>{% elif NAV.apps %}<span class="nav-badge">{{ NAV.apps }}</span>{% endif %}</a>{% endif %}
-            {% if perms.status.view_statuspage %}<a class="side-link {% if ns == 'status' %}active{% endif %}" href="{% url 'status:list' %}" {% if ns == 'status' %}aria-current="page"{% endif %}>{% icon "layers" %}<span class="side-text">Status pages</span></a>{% endif %}
-          </div>
-        </details>
-        {% endif %}
-
-        {% if perms.alerts.view_alert %}
-        <details class="nav-group" data-nav-group="incidents" {% if ns == 'alerts' %}data-active{% endif %} open>
-          <summary class="nav-group-head"><span>Incidents</span>
-            {% if NAV.alerts %}<span class="nav-group-dot" title="Open alerts"></span>{% endif %}
-            {% icon "chevron" 14 %}</summary>
-          <div class="nav-group-body">
-            <a class="side-link {% if url_name == 'list' and ns == 'alerts' %}active{% endif %}" href="{% url 'alerts:list' %}" {% if url_name == 'list' and ns == 'alerts' %}aria-current="page"{% endif %}>{% icon "bell" %}<span class="side-text">Alerts</span>
-              {% if NAV.alerts %}<span class="nav-badge is-critical" title="{{ NAV.alerts }} open">{{ NAV.alerts }}</span>{% endif %}</a>
-            {% if perms.alerts.view_maintenancewindow %}<a class="side-link {% if 'maintenance' in url_name %}active{% endif %}" href="{% url 'alerts:maintenance' %}" {% if 'maintenance' in url_name %}aria-current="page"{% endif %}>{% icon "wrench" %}<span class="side-text">Maintenance</span>
-              {% if NAV.maintenance %}<span class="nav-badge is-info" title="{{ NAV.maintenance }} active">{{ NAV.maintenance }}</span>{% endif %}</a>{% endif %}
-            {% if perms.alerts.view_channel %}<a class="side-link {% if 'channel' in url_name %}active{% endif %}" href="{% url 'alerts:channels' %}" {% if 'channel' in url_name %}aria-current="page"{% endif %}>{% icon "send" %}<span class="side-text">Notifications</span></a>{% endif %}
-          </div>
-        </details>
-        {% endif %}
-
-        {% if perms.operations.view_job or perms.operations.add_job %}
-        <details class="nav-group" data-nav-group="operations" {% if ns == 'operations' %}data-active{% endif %} open>
-          <summary class="nav-group-head"><span>Operations</span>{% icon "chevron" 14 %}</summary>
-          <div class="nav-group-body">
-            {% if perms.operations.add_job %}<a class="side-link {% if url_name == 'job_create' %}active{% endif %}" href="{% url 'operations:job_create' %}" {% if url_name == 'job_create' %}aria-current="page"{% endif %}>{% icon "play" %}<span class="side-text">Run on servers</span></a>{% endif %}
-            {% if perms.operations.view_job %}<a class="side-link {% if ns == 'operations' and url_name != 'job_create' and 'schedule' not in url_name %}active{% endif %}" href="{% url 'operations:job_list' %}" {% if ns == 'operations' and url_name != 'job_create' and 'schedule' not in url_name %}aria-current="page"{% endif %}>{% icon "layers" %}<span class="side-text">Jobs</span></a>{% endif %}
-            {% if perms.operations.view_schedule %}<a class="side-link {% if 'schedule' in url_name %}active{% endif %}" href="{% url 'operations:schedule_list' %}" {% if 'schedule' in url_name %}aria-current="page"{% endif %}>{% icon "clock" %}<span class="side-text">Schedules</span></a>{% endif %}
-          </div>
-        </details>
-        {% endif %}
+        {% if perms.fleet.view_server %}<a class="side-link {% if ns == 'fleet' %}active{% endif %}" href="{% url 'fleet:dashboard' %}" {% if ns == 'fleet' %}aria-current="page"{% endif %}>{% icon "server" %}<span class="side-text">Servers</span>
+          {% if NAV.servers_offline %}<span class="nav-badge is-critical" title="{{ NAV.servers_offline }} offline">{{ NAV.servers_offline }}</span>{% elif NAV.servers %}<span class="nav-badge">{{ NAV.servers }}</span>{% endif %}</a>{% endif %}
+        {% if perms.monitors.view_monitor %}<a class="side-link {% if ns == 'monitors' %}active{% endif %}" href="{% url 'monitors:list' %}" {% if ns == 'monitors' %}aria-current="page"{% endif %}>{% icon "globe" %}<span class="side-text">Applications</span>
+          {% if NAV.apps_down %}<span class="nav-badge is-critical" title="{{ NAV.apps_down }} down">{{ NAV.apps_down }}</span>{% elif NAV.apps %}<span class="nav-badge">{{ NAV.apps }}</span>{% endif %}</a>{% endif %}
+        {% if perms.status.view_statuspage %}<a class="side-link {% if ns == 'status' %}active{% endif %}" href="{% url 'status:list' %}" {% if ns == 'status' %}aria-current="page"{% endif %}>{% icon "layers" %}<span class="side-text">Status pages</span></a>{% endif %}
+        {% if perms.operations.view_job %}<a class="side-link {% if ns == 'operations' and 'schedule' not in url_name %}active{% endif %}" href="{% url 'operations:job_list' %}" {% if ns == 'operations' and 'schedule' not in url_name %}aria-current="page"{% endif %}>{% icon "play" %}<span class="side-text">Jobs</span></a>{% endif %}
+        {% if perms.operations.view_schedule %}<a class="side-link {% if 'schedule' in url_name %}active{% endif %}" href="{% url 'operations:schedule_list' %}" {% if 'schedule' in url_name %}aria-current="page"{% endif %}>{% icon "clock" %}<span class="side-text">Schedules</span></a>{% endif %}
+        {% if perms.alerts.view_alert %}<a class="side-link {% if url_name == 'list' and ns == 'alerts' %}active{% endif %}" href="{% url 'alerts:list' %}" {% if url_name == 'list' and ns == 'alerts' %}aria-current="page"{% endif %}>{% icon "bell" %}<span class="side-text">Alerts</span>
+          {% if NAV.alerts %}<span class="nav-badge is-critical" title="{{ NAV.alerts }} open">{{ NAV.alerts }}</span>{% endif %}</a>{% endif %}
+        {% if perms.alerts.view_maintenancewindow %}<a class="side-link {% if 'maintenance' in url_name %}active{% endif %}" href="{% url 'alerts:maintenance' %}" {% if 'maintenance' in url_name %}aria-current="page"{% endif %}>{% icon "wrench" %}<span class="side-text">Maintenance</span>
+          {% if NAV.maintenance %}<span class="nav-badge is-info" title="{{ NAV.maintenance }} active">{{ NAV.maintenance }}</span>{% endif %}</a>{% endif %}
+        {% if perms.alerts.view_channel %}<a class="side-link {% if 'channel' in url_name %}active{% endif %}" href="{% url 'alerts:channels' %}" {% if 'channel' in url_name %}aria-current="page"{% endif %}>{% icon "send" %}<span class="side-text">Notifications</span></a>{% endif %}
 
         {% if ACCOUNT %}
-        <details class="nav-group" data-nav-group="administration" {% if ns == 'audit' or ns == 'users' or url_name == 'system' or url_name == 'settings' %}data-active{% endif %} open>
-          <summary class="nav-group-head"><span>Administration</span>{% icon "chevron" 14 %}</summary>
-          <div class="nav-group-body">
-            {% if perms.users.view_user %}<a class="side-link {% if ns == 'users' %}active{% endif %}" href="{% url 'users:list' %}" {% if ns == 'users' %}aria-current="page"{% endif %}>{% icon "user" %}<span class="side-text">Members</span></a>{% endif %}
-            <a class="side-link {% if url_name == 'settings' %}active{% endif %}" href="{% url 'tenants:settings' %}" {% if url_name == 'settings' %}aria-current="page"{% endif %}>{% icon "wrench" %}<span class="side-text">Account</span></a>
-            {% if user.is_superuser %}<a class="side-link {% if url_name == 'system' %}active{% endif %}" href="{% url 'system' %}" {% if url_name == 'system' %}aria-current="page"{% endif %}>{% icon "activity" %}<span class="side-text">System</span>{% if NAV.system_problem %}<span class="nav-group-dot ms-auto" title="Needs attention"></span>{% endif %}</a>{% endif %}
-            {% if perms.audit.view_auditlog %}<a class="side-link {% if ns == 'audit' %}active{% endif %}" href="{% url 'audit:list' %}" {% if ns == 'audit' %}aria-current="page"{% endif %}>{% icon "shield" %}<span class="side-text">Audit log</span></a>{% endif %}
-            {% if user.is_superuser %}<a class="side-link" href="{% url 'admin:index' %}">{% icon "key" %}<span class="side-text">Django admin</span></a>{% endif %}
-          </div>
-        </details>
+        <hr class="side-sep" aria-hidden="true">
+        {% if perms.users.view_user %}<a class="side-link {% if ns == 'users' %}active{% endif %}" href="{% url 'users:list' %}" {% if ns == 'users' %}aria-current="page"{% endif %}>{% icon "user" %}<span class="side-text">Members</span></a>{% endif %}
+        {% if perms.audit.view_auditlog %}<a class="side-link {% if ns == 'audit' %}active{% endif %}" href="{% url 'audit:list' %}" {% if ns == 'audit' %}aria-current="page"{% endif %}>{% icon "shield" %}<span class="side-text">Audit log</span></a>{% endif %}
+        <a class="side-link {% if url_name == 'settings' %}active{% endif %}" href="{% url 'tenants:settings' %}" {% if url_name == 'settings' %}aria-current="page"{% endif %}>{% icon "wrench" %}<span class="side-text">Settings</span></a>
+        {% if user.is_superuser %}<a class="side-link {% if url_name == 'system' %}active{% endif %}" href="{% url 'system' %}" {% if url_name == 'system' %}aria-current="page"{% endif %}>{% icon "activity" %}<span class="side-text">System</span>{% if NAV.system_problem %}<span class="nav-dot" title="Needs attention"></span>{% endif %}</a>{% endif %}
         {% endif %}
       </nav>
 

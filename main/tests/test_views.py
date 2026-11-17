@@ -159,7 +159,7 @@ def test_banner_warns_when_relay_process_is_not_running(client, viewer, settings
     assert b"relay process isn" not in client.get(reverse("fleet:dashboard")).content
 
 
-def test_sidebar_categories_and_problem_badges(client, admin_user, viewer):
+def test_sidebar_is_one_flat_list_with_problem_badges(client, admin_user, viewer):
     from apps.fleet.models import Health
     from apps.monitors.models import Monitor, MonitorStatus
 
@@ -170,13 +170,14 @@ def test_sidebar_categories_and_problem_badges(client, admin_user, viewer):
     )
     client.force_login(admin_user)
     page = client.get(reverse("fleet:dashboard")).content.decode()
-    for category in ("Infrastructure", "Incidents", "Operations", "Administration"):
-        assert f"<span>{category}</span>" in page
+    assert "nav-group" not in page  # no collapsible categories any more
+    for label in ("Servers", "Applications", "Jobs", "Alerts", "Members", "Settings"):
+        assert f'<span class="side-text">{label}</span>' in page
     assert page.count('class="nav-badge is-critical"') == 2  # 1 server offline, 1 app down
-    # Viewers don't see categories they have no pages in.
+    # Viewers don't see links to pages they can't open.
     client.force_login(viewer)
     page = client.get(reverse("fleet:dashboard")).content.decode()
-    assert "<span>Infrastructure</span>" in page
+    assert '<span class="side-text">Servers</span>' in page
     assert reverse("users:list") not in page and reverse("audit:list") not in page
 
 

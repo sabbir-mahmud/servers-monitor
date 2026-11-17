@@ -234,4 +234,9 @@ def summarize(devices) -> dict:
         "headline": headline,
         "last_active": max(seen, key=lambda d: d.last_seen_at, default=None),
         "last_location": max(located, key=lambda d: d.location_at, default=None),
+        "lowest_battery": min(
+            (d for d in paired if d.battery_percent is not None),
+            key=lambda d: d.battery_percent,
+            default=None,
+        ),
     }

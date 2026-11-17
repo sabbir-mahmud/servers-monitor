@@ -311,12 +311,11 @@ def test_people_page_sums_up_each_child(client, parent, family, sara):
     Person.objects.create(account=family, kind="child", name="Zayn")
     client.force_login(parent)
     page = client.get(reverse("tenants:people")).content.decode()
-    assert "2 devices need a look" in page and "has-attention is-critical" in page
+    assert "2 devices need a look" in page and 'class="prow is-critical"' in page
     assert 'class="batt is-low"' in page and "openstreetmap.org/?mlat=23.780000" in page
-    assert '1 <span class="glance-of">of 2</span>' in page
-    # A child with nothing yet gets one-click buttons for every kind of device.
-    assert "Add Zayn's first device" in page
-    assert f"?person={Person.objects.get(name='Zayn').pk}&platform=ios" in page
+    assert '1<span class="statbar-of"> / 2</span>' in page
+    # A child with nothing yet gets a one-click "Add device" for them.
+    assert f"?person={Person.objects.get(name='Zayn').pk}" in page
 
 
 def test_parents_are_not_told_about_the_server_relay(client, parent, viewer):
@@ -391,3 +390,29 @@ def test_computers_without_location_skip_the_history_card(client, parent, sara):
     api_checkin(client, token, {})
     page = client.get(reverse("devices:detail", args=[device.pk])).content.decode()
     assert "Location history" not in page and "Computers don't share" in page
+
+
+# --------------------------------------------------------------------------- the people list
+
+
+def test_people_list_filters_searches_and_puts_problems_first(client, parent, family, paired):
+    device, token = paired
+    api_checkin(client, token, {"battery": {"percent": 5, "charging": False}})  # Sara: low
+    Person.objects.create(account=family, kind="child", name="Abir")
+    Person.objects.create(account=family, kind="child", name="Zayn")
+    url = reverse("tenants:people")
+
+    page = client.get(url).content.decode()
+    # Sara needs a look, so she leads, ahead of alphabetical order.
+    assert page.index(">Sara</a>") < page.index(">Abir</a>") < page.index(">Zayn</a>")
+    assert 'title="1 need a look"' in page  # the red count on the sidebar link
+
+    page = client.get(url, {"show": "attention"}).content.decode()
+    assert ">Sara</a>" in page and ">Abir</a>" not in page and "1 of 3" in page
+    page = client.get(url, {"show": "none"}).content.decode()
+    assert ">Sara</a>" not in page and ">Abir</a>" in page and ">Zayn</a>" in page
+    page = client.get(url, {"q": "zay"}).content.decode()
+    assert ">Zayn</a>" in page and ">Abir</a>" not in page
+    page = client.get(url, {"q": "nobody"}).content.decode()
+    assert "Nobody matches" in page
+    assert client.get(url, {"show": "bogus"}).status_code == 200  # unknown filter = all

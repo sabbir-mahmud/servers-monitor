@@ -24,6 +24,20 @@
     <div class="card mb-3"><div class="card-header">{% icon "user" 17 %} Owners</div><ul class="list-unstyled mb-0 p-3 d-flex flex-column gap-2">
       {% for m in owners %}<li>{% include "users/_person.html" with u=m.user %}</li>{% endfor %}
     </ul><div class="card-footer small text-body-secondary">{{ member_count }} member{{ member_count|pluralize }} in all.</div></div>
+    {% if MEMBERSHIPS|length > 1 or ALLOW_ACCOUNT_CREATE %}
+    <div class="card mb-3"><div class="card-header">{% icon "users" 17 %} Your accounts</div>
+      <div class="p-2 d-flex flex-column gap-1">
+        {% for m in MEMBERSHIPS %}
+        <form method="post" action="{% url 'tenants:switch' %}">{% csrf_token %}<input type="hidden" name="account" value="{{ m.account_id }}">
+          <button class="account-option {% if m.account_id == ACCOUNT.pk %}is-current{% endif %}" {% if m.account_id == ACCOUNT.pk %}aria-current="true" disabled{% endif %}>
+            <span class="account-mark">{{ m.account.name|slice:":1"|upper }}</span>
+            <span class="account-text"><span class="account-name">{{ m.account.name }}</span><span class="account-kind">{{ m.account.get_kind_display }} · {{ m.role_label }}</span></span>
+            {% if m.account_id == ACCOUNT.pk %}<span class="small text-body-secondary">Current</span>{% else %}<span class="small fw-semibold">Switch</span>{% endif %}
+          </button></form>
+        {% endfor %}
+        {% if ALLOW_ACCOUNT_CREATE %}<a class="account-option" href="{% url 'tenants:create' %}">{% icon "plus" 15 %}<span class="account-text"><span class="account-name">New account</span></span></a>{% endif %}
+      </div></div>
+    {% endif %}
     <div class="card danger-zone"><div class="card-header">{% icon "logout" 17 %} Leave this account</div><div class="card-body">
       {% if is_last_owner %}
         <p class="text-body-secondary small mb-0">You're its only owner. Make someone else owner before you leave.</p>

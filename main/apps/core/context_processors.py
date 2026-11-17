@@ -83,6 +83,15 @@ def _nav_counts(user, account) -> dict:
         counts["alerts"] = Alert.objects.filter(account=account, resolved_at__isnull=True).count()
     if user.has_perm("tenants.view_person"):
         counts["people"] = account.people.count()
+    if user.has_perm("devices.view_device"):
+        from apps.devices.models import Device
+
+        # People with a device offline or nearly flat: a red count on the sidebar link.
+        # Only a few columns, and the state is worked out in Python (it depends on time).
+        devices = Device.objects.filter(account=account, person__isnull=False).only(
+            "person_id", "platform", "token_hash", "last_seen_at", "battery_percent", "charging"
+        )
+        counts["people_attention"] = len({d.person_id for d in devices if d.attention})
     if user.is_superuser:
         # A dot on System when nobody would be told the dashboard died.
         counts["system_problem"] = not settings.WATCHDOG_URL
