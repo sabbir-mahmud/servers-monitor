@@ -63,18 +63,21 @@ MANAGER_ROLES = {Role.OWNER, Role.ADMIN, Role.GUARDIAN}
 PEOPLE_VIEW = ["tenants.view_person"]
 PEOPLE_MANAGE = ["tenants.add_person", "tenants.change_person", "tenants.delete_person"]
 OWNER_ONLY = ["tenants.change_account"]
+DEVICES_VIEW = ["devices.view_device"]
+DEVICES_MANAGE = ["devices.add_device", "devices.change_device", "devices.delete_device"]
 
+_MANAGE_PEOPLE = PEOPLE_VIEW + PEOPLE_MANAGE + DEVICES_VIEW + DEVICES_MANAGE
 ROLE_PERMS = {
-    Role.OWNER: VIEW + OPERATE + ADMINISTER + PEOPLE_VIEW + PEOPLE_MANAGE + OWNER_ONLY,
-    Role.ADMIN: VIEW + OPERATE + ADMINISTER + PEOPLE_VIEW + PEOPLE_MANAGE,
-    Role.GUARDIAN: VIEW + OPERATE + ADMINISTER + PEOPLE_VIEW + PEOPLE_MANAGE,
-    Role.OPERATOR: VIEW + OPERATE + PEOPLE_VIEW,
-    Role.VIEWER: VIEW + PEOPLE_VIEW,
+    Role.OWNER: VIEW + OPERATE + ADMINISTER + _MANAGE_PEOPLE + OWNER_ONLY,
+    Role.ADMIN: VIEW + OPERATE + ADMINISTER + _MANAGE_PEOPLE,
+    Role.GUARDIAN: VIEW + OPERATE + ADMINISTER + _MANAGE_PEOPLE,
+    Role.OPERATOR: VIEW + OPERATE + PEOPLE_VIEW + DEVICES_VIEW,
+    Role.VIEWER: VIEW + PEOPLE_VIEW + DEVICES_VIEW,
 }
 
 # Feature names, used for permissions (below), the sidebar and URL gating.
 FEATURES_BY_KIND = {
-    Kind.FAMILY: {"people", "alerts", "notifications", "team", "audit"},
+    Kind.FAMILY: {"people", "devices", "alerts", "notifications", "team", "audit"},
     Kind.SOLO: {
         "servers",
         "monitors",
@@ -98,6 +101,7 @@ FEATURES_BY_KIND = {
         "audit",
         "team",
         "people",
+        "devices",
     },  # fmt: skip
 }
 
@@ -116,6 +120,7 @@ _APP_FEATURE = {
     "users": "team",
     "audit": "audit",
     "alerts": "alerts",
+    "devices": "devices",
 }
 
 

@@ -1,5 +1,5 @@
 """
-Settings for the Vigil control plane ("main").
+Settings for the NexGuard control plane ("main").
 
 Environment-driven (12-factor): copy `.env.example` to `.env` and override per
 environment. Nothing in this file should need editing between local, staging
@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "apps.core",
     "apps.tenants",
+    "apps.devices",
     "apps.users",
     "apps.audit",
     "apps.fleet",
@@ -216,7 +217,7 @@ MAILERS = {
         else {"BACKEND": "apps.core.mail.DisabledEmailBackend"}
     )
 }
-DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="Vigil <noreply@localhost>")
+DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="NexGuard <noreply@localhost>")
 SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
 LOGIN_FAILURE_LIMIT = config("LOGIN_FAILURE_LIMIT", default=6, cast=int)
@@ -298,7 +299,7 @@ AGENT_DIST_DIR = Path(config("AGENT_DIST_DIR", default=str(BASE_DIR.parent / "ag
 # Monitoring behaviour
 # ---------------------------------------------------------------------------#
 
-SITE_NAME = config("SITE_NAME", default="Vigil")
+SITE_NAME = config("SITE_NAME", default="NexGuard")
 # A server is "late" after this many missed intervals and "offline" after OFFLINE many.
 MONITOR_LATE_AFTER_INTERVALS = config("MONITOR_LATE_AFTER_INTERVALS", default=2, cast=int)
 MONITOR_OFFLINE_AFTER_INTERVALS = config("MONITOR_OFFLINE_AFTER_INTERVALS", default=6, cast=int)
@@ -308,6 +309,11 @@ MONITOR_METRIC_RETENTION_DAYS = config("MONITOR_METRIC_RETENTION_DAYS", default=
 # Hourly server rollups and daily monitor uptime outlive raw samples: long charts, forecasts
 # and status-page history (~24 rows per server per day).
 ROLLUP_RETENTION_DAYS = config("ROLLUP_RETENTION_DAYS", default=400, cast=int)
+# Children's / staff devices: how long location history is kept.
+DEVICE_LOCATION_DAYS = config("DEVICE_LOCATION_DAYS", default=30, cast=int)
+# Map tiles for device locations ({z}/{x}/{y}). Empty: no maps, just coordinates and links.
+MAP_TILE_URL = config("MAP_TILE_URL", default="https://tile.openstreetmap.org/{z}/{x}/{y}.png")
+MAP_ATTRIBUTION = config("MAP_ATTRIBUTION", default="© OpenStreetMap contributors")
 # Pending commands no agent picked up within this window expire instead of firing late —
 # a deploy that runs an hour after someone clicked it is worse than one that never ran.
 MONITOR_COMMAND_DELIVERY_SECONDS = config("MONITOR_COMMAND_DELIVERY_SECONDS", default=300, cast=int)
@@ -335,13 +341,22 @@ DASHBOARD_URL = config("DASHBOARD_URL", default="")
 # Security
 # ---------------------------------------------------------------------------#
 
+
+def _tile_origin(url: str) -> list[str]:
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    return [f"{parts.scheme}://{parts.netloc}"] if parts.netloc else []
+
+
 # All JS/CSS is vendored under static/, so scripts need nothing beyond 'self'.
+# Map tiles (MAP_TILE_URL) are the only outside images.
 # Inline style attributes are allowed for meter widths; inline scripts are not.
 SECURE_CSP = {
     "default-src": [CSP.SELF],
     "script-src": [CSP.SELF, CSP.NONCE],
     "style-src": [CSP.SELF, CSP.UNSAFE_INLINE],
-    "img-src": [CSP.SELF, "data:"],
+    "img-src": [CSP.SELF, "data:", *_tile_origin(MAP_TILE_URL)],
     "connect-src": [CSP.SELF],
     "frame-ancestors": [CSP.NONE],
     "form-action": [CSP.SELF],

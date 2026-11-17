@@ -1,11 +1,13 @@
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.db.models import Prefetch
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
+from django.utils import timezone
 from django.views import View
-from django.views.generic import CreateView, DeleteView, ListView, UpdateView
+from django.views.generic import CreateView, DeleteView, DetailView, ListView, UpdateView
 
 from apps.audit.services import record
 from apps.core.mixins import StaffViewMixin
@@ -136,11 +138,87 @@ class AccountSettingsView(LoginRequiredMixin, View):
 # --------------------------------------------------------------------------- people
 
 
+def _with_devices(request, queryset):
+    """Each person's devices, one query for the whole page (none without the feature)."""
+    from apps.devices.models import Device
+
+    if not request.user.has_perm("devices.view_device"):
+        return queryset
+    return queryset.prefetch_related(
+        Prefetch("devices", queryset=Device.objects.filter(account=request.account))
+    )
+
+
 class PersonListView(StaffViewMixin, AccountScopedMixin, ListView):
     permission_required = "tenants.view_person"
     template_name = "tenants/people.html"
     model = Person
     context_object_name = "people"
+
+    def get_queryset(self):
+        return _with_devices(self.request, super().get_queryset())
+
+    def get_context_data(self, **kwargs):
+        from apps.devices.models import COMPUTERS, PHONES, Device, Platform, summarize
+
+        ctx = super().get_context_data(**kwargs)
+        show_devices = self.request.user.has_perm("devices.view_device")
+        unassigned = []
+        if show_devices:
+            unassigned = list(Device.objects.filter(account=self.request.account, person=None))
+        people = list(ctx["people"])
+        for person in people:
+            person.summary = summarize(person.devices.all() if show_devices else [])
+        everything = [d for p in people for d in p.summary["devices"]] + unassigned
+        ctx.update(
+            people=people,
+            unassigned=unassigned,
+            show_devices=show_devices,
+            family=self.request.account.kind == "family",
+            totals=summarize(everything),
+            # Quick "add a device" buttons on a child with none yet.
+            platforms=[Platform(p) for p in (*PHONES, *COMPUTERS)],
+        )
+        return ctx
+
+
+class PersonDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
+    """One child (or staff member) and their devices."""
+
+    permission_required = "tenants.view_person"
+    template_name = "tenants/person_detail.html"
+    model = Person
+    context_object_name = "person"
+
+    def get_queryset(self):
+        return _with_devices(self.request, super().get_queryset())
+
+    def get_context_data(self, **kwargs):
+        from apps.devices import maps
+        from apps.devices.models import COMPUTERS, PHONES, DeviceLocation, Platform, summarize
+
+        person = self.object
+        show_devices = self.request.user.has_perm("devices.view_device")
+        summary = summarize(person.devices.all() if show_devices else [])
+        located = summary["last_location"]
+        recent = []
+        if show_devices:
+            recent = list(
+                DeviceLocation.objects.filter(
+                    device__person=person, device__account=self.request.account
+                ).select_related("device")[:8]
+            )
+        return super().get_context_data(
+            show_devices=show_devices,
+            summary=summary,
+            map=maps.for_device(located) if located else None,
+            map_device=located,
+            recent_places=recent,
+            now_ymd=timezone.localdate().strftime("%Y%m%d"),
+            computers=[Platform(p) for p in COMPUTERS],
+            phones=[Platform(p) for p in PHONES],
+            **kwargs,
+        )
 
 
 class _PersonFormMixin(AccountScopedMixin):
@@ -180,7 +258,8 @@ class PersonDeleteView(StaffViewMixin, AccountScopedMixin, DeleteView):
     def get_context_data(self, **kwargs):
         return super().get_context_data(
             cancel_url=reverse("tenants:people"),
-            delete_note="Removes them from this account. Their devices stay, unassigned.",
+            delete_note="Removes them from this account. Their devices stay, unassigned "
+            "(remove those separately to stop them reporting).",
             **kwargs,
         )
 

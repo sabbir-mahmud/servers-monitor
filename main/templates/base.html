@@ -55,10 +55,10 @@
       {% endif %}
       <nav class="side-nav" aria-label="Main">
         {% if perms.tenants.view_person %}
-        <details class="nav-group" data-nav-group="people" {% if url_name == 'people' or 'person' in url_name %}data-active{% endif %} open>
+        <details class="nav-group" data-nav-group="people" {% if url_name == 'people' or 'person' in url_name or ns == 'devices' %}data-active{% endif %} open>
           <summary class="nav-group-head"><span>{% if ACCOUNT.kind == "family" %}Family{% else %}People{% endif %}</span>{% icon "chevron" 14 %}</summary>
           <div class="nav-group-body">
-            <a class="side-link {% if url_name == 'people' or 'person' in url_name %}active{% endif %}" href="{% url 'tenants:people' %}" {% if url_name == 'people' %}aria-current="page"{% endif %}>{% icon "users" %}<span class="side-text">{{ ACCOUNT.people_label }}</span>
+            <a class="side-link {% if url_name == 'people' or 'person' in url_name or ns == 'devices' %}active{% endif %}" href="{% url 'tenants:people' %}" {% if url_name == 'people' %}aria-current="page"{% endif %}>{% icon "users" %}<span class="side-text">{{ ACCOUNT.people_label }}</span>
               {% if NAV.people %}<span class="nav-badge">{{ NAV.people }}</span>{% endif %}</a>
           </div>
         </details>

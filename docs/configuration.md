@@ -18,7 +18,7 @@ the defaults when a variable is unset.
 | `DEBUG` | `False` | Development mode. Never in production. |
 | `ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` | Hostnames/IPs the UI may be opened with, comma-separated. |
 | `CSRF_TRUSTED_ORIGINS` | *(empty)* | Full origins (`https://monitor.example.com`) when served through a proxy or Tailscale. |
-| `SITE_NAME` | `Vigil` | Shown in the UI, emails and notifications. |
+| `SITE_NAME` | `NexGuard` | Shown in the UI, emails and notifications. |
 | `TIME_ZONE` | `UTC` | Zone for maintenance windows and displayed times, e.g. `Asia/Dhaka`. |
 | `DASHBOARD_URL` | *(empty)* | How people open the dashboard. Used for links in emails, invitations, reset links and alerts. Recommended in production. |
 | `ADMIN_URL` | `admin/` | Path of Django admin (superusers only). |
@@ -73,6 +73,9 @@ the defaults when a variable is unset.
 | `MONITOR_GRACE_SECONDS` | `10` | Network jitter allowance added to both. |
 | `MONITOR_METRIC_RETENTION_DAYS` | `14` | Raw metric samples and application check history kept this long. |
 | `ROLLUP_RETENTION_DAYS` | `400` | Hourly server rollups and daily application uptime kept this long: charts up to 90 days, per-mount disk forecasts and status-page history. About 24 rows per server per day. |
+| `DEVICE_LOCATION_DAYS` | `30` | Location history of children's and staff devices is kept this long (the last location is always kept). Deleted with the device. |
+| `MAP_TILE_URL` | `https://tile.openstreetmap.org/{z}/{x}/{y}.png` | Map tiles for device locations. The viewer's browser loads them (the tile server sees which area, not who). Use another tile provider for heavy use, or empty to show coordinates and map links only. |
+| `MAP_ATTRIBUTION` | `© OpenStreetMap contributors` | Credit shown on every map, as the tile provider requires. |
 | `MONITOR_COMMAND_DELIVERY_SECONDS` | `300` | Queued jobs not picked up within this window expire instead of running late. |
 | `MONITOR_COMMAND_OUTPUT_LIMIT` | `262144` | Bytes of output kept per command (the tail is kept). |
 | `MONITOR_CHECK_WORKERS` | `8` | Application health checks run in parallel. |
@@ -161,7 +164,7 @@ links from the Users page.
 | `EMAIL_HOST_PASSWORD` | *(empty)* | SMTP password or app password. |
 | `EMAIL_USE_TLS` | `True` | STARTTLS. |
 | `EMAIL_USE_SSL` | `False` | Implicit TLS (port 465). Use one or the other. |
-| `DEFAULT_FROM_EMAIL` | `Vigil <noreply@localhost>` | Sender address. |
+| `DEFAULT_FROM_EMAIL` | `NexGuard <noreply@localhost>` | Sender address. |
 
 ## Agent configuration
 

@@ -7,7 +7,7 @@ change files under `agent/`: run the upgrade command from each server's page.
 
 ## [3.0.0] - unreleased
 
-The project is now **Vigil**: one install serves many separate accounts. Agents are
+The project is now **NexGuard**: one install serves many separate accounts. Agents are
 unchanged and need no upgrade (`server-monitor-agent`, `smctl` and the relay keys keep their
 names).
 
@@ -22,6 +22,15 @@ names).
   address that already has a login asks them to sign in and join.
 - **People**: the children of a family, or company staff, with or without a login. Devices
   attach to them in the next release.
+- **Devices** for parent and company accounts: add a child's Windows, Mac or Linux
+  computer, Android phone or iPhone/iPad and get a pairing code (and a QR code for the
+  phone app). The code works until it's used; there's no time limit. Pairing gives the device
+  a token that never expires: it keeps reporting until the parent removes it or pairs it
+  again (after a reset or for a replacement), which cuts off the old one. Each device
+  shows when it was last online, its battery, storage, network and last location, with a
+  location history kept for `DEVICE_LOCATION_DAYS` (30). Devices check in over HTTPS at
+  `/device/v1/pair` and `/device/v1/checkin`; `agent/nexguard_device.py` is a reference
+  client for computers.
 - Sign-up (`ALLOW_SIGNUP`) asks for the account kind and makes the person its owner.
 - `OIDC_ACCOUNT`: which company account SSO users join.
 

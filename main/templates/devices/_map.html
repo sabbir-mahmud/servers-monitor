@@ -1,0 +1,17 @@
+{# A static map centred on the pin. Needs: m (maps.static_map), label, initials, tone, href. #}
+<div class="map" role="img" aria-label="{{ label }}">
+  <div class="map-layer" style="width: {{ m.width }}px; height: {{ m.height }}px; transform: translate(-{{ m.pin_x }}px, -{{ m.pin_y }}px)">
+    {% for t in m.tiles %}<img class="map-tile" src="{{ t.url }}" style="left: {{ t.x }}px; top: {{ t.y }}px" width="256" height="256" alt="" loading="lazy" decoding="async" referrerpolicy="strict-origin" draggable="false">{% endfor %}
+    {% if m.radius or m.trail or m.dots %}
+    <svg class="map-overlay" width="{{ m.width }}" height="{{ m.height }}" viewBox="0 0 {{ m.width }} {{ m.height }}" aria-hidden="true">
+      {% if m.radius %}<circle class="map-accuracy" cx="{{ m.pin_x }}" cy="{{ m.pin_y }}" r="{{ m.radius }}"/>{% endif %}
+      {% if m.trail %}<polyline class="map-trail" points="{{ m.trail }}"/>{% endif %}
+      {% for x, y in m.dots %}<circle class="map-dot" cx="{{ x }}" cy="{{ y }}" r="3.5"/>{% endfor %}
+    </svg>
+    {% endif %}
+    <span class="map-pin avatar-tone-{{ tone }}" style="left: {{ m.pin_x }}px; top: {{ m.pin_y }}px" aria-hidden="true"><span class="map-pin-face"><span>{{ initials }}</span></span></span>
+  </div>
+  <span class="map-attrib">{{ m.attribution }}</span>
+  {% if href %}<a class="map-open" href="{{ href }}" target="_blank" rel="noopener noreferrer">Open full map ↗</a>{% endif %}
+  {% if m.trail %}<span class="map-legend"><span class="map-legend-line"></span>last 24 h</span>{% endif %}
+</div>

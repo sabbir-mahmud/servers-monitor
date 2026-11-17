@@ -37,6 +37,11 @@ MONITOR_BADGES = {
     "pending": ("muted", "○", "Checking…"),
     "paused": ("muted", "⏸", "Paused"),
 }
+DEVICE_BADGES = {
+    "online": ("good", "●", "Online"),
+    "offline": ("critical", "✕", "Offline"),
+    "waiting": ("muted", "○", "Waiting to pair"),
+}
 SERVICE_BADGES = {
     "up": ("good", "●", "Up"),
     "down": ("critical", "✕", "Down"),
@@ -104,6 +109,14 @@ ICONS = {
     "user": '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
     "users": '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/>'
     '<path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6.5 6.5 0 0 1 3.5 6"/>',
+    "phone": '<rect width="12" height="20" x="6" y="2" rx="2.5"/><path d="M11 18h2"/>',
+    "laptop": '<rect width="16" height="11" x="4" y="4" rx="1.5"/><path d="M2 19h20"/>',
+    "battery": '<rect width="16" height="10" x="2" y="7" rx="2"/><path d="M22 11v2"/>',
+    "bolt": '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+    "battery-charging": '<path d="M15 7h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-2M6 17H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2.5"/><path d="m11 7-3 5h4l-3 5M22 11v2"/>',
+    "map-pin": '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
+    "wifi": '<path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/>',
+    "qr": '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/><path d="M14 14h3v3M21 14v.01M14 21h7v-4"/>',
     "home": '<path d="M3 11 12 3l9 8"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/>',
     "switch": '<path d="M7 4 3 8l4 4"/><path d="M3 8h14"/><path d="m17 20 4-4-4-4"/><path d="M21 16H7"/>',
 }
@@ -123,6 +136,33 @@ def icon(name, size=18):
 @register.simple_tag
 def health_badge(health):
     return _badge(HEALTH_BADGES, health)
+
+
+@register.simple_tag
+def device_badge(state):
+    return _badge(DEVICE_BADGES, state)
+
+
+@register.filter
+def avatar_tone(value) -> int:
+    """A stable colour (0-5) per person, so each child's avatar is recognisable."""
+    import hashlib
+
+    return int(hashlib.md5(str(value).encode(), usedforsecurity=False).hexdigest(), 16) % 6
+
+
+@register.filter
+def map_link(obj) -> str:
+    """OpenStreetMap at this device's (or location row's) position."""
+    from apps.devices.maps import open_url
+
+    return open_url(obj.latitude, obj.longitude)
+
+
+@register.filter
+def device_icon(device_or_platform):
+    platform = getattr(device_or_platform, "platform", device_or_platform)
+    return "phone" if platform in ("android", "ios") else "laptop"
 
 
 @register.filter

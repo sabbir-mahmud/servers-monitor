@@ -1,4 +1,4 @@
-{% load static %}// Vigil service worker {{ version }}: offline page, cached static files, push alerts.
+{% load static %}// NexGuard service worker {{ version }}: offline page, cached static files, push alerts.
 // Dashboard pages and data are never cached: they need you signed in and must be fresh.
 const CACHE = "sm-{{ version }}";
 const OFFLINE = "{% url 'offline' %}";

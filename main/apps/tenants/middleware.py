@@ -24,7 +24,7 @@ NO_ACCOUNT_OK = {
     "service_worker",
     "offline",
 }
-NO_ACCOUNT_PREFIXES = ("/static/", "/oidc/", "/api/", "/metrics")
+NO_ACCOUNT_PREFIXES = ("/static/", "/oidc/", "/api/", "/device/", "/metrics")
 
 
 def memberships(user):

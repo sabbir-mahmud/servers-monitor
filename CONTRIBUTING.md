@@ -1,4 +1,4 @@
-# Contributing to Vigil
+# Contributing to NexGuard
 
 Thanks for helping! Bug reports, ideas, documentation and code are all welcome.
 

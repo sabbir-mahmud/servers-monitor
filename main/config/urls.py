@@ -8,6 +8,7 @@ from apps.api import ui as api_ui
 from apps.api import views as api_views
 from apps.core import pwa
 from apps.core import views as core_views
+from apps.devices.urls import api_urlpatterns as device_api_urls
 from apps.tenants import views as tenant_views
 from apps.users import views as user_views
 
@@ -46,6 +47,8 @@ urlpatterns = [
         name="api_token_revoke",
     ),
     path("api/v1/", include("apps.api.urls")),
+    path("device/v1/", include(device_api_urls)),
+    path("devices/", include("apps.devices.urls")),
     path("metrics", api_views.metrics, name="metrics"),
     path("manifest.webmanifest", pwa.manifest, name="manifest"),
     path("sw.js", pwa.service_worker, name="service_worker"),

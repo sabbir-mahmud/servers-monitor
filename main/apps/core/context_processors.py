@@ -30,16 +30,24 @@ def site(request):
         return ctx
     from apps.agent_api import relay
 
-    # Without the relay process, agents' heartbeats and job output pile up in Redis unread.
-    ctx["RELAY_DOWN"] = not relay.is_alive()
-    ctx["INSECURE_TRANSPORT"] = _insecure_transport(request, user)
     account = getattr(request, "account", None)
+    # Without the relay process, agents' heartbeats and job output pile up in Redis unread.
+    # Only for people with servers to worry about (and whoever runs the installation): a
+    # parent has none, and the warning would only alarm them.
+    ctx["RELAY_DOWN"] = _cares_about_servers(user, account) and not relay.is_alive()
+    ctx["INSECURE_TRANSPORT"] = _insecure_transport(request, user)
     ctx["ACCOUNT"] = account
     ctx["MEMBERSHIP"] = getattr(request, "membership", None)
     ctx["MEMBERSHIPS"] = getattr(request, "memberships", [])
     ctx["NAV"] = _nav_counts(user, account) if account is not None else {}
     ctx["ALLOW_ACCOUNT_CREATE"] = settings.ALLOW_SIGNUP or user.is_superuser
     return ctx
+
+
+def _cares_about_servers(user, account) -> bool:
+    if user.is_superuser:
+        return True
+    return account is not None and account.has("servers") and user.has_perm("fleet.view_server")
 
 
 def _insecure_transport(request, user) -> bool:

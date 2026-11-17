@@ -15,6 +15,7 @@ from apps.alerts import delivery, maintenance
 from apps.alerts.models import Alert, AlertKind, Channel, MaintenanceWindow, Severity
 from apps.api.models import ApiToken
 from apps.audit.models import AuditLog
+from apps.devices.models import Device
 from apps.fleet.models import Server, ServerGroup
 from apps.monitors.models import Monitor
 from apps.operations import services as ops
@@ -58,6 +59,8 @@ def globex(django_user_model):
     alert = Alert.objects.create(account=b, server=server, kind=AlertKind.OFFLINE,
                                  severity=Severity.CRITICAL, message="globex-db is offline")  # fmt: skip
     person = Person.objects.create(account=b, kind="staff", name="Globex Gary")
+    device = Device.objects.create(account=b, person=person, platform="windows",
+                                   name="globex-laptop", token_hash="globex-token")  # fmt: skip
     invite, _ = Invitation.issue(b, "new@globex.test", "viewer", boss)
     token, raw = ApiToken.issue(boss, b, "globex-ci", "operate")
     AuditLog.objects.create(account=b, action="server.create", target="globex-secret-audit")
@@ -65,7 +68,7 @@ def globex(django_user_model):
         "account": b, "boss": boss, "server": server, "group": group, "monitor": monitor,
         "channel": channel, "window": window, "job": job, "command": command,
         "schedule": schedule, "page": page, "incident": incident, "alert": alert,
-        "person": person, "invite": invite, "token": raw,
+        "person": person, "invite": invite, "token": raw, "device": device,
     }  # fmt: skip
 
 
@@ -102,7 +105,12 @@ OBJECT_URLS = [
     ("status:download", "page", {}),
     ("status:publish", "page", {}),
     ("status:incident_create", "page", {}),
+    ("tenants:person_detail", "person", {}),
     ("tenants:person_update", "person", {}),
+    ("devices:detail", "device", {}),
+    ("devices:pair", "device", {}),
+    ("devices:update", "device", {}),
+    ("devices:delete", "device", {}),
     ("tenants:person_delete", "person", {}),
     ("users:invite_revoke", "invite", {}),
 ]
@@ -123,6 +131,8 @@ def test_no_page_reaches_another_accounts_objects(client, admin_user, globex, ur
         assert fresh.status == CommandStatus.PENDING
     if isinstance(fresh, Invitation):
         assert fresh.revoked_at is None
+    if isinstance(fresh, Device):
+        assert fresh.pairing_code_hash == "" and fresh.token_hash == "globex-token"
 
 
 def test_incident_update_of_another_account(client, admin_user, globex):
@@ -156,6 +166,8 @@ LIST_PAGES = [
     ("monitors:create", "globex-db"),
     ("alerts:maintenance_create", "globex-db"),
     ("tenants:people", "Globex Gary"),
+    ("tenants:people", "globex-laptop"),
+    ("devices:create", "Globex Gary"),
     ("audit:list", "globex-secret-audit"),
 ]
 

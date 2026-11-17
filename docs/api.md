@@ -132,7 +132,7 @@ default). Disabled servers and paused monitors are left out.
 
 ```yaml
 openapi: 3.1.0
-info: {title: Vigil API, version: "1"}
+info: {title: NexGuard API, version: "1"}
 servers: [{url: /api/v1}]
 components:
   securitySchemes:

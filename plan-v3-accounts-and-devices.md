@@ -241,7 +241,7 @@ second (mobile) developer.
 3. **Scope:** decided as we go, phase by phase. Monitoring first; no parental controls yet.
 4. **Company staff:** both. Staff are `Person`s; a staff member can also have a login
    (`Person.user`) and a role.
-5. **Naming:** the product is **Vigil** (`SITE_NAME`). The agent, `smctl`, its systemd units
+5. **Naming:** the product is **NexGuard** (`SITE_NAME`). The agent, `smctl`, its systemd units
    and the `sm:` relay keys keep their names so existing servers need no change.
 
 ## 8. Progress
@@ -256,5 +256,16 @@ second (mobile) developer.
   object URL, list, form, the API, channel routing, maintenance and schedules across two
   accounts. Differences from the plan: the System page is superuser-only, and sign-up no
   longer waits for approval.
-- **Next: Phase 2** — `Device` on desktops (macOS, Windows, Linux desktop agents, HTTPS
-  check-ins), attached to a `Person`.
+- **Phase 2 — devices, started.** `apps/devices`: `Device` (Windows, macOS, Linux,
+  Android, iOS) attached to a `Person`, and `DeviceLocation` history. It's a separate model
+  from `Server`, not a rename: servers keep the relay, devices use HTTPS (`/device/v1/pair`
+  and `/device/v1/checkin`). Pairing codes have no time limit and are single use; device
+  tokens never expire and are replaced by pairing again (a reset device) or removed with
+  the device. Parent pages: a card per child with each device's state, battery and
+  location age; a page per device with last online, battery, storage, network, last
+  location and history. `agent/nexguard_device.py` is the reference client for computers
+  (stdlib, optional psutil).
+- **Next:** the Expo app (Android/iOS, EAS builds) speaking the same API: pairing by QR
+  (`nexguard://pair?server=…&code=…`), background location, a visible "monitored by"
+  screen. Then alerts (device offline for a long time, battery low), places (home/school)
+  and desktop location.

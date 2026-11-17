@@ -1,0 +1,11 @@
+{% load monitor %}<a class="device-row" href="{% if device.is_paired %}{% url 'devices:detail' device.pk %}{% else %}{% url 'devices:pair' device.pk %}{% endif %}">
+  <span class="device-icon is-{{ device.state }}" aria-hidden="true">{% icon device|device_icon 18 %}</span>
+  <span class="device-main">
+    <span class="device-name">{{ device.name }}</span>
+    <span class="device-meta">
+      {% if device.state == "waiting" %}{{ device.get_platform_display }} · waiting to pair
+      {% else %}{% if device.state == "online" %}Online{% else %}Last online {{ device.last_seen_at|ago }}{% endif %}{% if device.battery_percent is not None %} · {% if device.charging %}{% icon "battery-charging" 12 %}{% else %}{% icon "battery" 12 %}{% endif %} {{ device.battery_percent }}%{% endif %}{% if device.has_location %} · {% icon "map-pin" 12 %} {{ device.location_at|ago }}{% endif %}{% endif %}
+    </span>
+  </span>
+  {% device_badge device.state %}
+</a>
