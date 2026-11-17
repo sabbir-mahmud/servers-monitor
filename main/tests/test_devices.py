@@ -360,7 +360,8 @@ def test_child_page_shows_map_recent_places_and_devices(client, parent, paired, 
     assert "Where Sara was last" in page and 'class="map-tile"' in page
     assert "23.7812, 90.4074" in page  # recent places
     assert "Sara&#x27;s phone: battery low" in page  # status line
-    assert "Add another device" in page
+    assert "Add another" in page and "Full history" in page
+    assert 'class="alert-line is-warning"' in page  # low battery is called out up top
 
 
 def test_device_page_shows_timeline_and_vitals(client, paired):
@@ -416,3 +417,15 @@ def test_people_list_filters_searches_and_puts_problems_first(client, parent, fa
     page = client.get(url, {"q": "nobody"}).content.decode()
     assert "Nobody matches" in page
     assert client.get(url, {"show": "bogus"}).status_code == 200  # unknown filter = all
+
+
+def test_child_with_only_a_computer_gets_a_short_location_hint(client, parent, sara):
+    client.force_login(parent)
+    device, code = add_device(client, sara, platform="macos", name="Sara's Mac")
+    token = api_pair(client, code, platform="macos").json()["token"]
+    api_checkin(client, token, {"battery": {"percent": 70}})
+    page = client.get(reverse("tenants:person_detail", args=[sara.pk])).content.decode()
+    assert "map-tile" not in page and "Where Sara was last" not in page
+    assert "Computers don&#x27;t share it" in page or "Computers don't share it" in page
+    assert f"?person={sara.pk}&amp;platform=ios" in page  # offer to add a phone
+    assert "Not on computers" in page and "alert-line" not in page

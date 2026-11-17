@@ -238,7 +238,7 @@ class PersonDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
             recent = list(
                 DeviceLocation.objects.filter(
                     device__person=person, device__account=self.request.account
-                ).select_related("device")[:8]
+                ).select_related("device")[:6]
             )
         return super().get_context_data(
             show_devices=show_devices,
@@ -246,6 +246,7 @@ class PersonDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
             map=maps.for_device(located) if located else None,
             map_device=located,
             recent_places=recent,
+            has_phone=any(d.is_phone for d in summary["devices"]),
             now_ymd=timezone.localdate().strftime("%Y%m%d"),
             computers=[Platform(p) for p in COMPUTERS],
             phones=[Platform(p) for p in PHONES],

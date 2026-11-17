@@ -1,0 +1,33 @@
+{% load monitor %}
+<section class="card loc-card" aria-labelledby="where-title">
+  <div class="map-card-head">
+    <div class="min-w-0">
+      <h2 class="card-title-lg" id="where-title">{% icon "map-pin" 17 %} Where {{ person.name }} was last</h2>
+      <p class="map-card-sub">{{ map_device.location_at|ago }} · {{ map_device.location_at|date:"D j M, H:i" }} · {{ map_device.name }}{% if map_device.location_accuracy_m %} · within {{ map_device.location_accuracy_m }} m{% endif %}</p>
+    </div>
+    <a class="btn btn-sm btn-outline-secondary flex-none" href="{% url 'devices:detail' map_device.pk %}">Full history</a>
+  </div>
+  <div class="loc-split">
+    <div class="loc-map">
+      {% if map %}
+        {% include "devices/_map.html" with m=map label="Map of "|add:person.name|add:"'s last location" initials=person.initials tone=person.pk|avatar_tone href=map_device|map_link %}
+      {% else %}
+        <div class="map-empty"><div><div class="fw-semibold num">{{ map_device.latitude }}, {{ map_device.longitude }}</div><a href="{{ map_device|map_link }}" target="_blank" rel="noopener noreferrer">Open map ↗</a></div></div>
+      {% endif %}
+    </div>
+    <div class="loc-places">
+      <h3 class="side-title">Recent places</h3>
+      {% if recent_places %}
+      <ol class="place-list" role="list">
+        {% for loc in recent_places %}
+        <li>
+          <span class="place-time" title="{{ loc.recorded_at }}">{{ loc.recorded_at|date:"H:i" }}<span>{% if loc.recorded_at|date:"Ymd" != now_ymd %}{{ loc.recorded_at|date:"j M" }}{% else %}today{% endif %}</span></span>
+          <span class="place-main min-w-0"><span class="num text-truncate d-block">{{ loc.latitude|floatformat:4 }}, {{ loc.longitude|floatformat:4 }}</span><span class="place-meta">{{ loc.device.name }}{% if loc.accuracy_m is not None %} · ±{{ loc.accuracy_m }} m{% endif %}</span></span>
+          <a class="place-map" href="{{ loc|map_link }}" target="_blank" rel="noopener noreferrer" aria-label="Open {{ loc.recorded_at|date:'H:i' }} on a map (new tab)">{% icon "map-pin" 15 %}</a>
+        </li>
+        {% endfor %}
+      </ol>
+      {% else %}<p class="small text-body-secondary mb-0">Only the latest location so far.</p>{% endif %}
+    </div>
+  </div>
+</section>
