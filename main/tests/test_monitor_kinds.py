@@ -17,7 +17,7 @@ from apps.alerts.models import Alert, AlertKind, Severity
 from apps.monitors import checker
 from apps.monitors.models import Kind, Monitor, MonitorCheck, MonitorStatus
 
-from .conftest import make_server
+from .conftest import acme, make_server
 
 pytestmark = pytest.mark.django_db
 
@@ -30,7 +30,7 @@ def private_ok(settings):
 def _monitor(kind=Kind.HTTP, **kw):
     kw.setdefault("name", f"{kind}-mon")
     kw.setdefault("failure_threshold", 1)
-    return Monitor.objects.create(kind=kind, **kw)
+    return Monitor.objects.create(account=acme(), kind=kind, **kw)
 
 
 # --------------------------------------------------------------------------- HTTP additions
@@ -76,7 +76,7 @@ def app_url(private_ok):
 
 
 def test_existing_monitors_default_to_http(app_url):
-    m = Monitor.objects.create(name="old", url=f"{app_url}/page")
+    m = Monitor.objects.create(account=acme(), name="old", url=f"{app_url}/page")
     assert m.kind == Kind.HTTP and checker.probe(m).ok
 
 
@@ -268,7 +268,7 @@ def test_domain_expiry(monkeypatch, days, ok, severity):
 
 @pytest.fixture
 def hb(server):
-    return Monitor.objects.create(name="Backup", kind=Kind.HEARTBEAT, target="nightly-backup",
+    return Monitor.objects.create(account=acme(), name="Backup", kind=Kind.HEARTBEAT, target="nightly-backup",
                                   server=server, failure_threshold=1,
                                   options={"period_seconds": 86400, "grace_seconds": 3600})  # fmt: skip
 
@@ -342,7 +342,7 @@ def _ping(server, key=None, **body):
 def test_signed_ping_from_the_right_server_counts():
     server = _keyed("db-01")
     m = Monitor.objects.create(
-        name="B", kind=Kind.HEARTBEAT, target="nightly-backup", server=server
+        account=acme(), name="B", kind=Kind.HEARTBEAT, target="nightly-backup", server=server
     )
     _ping(server)
     m.refresh_from_db()
@@ -355,8 +355,12 @@ def test_signed_ping_from_the_right_server_counts():
 def test_forged_unsigned_and_cross_server_pings_are_ignored():
     owner, other = _keyed("db-01"), _keyed("web-01")
     legacy, _ = make_server("old-01")  # no signing salt
-    m = Monitor.objects.create(name="B", kind=Kind.HEARTBEAT, target="nightly-backup", server=owner)
-    Monitor.objects.create(name="L", kind=Kind.HEARTBEAT, target="nightly-backup", server=legacy)
+    m = Monitor.objects.create(
+        account=acme(), name="B", kind=Kind.HEARTBEAT, target="nightly-backup", server=owner
+    )
+    Monitor.objects.create(
+        account=acme(), name="L", kind=Kind.HEARTBEAT, target="nightly-backup", server=legacy
+    )
     _ping(owner, key=b"x" * 32)  # forged: wrong key
     _ping(other)  # valid, but for another server's monitor
     _ping(legacy)  # unsigned legacy agent

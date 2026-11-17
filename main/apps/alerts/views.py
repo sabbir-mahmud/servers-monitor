@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from django.contrib import messages
 from django.db.models import Q
-from django.shortcuts import get_object_or_404, redirect, render
+from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.views import View
@@ -11,20 +11,23 @@ from django.views.generic import CreateView, DeleteView, ListView, UpdateView
 from apps.audit.services import record
 from apps.core.mixins import HtmxTemplateMixin, StaffViewMixin
 from apps.core.utils import safe_next
+from apps.tenants.scoping import AccountScopedMixin, get_scoped_or_404, scoped
 
 from . import delivery, maintenance
 from .forms import ChannelForm, MaintenanceForm
 from .models import Alert, Channel, ChannelKind, Delivery, MaintenanceWindow
 
 
-class AlertListView(StaffViewMixin, HtmxTemplateMixin, ListView):
+class AlertListView(StaffViewMixin, AccountScopedMixin, HtmxTemplateMixin, ListView):
     permission_required = "alerts.view_alert"
     template_name = "alerts/list.html"
     htmx_partial = "rows"
     paginate_by = 50
 
+    model = Alert
+
     def get_queryset(self):
-        qs = Alert.objects.select_related("server", "monitor", "acknowledged_by")
+        qs = super().get_queryset().select_related("server", "monitor", "acknowledged_by")
         state = self.request.GET.get("state", "open")
         if state == "open":
             qs = qs.filter(resolved_at__isnull=True)
@@ -37,7 +40,7 @@ class AlertListView(StaffViewMixin, HtmxTemplateMixin, ListView):
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         ctx["state"] = self.request.GET.get("state", "open")
-        cov = maintenance.coverage()
+        cov = maintenance.coverage(account=self.request.account)
         for alert in ctx["object_list"]:
             alert.muted = alert.is_open and cov.covers_alert(alert)
         return ctx
@@ -48,7 +51,7 @@ class AlertAcknowledgeView(StaffViewMixin, View):
     http_method_names = ["post"]
 
     def post(self, request, pk):
-        alert = get_object_or_404(Alert.objects.select_related("server"), pk=pk)
+        alert = get_scoped_or_404(request, Alert.objects.select_related("server"), pk=pk)
         if alert.acknowledged_at is None:
             alert.acknowledged_by, alert.acknowledged_at = request.user, timezone.now()
             alert.save(update_fields=["acknowledged_by", "acknowledged_at"])
@@ -60,7 +63,7 @@ class AlertAcknowledgeView(StaffViewMixin, View):
 # --------------------------------------------------------------------------- notifications
 
 
-class ChannelListView(StaffViewMixin, ListView):
+class ChannelListView(StaffViewMixin, AccountScopedMixin, ListView):
     permission_required = "alerts.view_channel"
     template_name = "alerts/channels.html"
     context_object_name = "channels"
@@ -68,7 +71,7 @@ class ChannelListView(StaffViewMixin, ListView):
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        ctx["deliveries"] = Delivery.objects.select_related("channel", "alert")[:30]
+        ctx["deliveries"] = scoped(self.request, Delivery).select_related("channel", "alert")[:30]
         return ctx
 
 
@@ -103,7 +106,7 @@ class _ChannelFormMixin:
         return ctx
 
 
-class ChannelCreateView(StaffViewMixin, _ChannelFormMixin, CreateView):
+class ChannelCreateView(StaffViewMixin, AccountScopedMixin, _ChannelFormMixin, CreateView):
     permission_required = "alerts.add_channel"
 
     def form_valid(self, form):
@@ -114,7 +117,7 @@ class ChannelCreateView(StaffViewMixin, _ChannelFormMixin, CreateView):
         return response
 
 
-class ChannelUpdateView(StaffViewMixin, _ChannelFormMixin, UpdateView):
+class ChannelUpdateView(StaffViewMixin, AccountScopedMixin, _ChannelFormMixin, UpdateView):
     permission_required = "alerts.change_channel"
 
     def form_valid(self, form):
@@ -124,7 +127,7 @@ class ChannelUpdateView(StaffViewMixin, _ChannelFormMixin, UpdateView):
         return response
 
 
-class ChannelDeleteView(StaffViewMixin, DeleteView):
+class ChannelDeleteView(StaffViewMixin, AccountScopedMixin, DeleteView):
     permission_required = "alerts.delete_channel"
     template_name = "confirm_delete.html"
     model = Channel
@@ -147,7 +150,7 @@ class ChannelTestView(StaffViewMixin, View):
     http_method_names = ["post"]
 
     def post(self, request, pk):
-        channel = get_object_or_404(Channel, pk=pk)
+        channel = get_scoped_or_404(request, Channel, pk=pk)
         result = delivery.send_test(channel, request.user)
         if result.ok:
             messages.success(request, f"Test message sent to {channel.name}.")
@@ -165,7 +168,7 @@ class TelegramChatsView(StaffViewMixin, View):
     def post(self, request):
         token = request.POST.get("telegram_token", "").strip()
         if not token and (pk := request.POST.get("channel")):
-            token = get_object_or_404(Channel, pk=pk).telegram_token
+            token = get_scoped_or_404(request, Channel, pk=pk).telegram_token
         error, chats = "", []
         if not token:
             error = "Paste the bot token first."
@@ -180,14 +183,19 @@ class TelegramChatsView(StaffViewMixin, View):
 # --------------------------------------------------------------------------- maintenance
 
 
-class MaintenanceListView(StaffViewMixin, ListView):
+class MaintenanceListView(StaffViewMixin, AccountScopedMixin, ListView):
     permission_required = "alerts.view_maintenancewindow"
     template_name = "alerts/maintenance.html"
     context_object_name = "windows"
 
+    model = MaintenanceWindow
+
     def get_queryset(self):
-        return MaintenanceWindow.objects.prefetch_related("servers", "monitors").select_related(
-            "created_by"
+        return (
+            super()
+            .get_queryset()
+            .prefetch_related("servers", "monitors")
+            .select_related("created_by")
         )
 
     def get_context_data(self, **kwargs):
@@ -202,7 +210,7 @@ class MaintenanceListView(StaffViewMixin, ListView):
         return ctx
 
 
-class MaintenanceCreateView(StaffViewMixin, CreateView):
+class MaintenanceCreateView(StaffViewMixin, AccountScopedMixin, CreateView):
     permission_required = "alerts.add_maintenancewindow"
     template_name = "alerts/maintenance_form.html"
     form_class = MaintenanceForm
@@ -240,7 +248,7 @@ class MaintenanceEndView(StaffViewMixin, View):
     http_method_names = ["post"]
 
     def post(self, request, pk):
-        window = get_object_or_404(MaintenanceWindow, pk=pk)
+        window = get_scoped_or_404(request, MaintenanceWindow, pk=pk)
         maintenance.end_now(window)
         record(request, "maintenance.end", target=window.title)
         messages.success(
@@ -249,7 +257,7 @@ class MaintenanceEndView(StaffViewMixin, View):
         return redirect(safe_next(request, reverse("alerts:maintenance")))
 
 
-class MaintenanceDeleteView(StaffViewMixin, DeleteView):
+class MaintenanceDeleteView(StaffViewMixin, AccountScopedMixin, DeleteView):
     permission_required = "alerts.delete_maintenancewindow"
     template_name = "confirm_delete.html"
     model = MaintenanceWindow
@@ -283,9 +291,9 @@ class QuickMuteView(StaffViewMixin, View):
             minutes = 60
         server = monitor = None
         if pk := request.POST.get("server"):
-            server = get_object_or_404(Server, pk=pk)
+            server = get_scoped_or_404(request, Server, pk=pk)
         elif pk := request.POST.get("monitor"):
-            monitor = get_object_or_404(Monitor, pk=pk)
+            monitor = get_scoped_or_404(request, Monitor, pk=pk)
         else:
             return redirect("alerts:maintenance")
         window = maintenance.quick_mute(request.user, minutes, server=server, monitor=monitor)

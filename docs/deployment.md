@@ -1,4 +1,4 @@
-# Deploying Server Monitor
+# Deploying Vigil
 
 The dashboard is two processes sharing one SQLite database:
 
@@ -154,7 +154,7 @@ EMAIL_PORT=587
 EMAIL_HOST_USER=…
 EMAIL_HOST_PASSWORD=…
 EMAIL_USE_TLS=True
-DEFAULT_FROM_EMAIL=Server Monitor <monitor@example.com>
+DEFAULT_FROM_EMAIL=Vigil <monitor@example.com>
 ```
 
 Any SMTP provider works (Gmail with an app password, Brevo, Mailgun, Postmark, Amazon SES).

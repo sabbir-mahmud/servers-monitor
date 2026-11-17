@@ -23,7 +23,7 @@ from apps.alerts.models import (
 from apps.fleet.models import Environment
 from apps.monitors.models import Monitor
 
-from .conftest import make_server
+from .conftest import acme, make_server
 
 pytestmark = pytest.mark.django_db
 
@@ -52,7 +52,7 @@ def outbox(monkeypatch):
 
 def channel(**kw):
     defaults = {"name": "ops", "kind": "telegram", "telegram_token": "t", "telegram_chat_id": "1"}
-    c = Channel.objects.create(**{**defaults, **kw})
+    c = Channel.objects.create(account=acme(), **{**defaults, **kw})
     Channel.objects.filter(pk=c.pk).update(created_at=timezone.now() - timedelta(hours=1))
     c.refresh_from_db()
     return c
@@ -61,7 +61,12 @@ def channel(**kw):
 def alert(target, kind=AlertKind.OFFLINE, severity=Severity.CRITICAL, **kw):
     field = "server" if hasattr(target, "environment") else "monitor"
     return Alert.objects.create(
-        **{field: target}, kind=kind, severity=severity, message=f"{target.name} broke", **kw
+        account=acme(),
+        **{field: target},
+        kind=kind,
+        severity=severity,
+        message=f"{target.name} broke",
+        **kw,
     )
 
 
@@ -95,7 +100,7 @@ def test_adding_a_channel_does_not_replay_history(outbox, prod):
 
 def test_routing_rules(outbox, prod):
     staging = make_server("stg-01", environment=Environment.STAGING)[0]
-    app = Monitor.objects.create(name="shop", url="https://shop.test/")
+    app = Monitor.objects.create(account=acme(), name="shop", url="https://shop.test/")
     channel(name="prod-critical", min_severity=Severity.CRITICAL, environments=["production"])
     channel(name="apps-only", include_servers=False)
     alert(prod)
@@ -164,6 +169,7 @@ def _window(**kw):
     now = timezone.now()
     targets = {k: kw.pop(k) for k in ("servers", "monitors") if k in kw}
     w = MaintenanceWindow.objects.create(
+        account=acme(),
         title="upgrade",
         starts_at=kw.pop("starts_at", now - timedelta(minutes=5)),
         ends_at=kw.pop("ends_at", now + timedelta(hours=1)),
@@ -199,18 +205,19 @@ def test_recovered_during_maintenance_is_never_sent(outbox, prod):
 
 
 def test_muting_a_server_mutes_its_apps(prod):
-    app = Monitor.objects.create(name="api", url="https://api.test/", server=prod)
-    other = Monitor.objects.create(name="blog", url="https://blog.test/")
+    app = Monitor.objects.create(account=acme(), name="api", url="https://api.test/", server=prod)
+    other = Monitor.objects.create(account=acme(), name="blog", url="https://blog.test/")
     _window(servers=[prod])
     cov = maintenance.coverage()
-    assert cov.covers_monitor(app.pk, app.server_id) and not cov.covers_monitor(other.pk)
+    assert cov.covers_monitor(app.pk, app.account_id, app.server_id)
+    assert not cov.covers_monitor(other.pk, other.account_id)
     assert cov.covers_alert(alert(app, kind=AlertKind.APP_DOWN))
 
 
 def test_upcoming_window_does_not_mute_yet(prod):
     now = timezone.now()
     _window(servers=[prod], starts_at=now + timedelta(hours=1), ends_at=now + timedelta(hours=2))
-    assert not maintenance.coverage().covers_server(prod.pk)
+    assert not maintenance.coverage().covers_server(prod.pk, prod.account_id)
 
 
 # ---------------------------------------------------------------- telegram transport
@@ -283,6 +290,7 @@ def test_telegram_errors_are_readable(telegram):
 
 def test_messages_escape_html(prod):
     a = Alert.objects.create(
+        account=acme(),
         server=prod,
         kind=AlertKind.SERVICE,
         severity=Severity.CRITICAL,

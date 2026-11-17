@@ -22,6 +22,7 @@ from django.db import IntegrityError, transaction
 from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 
 from apps.audit.services import record
+from apps.tenants.permissions import MembershipPermissionsMixin
 
 from . import accounts
 from .models import SSOIdentity
@@ -42,14 +43,29 @@ def _groups(claims) -> set[str]:
     return {str(g) for g in raw if isinstance(g, str | int)}
 
 
+LEGACY_ROLE = {"Admin": "admin", "Operator": "operator", "Viewer": "viewer"}
+
+
 def role_for(claims) -> str | None:
+    """admin / operator / viewer in the SSO account (OIDC_*_GROUPS); never owner."""
     groups = _groups(claims)
-    for role, wanted in (("Admin", settings.OIDC_ADMIN_GROUPS),
-                         ("Operator", settings.OIDC_OPERATOR_GROUPS),
-                         ("Viewer", settings.OIDC_VIEWER_GROUPS)):  # fmt: skip
+    for role, wanted in (("admin", settings.OIDC_ADMIN_GROUPS),
+                         ("operator", settings.OIDC_OPERATOR_GROUPS),
+                         ("viewer", settings.OIDC_VIEWER_GROUPS)):  # fmt: skip
         if groups & set(wanted):
             return role
-    return settings.OIDC_DEFAULT_ROLE or None
+    default = settings.OIDC_DEFAULT_ROLE
+    return LEGACY_ROLE.get(default, default.lower()) or None
+
+
+def sso_account():
+    """The company account SSO users join: OIDC_ACCOUNT (slug), else the oldest company."""
+    from apps.tenants.models import Account
+    from apps.tenants.roles import Kind
+
+    if settings.OIDC_ACCOUNT:
+        return Account.objects.filter(slug=settings.OIDC_ACCOUNT).first()
+    return Account.objects.filter(kind=Kind.COMPANY).order_by("created_at").first()
 
 
 def username_for(email, claims=None) -> str:
@@ -65,7 +81,7 @@ def username_for(email, claims=None) -> str:
     return name
 
 
-class SSOBackend(OIDCAuthenticationBackend):
+class SSOBackend(MembershipPermissionsMixin, OIDCAuthenticationBackend):
     def verify_claims(self, claims) -> bool:
         if not claims.get("sub") or not claims.get("email"):
             return False
@@ -76,6 +92,11 @@ class SSOBackend(OIDCAuthenticationBackend):
             return False
         if role_for(claims) is None:
             logger.warning("SSO refused %s: in no group mapped to a role", claims.get("email"))
+            return False
+        if sso_account() is None:
+            logger.warning(
+                "SSO refused %s: no account to join (set OIDC_ACCOUNT)", claims.get("email")
+            )
             return False
         return True
 
@@ -117,12 +138,22 @@ class SSOBackend(OIDCAuthenticationBackend):
             raise SuspiciousOperation("this provider account is linked to another user") from None
         if user.sso.subject != str(claims["sub"]):
             raise SuspiciousOperation("this account is linked to a different provider account")
-        role = role_for(claims)
-        if role != accounts.role_of(user):
+        from apps.tenants.models import Membership
+        from apps.tenants.roles import Role
+
+        role, account = role_for(claims), sso_account()
+        membership = Membership.objects.filter(account=account, user=user).first()
+        if membership is None:
+            Membership.objects.create(account=account, user=user, role=role)
+            record(user, "user.sso_role", target=user.get_username(), account=account, role=role)
+        elif membership.role != role and membership.role != Role.OWNER:
+            # Owners are managed in the dashboard, never demoted by a group change.
             try:
-                accounts.set_role(user, role)
-                record(user, "user.sso_role", target=user.get_username(), role=role)
-            except accounts.AccountError as exc:  # e.g. demoting the last Admin
+                accounts.set_role(membership, role)
+                record(
+                    user, "user.sso_role", target=user.get_username(), account=account, role=role
+                )
+            except accounts.AccountError as exc:
                 logger.warning("SSO kept %s's role: %s", user.get_username(), exc)
         return user
 

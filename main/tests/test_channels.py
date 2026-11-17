@@ -11,6 +11,8 @@ from django.urls import reverse
 from apps.alerts import channels, delivery
 from apps.alerts.models import Alert, AlertKind, Channel, DeliveryEvent, Severity
 
+from .conftest import acme
+
 pytestmark = pytest.mark.django_db
 
 
@@ -40,12 +42,12 @@ def sink(settings):
 
 
 def _channel(kind, **config):
-    return Channel.objects.create(name=kind, kind=kind, config=json.dumps(config))
+    return Channel.objects.create(account=acme(), name=kind, kind=kind, config=json.dumps(config))
 
 
 @pytest.fixture
 def alert(server):
-    return Alert.objects.create(server=server, kind=AlertKind.DISK, severity=Severity.CRITICAL,
+    return Alert.objects.create(account=acme(), server=server, kind=AlertKind.DISK, severity=Severity.CRITICAL,
                                 message="Disk at 97%")  # fmt: skip
 
 

@@ -15,6 +15,8 @@ from apps.alerts.models import Alert, AlertKind
 from apps.monitors import checker, stats
 from apps.monitors.models import Monitor, MonitorCheck, MonitorStatus, validate_status_spec
 
+from .conftest import acme
+
 pytestmark = pytest.mark.django_db
 
 
@@ -55,7 +57,9 @@ def site():
 
 
 def make(url, **kw):
-    return Monitor.objects.create(name=kw.pop("name", url.rsplit("/", 1)[-1] or "m"), url=url, **kw)
+    return Monitor.objects.create(
+        account=acme(), name=kw.pop("name", url.rsplit("/", 1)[-1] or "m"), url=url, **kw
+    )
 
 
 # ---------------------------------------------------------------- probing

@@ -4,7 +4,7 @@ from . import views
 
 app_name = "fleet"
 urlpatterns = [
-    path("", views.DashboardView.as_view(), name="dashboard"),
+    path("servers/", views.DashboardView.as_view(), name="dashboard"),
     path("servers/new/", views.ServerCreateView.as_view(), name="server_create"),
     path("servers/<uuid:pk>/", views.ServerDetailView.as_view(), name="server_detail"),
     path("servers/<uuid:pk>/edit/", views.ServerUpdateView.as_view(), name="server_update"),

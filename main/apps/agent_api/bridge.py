@@ -156,7 +156,11 @@ def _job_ping(server: Server, message: dict) -> None:
     if exit_code is not None and not isinstance(exit_code, int):
         exit_code = None
     monitor = Monitor.objects.filter(
-        kind=Kind.HEARTBEAT, server=server, target=name[:253], is_enabled=True
+        kind=Kind.HEARTBEAT,
+        server=server,
+        account_id=server.account_id,
+        target=name[:253],
+        is_enabled=True,
     ).first()
     if monitor is None:
         logger.info("Job ping %r from %s matches no enabled Heartbeat monitor", name, server.name)

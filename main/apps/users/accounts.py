@@ -1,11 +1,12 @@
-"""Account operations: roles, the last-admin guard, reset and invitation links, email."""
+"""People operations: roles in an account, the last-owner guard, reset and invitation
+links, email. Roles are memberships (apps/tenants); a user's login itself (password,
+email, two-factor, active) is global and can only be managed by someone who manages
+every account that user belongs to, or by a superuser."""
 
 import logging
 import threading
 
 from django.conf import settings
-from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Group
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import EmailMultiAlternatives
 from django.db import close_old_connections, transaction
@@ -14,16 +15,13 @@ from django.urls import reverse
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 
-from .roles import ROLE_MATRIX
+from apps.tenants.models import Membership
+from apps.tenants.permissions import membership_of
+from apps.tenants.roles import MANAGER_ROLES, ROLE_HELP, Role
 
 logger = logging.getLogger(__name__)
 
-ROLES = list(ROLE_MATRIX)  # Viewer, Operator, Admin
-ROLE_HELP = {
-    "Viewer": "Sees everything except the audit log. Can't change anything.",
-    "Operator": "Viewer, plus runs actions, acknowledges alerts, mutes and edits apps.",
-    "Admin": "Everything: servers, credentials, users, notifications, shell, audit log.",
-}
+__all__ = ["ROLE_HELP", "AccountError", "Role"]
 
 
 class AccountError(Exception):
@@ -38,44 +36,72 @@ def check_can_manage(actor, person) -> None:
         raise AccountError("Only a superuser can change a superuser's account.")
 
 
-def role_of(user) -> str | None:
-    if user.is_superuser:
-        return "Admin"
-    names = set(user.groups.values_list("name", flat=True))
-    for role in reversed(ROLES):  # highest wins if someone has several
-        if role in names:
-            return role
-    return None
+def can_manage_login(actor, person, account) -> bool:
+    """May `actor` reset `person`'s password, two-factor, email or deactivate them? Only
+    when every account `person` belongs to is `account` and `actor` manages it: otherwise
+    an Admin of one family could take over the login someone uses for their company."""
+    if actor.is_superuser:
+        return True
+    if person.is_superuser or person.pk == actor.pk:
+        return False
+    actor_m = membership_of(actor)
+    if actor_m is None or actor_m.account_id != account.pk or actor_m.role not in MANAGER_ROLES:
+        return False
+    accounts = set(Membership.objects.filter(user=person).values_list("account_id", flat=True))
+    return accounts == {account.pk}
 
 
-def _admins():
-    from django.db.models import Q
-
-    User = get_user_model()
+def role_of(user, account=None) -> str | None:
+    """The user's role in `account` (default: the one bound for this request)."""
+    if account is None:
+        m = membership_of(user)
+        return m.role if m is not None else None
     return (
-        User.objects.filter(is_active=True)
-        .filter(Q(is_superuser=True) | Q(groups__name="Admin"))
-        .distinct()
+        Membership.objects.filter(user=user, account=account).values_list("role", flat=True).first()
     )
 
 
-def is_last_admin(user) -> bool:
-    return role_of(user) == "Admin" and user.is_active and _admins().count() <= 1
+def owners(account):
+    return Membership.objects.filter(account=account, role=Role.OWNER, user__is_active=True)
+
+
+def is_last_owner(membership: Membership) -> bool:
+    return membership.role == Role.OWNER and owners(membership.account).count() <= 1
 
 
 @transaction.atomic
-def set_role(user, role: str | None, *, actor=None) -> None:
-    if role is not None and role not in ROLES:
-        raise AccountError("Unknown role.")
-    if actor is not None and actor.pk == user.pk and role != role_of(user):
-        raise AccountError("You can't change your own role. Ask another Admin.")
-    if role != "Admin" and is_last_admin(user):
-        raise AccountError("This is the last Admin. Make someone else an Admin first.")
-    if user.is_superuser and role != "Admin":
-        raise AccountError("Superusers are always Admins. Change that in Django admin.")
-    user.groups.remove(*Group.objects.filter(name__in=ROLES))
-    if role:
-        user.groups.add(Group.objects.get(name=role))
+def set_role(membership: Membership, role: str, *, actor=None) -> None:
+    """Change someone's role in their account, with the guards every path needs."""
+    account = membership.account
+    if role not in account.roles:
+        raise AccountError(f"{account.get_kind_display()} accounts have no {role} role.")
+    if role == membership.role:
+        return
+    if actor is not None:
+        if actor.pk == membership.user_id:
+            raise AccountError("You can't change your own role. Ask another owner or admin.")
+        mine = role_of(actor, account)
+        if (
+            (Role.OWNER in (role, membership.role))
+            and mine != Role.OWNER
+            and not actor.is_superuser
+        ):
+            raise AccountError("Only an owner can make someone an owner, or change an owner.")
+    if is_last_owner(membership):
+        raise AccountError("This is the account's only owner. Make someone else owner first.")
+    membership.role = role
+    membership.save(update_fields=["role"])
+
+
+@transaction.atomic
+def remove_member(membership: Membership, *, actor=None) -> None:
+    if is_last_owner(membership):
+        raise AccountError("This is the account's only owner. Make someone else owner first.")
+    if actor is not None and actor.pk != membership.user_id:
+        mine = role_of(actor, membership.account)
+        if membership.role == Role.OWNER and mine != Role.OWNER and not actor.is_superuser:
+            raise AccountError("Only an owner can remove an owner.")
+    membership.delete()
 
 
 @transaction.atomic
@@ -83,8 +109,12 @@ def set_active(user, active: bool, *, actor=None) -> None:
     if not active:
         if actor is not None and actor.pk == user.pk:
             raise AccountError("You can't deactivate your own account.")
-        if is_last_admin(user):
-            raise AccountError("This is the last Admin. Make someone else an Admin first.")
+        for m in Membership.objects.filter(user=user, role=Role.OWNER).select_related("account"):
+            if is_last_owner(m):
+                raise AccountError(
+                    f"{user.display_name} is the only owner of {m.account.name}. "
+                    "Make someone else owner first."
+                )
     user.is_active = active
     if active:
         user.pending_approval = False

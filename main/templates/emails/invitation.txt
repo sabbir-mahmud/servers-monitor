@@ -1,6 +1,6 @@
 Hi,
 
-{% if inviter %}{{ inviter.display_name }} invited you{% else %}You're invited{% endif %} to {{ SITE_NAME }} as {{ invitation.role }}.
+{% if inviter %}{{ inviter.display_name }} invited you{% else %}You're invited{% endif %} to {{ SITE_NAME }} as {{ invitation.role_label }} in {{ invitation.account.name }}.
 
 Create your account here (works once, expires in {{ days }} days):
 {{ link }}

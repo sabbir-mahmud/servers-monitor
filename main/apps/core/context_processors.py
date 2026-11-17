@@ -33,7 +33,12 @@ def site(request):
     # Without the relay process, agents' heartbeats and job output pile up in Redis unread.
     ctx["RELAY_DOWN"] = not relay.is_alive()
     ctx["INSECURE_TRANSPORT"] = _insecure_transport(request, user)
-    ctx["NAV"] = _nav_counts(user)
+    account = getattr(request, "account", None)
+    ctx["ACCOUNT"] = account
+    ctx["MEMBERSHIP"] = getattr(request, "membership", None)
+    ctx["MEMBERSHIPS"] = getattr(request, "memberships", [])
+    ctx["NAV"] = _nav_counts(user, account) if account is not None else {}
+    ctx["ALLOW_ACCOUNT_CREATE"] = settings.ALLOW_SIGNUP or user.is_superuser
     return ctx
 
 
@@ -41,7 +46,7 @@ def _insecure_transport(request, user) -> bool:
     """Plain HTTP from another machine: the session cookie is readable on the network."""
     import ipaddress
 
-    if request.is_secure() or not user.has_perm("users.view_user"):
+    if request.is_secure() or not (user.is_superuser or user.has_perm("users.view_user")):
         return False
     try:
         return not ipaddress.ip_address(request.META.get("REMOTE_ADDR", "")).is_loopback
@@ -49,7 +54,7 @@ def _insecure_transport(request, user) -> bool:
         return True
 
 
-def _nav_counts(user) -> dict:
+def _nav_counts(user, account) -> dict:
     """Sidebar badges: a few COUNT queries so problems are visible from every page."""
     from apps.alerts.models import Alert
     from apps.fleet.models import Health, Server
@@ -57,21 +62,20 @@ def _nav_counts(user) -> dict:
 
     counts = {}
     if user.has_perm("fleet.view_server"):
-        counts["servers"] = Server.objects.count()
-        counts["servers_offline"] = Server.objects.filter(
+        servers = Server.objects.filter(account=account)
+        counts["servers"] = servers.count()
+        counts["servers_offline"] = servers.filter(
             is_enabled=True, last_health=Health.OFFLINE
         ).count()
     if user.has_perm("monitors.view_monitor"):
-        counts["apps"] = Monitor.objects.count()
-        counts["apps_down"] = Monitor.objects.filter(
-            is_enabled=True, status=MonitorStatus.DOWN
-        ).count()
+        monitors = Monitor.objects.filter(account=account)
+        counts["apps"] = monitors.count()
+        counts["apps_down"] = monitors.filter(is_enabled=True, status=MonitorStatus.DOWN).count()
     if user.has_perm("alerts.view_alert"):
-        counts["alerts"] = Alert.objects.filter(resolved_at__isnull=True).count()
-    if user.has_perm("users.view_user"):
-        from apps.users.models import User
-
-        counts["pending_users"] = User.objects.filter(pending_approval=True).count()
+        counts["alerts"] = Alert.objects.filter(account=account, resolved_at__isnull=True).count()
+    if user.has_perm("tenants.view_person"):
+        counts["people"] = account.people.count()
+    if user.is_superuser:
         # A dot on System when nobody would be told the dashboard died.
         counts["system_problem"] = not settings.WATCHDOG_URL
     if user.has_perm("alerts.view_maintenancewindow"):
@@ -81,6 +85,6 @@ def _nav_counts(user) -> dict:
 
         now = timezone.now()
         counts["maintenance"] = MaintenanceWindow.objects.filter(
-            starts_at__lte=now, ends_at__gt=now
+            account=account, starts_at__lte=now, ends_at__gt=now
         ).count()
     return counts

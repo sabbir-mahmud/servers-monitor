@@ -50,6 +50,9 @@ class Invitation(models.Model):
     configured)."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    account = models.ForeignKey(
+        "tenants.Account", on_delete=models.CASCADE, related_name="invitations"
+    )
     email = models.EmailField()
     role = models.CharField(max_length=20)
     token_hash = models.CharField(max_length=64, unique=True, editable=False)
@@ -75,9 +78,10 @@ class Invitation(models.Model):
         return f"Invitation for {self.email}"
 
     @classmethod
-    def issue(cls, email: str, role: str, invited_by) -> tuple[Invitation, str]:
+    def issue(cls, account, email: str, role: str, invited_by) -> tuple[Invitation, str]:
         raw = secrets.token_urlsafe(32)
         invite = cls.objects.create(
+            account=account,
             email=email.strip(),
             role=role,
             token_hash=hash_token(raw),
@@ -101,6 +105,12 @@ class Invitation(models.Model):
         if self.expires_at <= timezone.now():
             return "expired"
         return "pending"
+
+    @property
+    def role_label(self) -> str:
+        from apps.tenants.roles import Role
+
+        return Role(self.role).label if self.role in Role.values else self.role
 
     @property
     def is_usable(self) -> bool:

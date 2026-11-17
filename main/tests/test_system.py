@@ -14,6 +14,8 @@ from apps.audit.models import AuditLog
 from apps.core import system
 from apps.core.models import SystemState
 
+from .conftest import acme
+
 pytestmark = pytest.mark.django_db
 
 
@@ -56,9 +58,16 @@ def test_watchdog_off_when_not_configured(settings):
 def test_downtime_gap_notifies_every_channel_once(monkeypatch):
     sent = []
     monkeypatch.setattr(delivery, "send", lambda ch, msg, *a: sent.append((ch.name, msg.plain)))
-    Channel.objects.create(name="phone", kind="telegram", telegram_token="t", telegram_chat_id="1")
     Channel.objects.create(
-        name="off", kind="telegram", telegram_token="t", telegram_chat_id="1", is_enabled=False
+        account=acme(), name="phone", kind="telegram", telegram_token="t", telegram_chat_id="1"
+    )
+    Channel.objects.create(
+        account=acme(),
+        name="off",
+        kind="telegram",
+        telegram_token="t",
+        telegram_chat_id="1",
+        is_enabled=False,
     )
     now = timezone.now()
     gap = system.check_downtime(now - timedelta(hours=2, minutes=21), now=now)
@@ -75,11 +84,13 @@ def test_short_gaps_are_not_downtime(monkeypatch):
     assert system.check_downtime(None) is None
 
 
-def test_system_page_admin_only(client, viewer, admin_user, settings):
+def test_system_page_superusers_only(client, viewer, admin_user, superuser, settings):
+    """It's about the whole installation (every account's agents, Redis, backups)."""
     settings.WATCHDOG_URL = ""
-    client.force_login(viewer)
-    assert client.get(reverse("system")).status_code == 403
-    client.force_login(admin_user)
+    for who in (viewer, admin_user):
+        client.force_login(who)
+        assert client.get(reverse("system")).status_code == 403
+    client.force_login(superuser)
     page = client.get(reverse("system")).content.decode()
     assert "Watchdog" in page and "Not set up" in page and settings.APP_VERSION in page
 
@@ -152,14 +163,14 @@ def test_restore_refuses_running_relay_and_corrupt_files(live_db, tmp_path, monk
     assert list(live_db.parent.glob("db.before-restore-*.sqlite3"))
 
 
-def test_system_page_flags_stale_backup(client, admin_user, live_db):
+def test_system_page_flags_stale_backup(client, superuser, live_db):
     from apps.core import backup
 
     backup.take_snapshot()
     state = SystemState.get("backup")
     state["at"] = (timezone.now() - timedelta(days=3)).isoformat()
     SystemState.put("backup", state)
-    client.force_login(admin_user)
+    client.force_login(superuser)
     assert "over 36 h old" in client.get(reverse("system")).content.decode()
 
 

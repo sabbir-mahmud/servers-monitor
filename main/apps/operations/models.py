@@ -35,6 +35,7 @@ class Job(models.Model):
     """One operator request fanned out to N servers ("deploy api to all production")."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    account = models.ForeignKey("tenants.Account", on_delete=models.CASCADE, related_name="+")
     action = models.CharField(max_length=64)
     args = models.JSONField(default=dict, blank=True)
     note = models.CharField(max_length=200, blank=True)
@@ -91,6 +92,8 @@ class Command(models.Model):
     mailbox, so only one consumer ever sees it, and a delivered-but-silent command becomes
     LOST rather than being re-sent: a deploy must never run twice."""
 
+    account_path = "job__account"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
     job = models.ForeignKey(Job, on_delete=models.CASCADE, related_name="commands")
     server = models.ForeignKey("fleet.Server", on_delete=models.CASCADE, related_name="commands")
@@ -146,7 +149,8 @@ class Schedule(models.Model):
     """Run an action on a cron schedule (e.g. renew certificates every night, deploy at 02:00)."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
-    name = models.CharField(max_length=100, unique=True)
+    account = models.ForeignKey("tenants.Account", on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=100)
     action = models.CharField(max_length=64)
     args = models.JSONField(default=dict, blank=True)
     cron = models.CharField(
@@ -172,6 +176,9 @@ class Schedule(models.Model):
 
     class Meta:
         ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(fields=["account", "name"], name="schedule_name_per_account"),
+        ]
 
     def __str__(self):
         return self.name
@@ -183,4 +190,9 @@ class Schedule(models.Model):
         q = Q(pk__in=self.servers.values("pk")) | Q(groups__in=self.groups.all())
         if self.environments:
             q |= Q(environment__in=self.environments)
-        return Server.objects.filter(q, is_enabled=True).distinct().order_by("name")
+        # Groups and environments are resolved inside this schedule's account only.
+        return (
+            Server.objects.filter(q, account_id=self.account_id, is_enabled=True)
+            .distinct()
+            .order_by("name")
+        )

@@ -6,12 +6,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Group
 from django.urls import reverse
 
 from apps.fleet.models import MetricSample
 
-from .conftest import report
+from .conftest import acme, add_member, report
 
 pytestmark = pytest.mark.django_db
 User = get_user_model()
@@ -19,7 +18,9 @@ User = get_user_model()
 
 @pytest.fixture
 def owner():
-    return User.objects.create_superuser("owner", "owner@example.com", "owner-secret-pass-1")
+    user = User.objects.create_superuser("owner", "owner@example.com", "owner-secret-pass-1")
+    add_member(user, "owner")
+    return user
 
 
 # 1 — an Admin could take over the superuser --------------------------------------------
@@ -43,11 +44,13 @@ def test_1_admin_cannot_reset_reroute_or_deactivate_a_superuser(client, admin_us
     owner.refresh_from_db()
     assert owner.is_active and owner.email == "owner@example.com"
     page = client.get(reverse("users:detail", args=[owner.pk])).content.decode()
-    assert "Only another superuser can change it" in page and 'value="reset_link"' not in page
+    assert "Only another superuser can change their login" in page
+    assert 'value="reset_link"' not in page
 
 
 def test_1_superusers_can_still_manage_each_other(client, owner):
     other = User.objects.create_superuser("second", "s@example.com", "second-secret-pass-1")
+    add_member(other, "admin")
     client.force_login(owner)
     page = client.post(reverse("users:detail", args=[other.pk]), {"action": "reset_link"}).content
     assert b"/password/reset/" in page
@@ -78,7 +81,7 @@ def test_2_signed_in_non_staff_gets_403_not_a_loop(client, viewer):
 def test_5_username_and_email_share_one_counter(client, roles, settings):
     settings.LOGIN_FAILURE_LIMIT = 3
     user = User.objects.create_user("sabbir", "sabbir@example.com", "the-real-password-1")
-    user.groups.add(Group.objects.get(name="Viewer"))
+    add_member(user, "Viewer")
     for _ in range(3):
         client.post(reverse("login"), {"username": "sabbir", "password": "guess"})
     resp = client.post(
@@ -138,7 +141,7 @@ def test_7_next_cannot_leave_the_site(client, operator):
 
     server, _ = make_server("web-01")
     alert = Alert.objects.create(
-        server=server, kind=AlertKind.OFFLINE, severity="critical", message="x"
+        account=acme(), server=server, kind=AlertKind.OFFLINE, severity="critical", message="x"
     )
     client.force_login(operator)
     for evil in ("https://evil.example/phish", "//evil.example", "javascript:alert(1)"):
@@ -299,7 +302,11 @@ def test_13_channel_secrets_are_encrypted_in_the_database():
     from apps.alerts.models import Channel
 
     c = Channel.objects.create(
-        name="tg", kind="telegram", telegram_token="123:SECRET", telegram_chat_id="1"
+        account=acme(),
+        name="tg",
+        kind="telegram",
+        telegram_token="123:SECRET",
+        telegram_chat_id="1",
     )
     with connection.cursor() as cur:
         cur.execute("SELECT telegram_token FROM alerts_channel WHERE id = %s", [c.pk.hex])
@@ -375,7 +382,7 @@ def test_api_token_cannot_reach_browser_only_shell(client, admin_user, agent):
     from apps.api.models import ApiToken, Scope
 
     agent.heartbeat(report(capabilities={"shell": True, "actions": [], "logs": []}))
-    raw = ApiToken.issue(admin_user, "leaked", Scope.OPERATE)[1]
+    raw = ApiToken.issue(admin_user, acme(), "leaked", Scope.OPERATE)[1]
     r = client.post(reverse("api_jobs"), '{"action": "shell", "args": {"command": "id"}, "servers": ["web-01"]}',
                     content_type="application/json", HTTP_AUTHORIZATION=f"Bearer {raw}")  # fmt: skip
     assert r.status_code == 403
@@ -387,7 +394,7 @@ def test_agent_cannot_write_probe_results_for_monitors_it_was_not_given(fake_rel
     from .conftest import AgentClient, make_server
 
     server = make_server("probe", signing_salt="ef" * 16)[0]
-    victim = Monitor.objects.create(name="payments", url="https://pay.example.com/")
+    victim = Monitor.objects.create(account=acme(), name="payments", url="https://pay.example.com/")
     AgentClient(server, fake_relay).heartbeat(report(
         capabilities={"features": ["probes"]},
         probe_results=[{"id": str(victim.pk), "ok": False, "error": "forged outage"}]))  # fmt: skip

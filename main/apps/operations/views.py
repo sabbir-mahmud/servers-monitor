@@ -1,42 +1,50 @@
 from django.contrib import messages
 from django.db.models import Count, Q
-from django.shortcuts import get_object_or_404, redirect, render
+from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.views import View
 from django.views.generic import DeleteView, DetailView, FormView, ListView
 
 from apps.audit.services import record
 from apps.core.mixins import HtmxTemplateMixin, StaffViewMixin
+from apps.tenants.scoping import AccountScopedMixin, get_scoped_or_404
 
 from . import services
 from .forms import JobForm, ScheduleForm
 from .models import ACTIVE_STATUSES, Command, CommandStatus, Job, Schedule
 
 
-class JobListView(StaffViewMixin, ListView):
+class JobListView(StaffViewMixin, AccountScopedMixin, ListView):
     permission_required = "operations.view_job"
     template_name = "operations/job_list.html"
     paginate_by = 30
+    model = Job
 
     def get_queryset(self):
-        return Job.objects.select_related("created_by").annotate(
-            total=Count("commands"),
-            active=Count("commands", filter=Q(commands__status__in=ACTIVE_STATUSES)),
-            ok=Count("commands", filter=Q(commands__status=CommandStatus.SUCCEEDED)),
-            bad=Count(
-                "commands",
-                filter=Q(
-                    commands__status__in=[
-                        CommandStatus.FAILED,
-                        CommandStatus.LOST,
-                        CommandStatus.EXPIRED,
-                    ]
+        return (
+            super()
+            .get_queryset()
+            .select_related("created_by")
+            .annotate(
+                total=Count("commands"),
+                active=Count("commands", filter=Q(commands__status__in=ACTIVE_STATUSES)),
+                ok=Count("commands", filter=Q(commands__status=CommandStatus.SUCCEEDED)),
+                bad=Count(
+                    "commands",
+                    filter=Q(
+                        commands__status__in=[
+                            CommandStatus.FAILED,
+                            CommandStatus.LOST,
+                            CommandStatus.EXPIRED,
+                        ]
+                    ),
                 ),
-            ),
-        )
+            )
+            .order_by("-created_at")
+        )  # GROUP BY drops Meta.ordering; pagination needs one
 
 
-class JobCreateView(StaffViewMixin, FormView):
+class JobCreateView(StaffViewMixin, AccountScopedMixin, FormView):
     permission_required = "operations.add_job"
     template_name = "operations/job_form.html"
     form_class = JobForm
@@ -84,14 +92,16 @@ class JobCreateView(StaffViewMixin, FormView):
         return redirect("operations:job_detail", pk=job.pk)
 
 
-class JobDetailView(StaffViewMixin, HtmxTemplateMixin, DetailView):
+class JobDetailView(StaffViewMixin, AccountScopedMixin, HtmxTemplateMixin, DetailView):
     permission_required = "operations.view_job"
     template_name = "operations/job_detail.html"
     htmx_partial = "commands"
     model = Job
 
     def get_queryset(self):
-        return Job.objects.select_related("created_by").prefetch_related("commands__server")
+        return (
+            super().get_queryset().select_related("created_by").prefetch_related("commands__server")
+        )
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -104,7 +114,7 @@ class JobDetailView(StaffViewMixin, HtmxTemplateMixin, DetailView):
         return ctx
 
 
-class CommandDetailView(StaffViewMixin, HtmxTemplateMixin, DetailView):
+class CommandDetailView(StaffViewMixin, AccountScopedMixin, HtmxTemplateMixin, DetailView):
     permission_required = "operations.view_command"
     template_name = "operations/command_detail.html"
     htmx_partial = "output"
@@ -112,7 +122,7 @@ class CommandDetailView(StaffViewMixin, HtmxTemplateMixin, DetailView):
     context_object_name = "command"
 
     def get_queryset(self):
-        return Command.objects.select_related("server", "job")
+        return super().get_queryset().select_related("server", "job")
 
 
 class CommandCancelView(StaffViewMixin, View):
@@ -120,7 +130,7 @@ class CommandCancelView(StaffViewMixin, View):
     http_method_names = ["post"]
 
     def post(self, request, pk):
-        command = get_object_or_404(Command.objects.select_related("server"), pk=pk)
+        command = get_scoped_or_404(request, Command.objects.select_related("server"), pk=pk)
         if services.cancel_command(request, command):
             messages.success(request, f"Cancelled on {command.server.name}.")
         else:
@@ -135,7 +145,7 @@ class CommandStopView(StaffViewMixin, View):
     http_method_names = ["post"]
 
     def post(self, request, pk):
-        command = get_object_or_404(Command.objects.select_related("server", "job"), pk=pk)
+        command = get_scoped_or_404(request, Command.objects.select_related("server", "job"), pk=pk)
         if services.stop_follow(request, command):
             command.stopping = True
         return render(request, "operations/command_detail.html#output", {"command": command})
@@ -148,7 +158,7 @@ class JobControlView(StaffViewMixin, View):
     http_method_names = ["post"]
 
     def post(self, request, pk, op):
-        job = get_object_or_404(Job, pk=pk)
+        job = get_scoped_or_404(request, Job, pk=pk)
         if op == "resume" and services.resume_job(request, job):
             messages.success(
                 request, "Rollout resumed: the next batch starts once the checks pass."
@@ -159,17 +169,17 @@ class JobControlView(StaffViewMixin, View):
         return redirect("operations:job_detail", pk=pk)
 
 
-class ScheduleListView(StaffViewMixin, ListView):
+class ScheduleListView(StaffViewMixin, AccountScopedMixin, ListView):
     permission_required = "operations.view_schedule"
     template_name = "operations/schedule_list.html"
     model = Schedule
     context_object_name = "schedules"
 
     def get_queryset(self):
-        return Schedule.objects.prefetch_related("servers", "groups")
+        return super().get_queryset().prefetch_related("servers", "groups")
 
 
-class _ScheduleFormView(StaffViewMixin, FormView):
+class _ScheduleFormView(StaffViewMixin, AccountScopedMixin, FormView):
     template_name = "operations/schedule_form.html"
     form_class = ScheduleForm
     instance = None
@@ -205,11 +215,11 @@ class ScheduleUpdateView(_ScheduleFormView):
     permission_required = "operations.change_schedule"
 
     def dispatch(self, request, *args, **kwargs):
-        self.instance = get_object_or_404(Schedule, pk=kwargs["pk"])
+        self.instance = get_scoped_or_404(request, Schedule, pk=kwargs["pk"])
         return super().dispatch(request, *args, **kwargs)
 
 
-class ScheduleDeleteView(StaffViewMixin, DeleteView):
+class ScheduleDeleteView(StaffViewMixin, AccountScopedMixin, DeleteView):
     permission_required = "operations.delete_schedule"
     model = Schedule
     template_name = "confirm_delete.html"

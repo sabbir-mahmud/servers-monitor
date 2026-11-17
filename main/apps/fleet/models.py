@@ -25,11 +25,19 @@ class Health(models.TextChoices):
 class ServerGroup(models.Model):
     """Free-form grouping (e.g. `api`, `workers`, `client-x`) — the Ansible inventory idea."""
 
-    name = models.SlugField(max_length=60, unique=True)
+    account = models.ForeignKey("tenants.Account", on_delete=models.CASCADE, related_name="+")
+    name = models.SlugField(max_length=60)
     description = models.CharField(max_length=200, blank=True)
 
     class Meta:
         ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["account", "name"],
+                name="servergroup_name_per_account",
+                violation_error_message="A group with this name already exists.",
+            ),
+        ]
 
     def __str__(self):
         return self.name
@@ -37,7 +45,8 @@ class ServerGroup(models.Model):
 
 class Server(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
-    name = models.CharField(max_length=100, unique=True)
+    account = models.ForeignKey("tenants.Account", on_delete=models.CASCADE, related_name="servers")
+    name = models.CharField(max_length=100)
     environment = models.CharField(
         max_length=20, choices=Environment.choices, default=Environment.PRODUCTION
     )
@@ -106,8 +115,13 @@ class Server(models.Model):
 
     class Meta:
         ordering = ["name"]
-        indexes = [models.Index(fields=["environment", "name"])]
+        indexes = [models.Index(fields=["account", "environment", "name"])]
         constraints = [
+            models.UniqueConstraint(
+                fields=["account", "name"],
+                name="server_name_per_account",
+                violation_error_message="A server with this name already exists.",
+            ),
             models.CheckConstraint(
                 condition=Q(report_interval__gte=5, report_interval__lte=3600),
                 name="server_report_interval_range",

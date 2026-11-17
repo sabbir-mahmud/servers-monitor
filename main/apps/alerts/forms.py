@@ -2,6 +2,7 @@ from django import forms
 
 from apps.fleet.models import Environment, Server
 from apps.monitors.models import Monitor
+from apps.tenants.scoping import AccountFormMixin
 
 from .channels import KINDS
 from .models import Channel, ChannelKind, MaintenanceWindow
@@ -28,7 +29,7 @@ def _style(form):
             w.attrs.setdefault("class", "form-control")
 
 
-class ChannelForm(forms.ModelForm):
+class ChannelForm(AccountFormMixin, forms.ModelForm):
     environments = forms.MultipleChoiceField(
         choices=Environment.choices,
         required=False,
@@ -207,7 +208,7 @@ class ChannelForm(forms.ModelForm):
         return super().save(commit)
 
 
-class MaintenanceForm(forms.ModelForm):
+class MaintenanceForm(AccountFormMixin, forms.ModelForm):
     starts_at = forms.DateTimeField(
         widget=forms.DateTimeInput(attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"),
         input_formats=["%Y-%m-%dT%H:%M"],
@@ -231,7 +232,10 @@ class MaintenanceForm(forms.ModelForm):
     class Meta:
         model = MaintenanceWindow
         fields = ["title", "starts_at", "ends_at", "all_targets", "servers", "monitors"]
-        labels = {"title": "What's happening", "all_targets": "Everything (all servers and apps)"}
+        labels = {
+            "title": "What's happening",
+            "all_targets": "Everything (all of this account's servers and apps)",
+        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

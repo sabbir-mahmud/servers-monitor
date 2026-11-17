@@ -1,4 +1,4 @@
-# Contributing to Server Monitor
+# Contributing to Vigil
 
 Thanks for helping! Bug reports, ideas, documentation and code are all welcome.
 

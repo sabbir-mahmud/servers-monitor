@@ -12,7 +12,7 @@ from apps.operations import services
 from apps.operations.cron import Cron, CronError
 from apps.operations.models import CommandStatus, Job, JobState, Schedule
 
-from .conftest import make_server
+from .conftest import acme, make_server
 
 pytestmark = pytest.mark.django_db
 
@@ -163,7 +163,7 @@ def test_pause_between_batches(operator, fleet):
 
 def test_health_gate_waits_then_halts(operator, fleet):
     shop = Monitor.objects.create(
-        name="Shop", url="https://shop.example.com", status=MonitorStatus.DOWN
+        account=acme(), name="Shop", url="https://shop.example.com", status=MonitorStatus.DOWN
     )
     job = _rolling(operator, fleet, health_gates=[shop])
     _finish(job, 0)
@@ -218,7 +218,7 @@ def test_job_form_starts_a_rolling_job(client, operator, fleet):
 
 
 def _schedule(user, servers=(), **kw):
-    s = Schedule.objects.create(name=kw.pop("name", "nightly"), action="deploy_api", cron=kw.pop("cron", "0 3 * * *"),
+    s = Schedule.objects.create(account=acme(), name=kw.pop("name", "nightly"), action="deploy_api", cron=kw.pop("cron", "0 3 * * *"),
                                 created_by=user, next_run_at=kw.pop("next_run_at", timezone.now()), **kw)  # fmt: skip
     s.servers.set(servers)
     return s
@@ -245,7 +245,7 @@ def test_missed_slots_run_once(admin_user, fleet):
 def test_targets_resolve_groups_and_environments_at_run_time(admin_user, fleet):
     from apps.fleet.models import ServerGroup
 
-    api = ServerGroup.objects.create(name="api")
+    api = ServerGroup.objects.create(account=acme(), name="api")
     fleet[3].groups.add(api)
     sched = _schedule(admin_user, [fleet[0]], environments=["staging"])
     sched.groups.add(api)

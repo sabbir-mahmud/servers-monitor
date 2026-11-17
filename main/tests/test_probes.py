@@ -13,7 +13,7 @@ from apps.monitors.checker import Result
 from apps.monitors.forms import MonitorForm
 from apps.monitors.models import Kind, Monitor, MonitorCheck, MonitorStatus
 
-from .conftest import AgentClient, make_server, report
+from .conftest import AgentClient, acme, make_server, report
 
 pytestmark = pytest.mark.django_db
 
@@ -32,7 +32,7 @@ def servers():
 
 @pytest.fixture
 def monitor(servers):
-    m = Monitor.objects.create(name="app", url="https://app.example.com/health",
+    m = Monitor.objects.create(account=acme(), name="app", url="https://app.example.com/health",
                                failure_threshold=1, quorum=2)  # fmt: skip
     m.probe_servers.set(servers)
     return m
@@ -58,7 +58,7 @@ def test_assignments_pushed_signed_and_only_when_changed(fake_relay, servers, mo
 
 
 def test_results_stored_per_location_only_for_assigned_monitors(fake_relay, servers, monitor):
-    other = Monitor.objects.create(name="other", url="https://other.example.com/")
+    other = Monitor.objects.create(account=acme(), name="other", url="https://other.example.com/")
     results = [{"id": str(monitor.pk), "ok": True, "ms": 42, "code": 200},
                {"id": str(other.pk), "ok": False, "error": "forged"},
                {"id": "not-a-uuid", "ok": False}]  # fmt: skip
@@ -130,11 +130,13 @@ def form_data(**extra):
 
 
 def test_form_allows_internal_urls_only_when_agents_alone_check(servers):
-    form = MonitorForm(form_data())
+    form = MonitorForm(form_data(), account=acme())
     assert not form.is_valid() and "url" in form.errors  # the dashboard won't fetch internal URLs
-    form = MonitorForm(form_data(agents_only="on"))
+    form = MonitorForm(form_data(agents_only="on"), account=acme())
     assert not form.is_valid() and "probe_servers" in form.errors  # nobody would check it
-    form = MonitorForm(form_data(agents_only="on", probe_servers=[s.pk for s in servers], quorum=2))
+    form = MonitorForm(
+        form_data(agents_only="on", probe_servers=[s.pk for s in servers], quorum=2), account=acme()
+    )
     assert form.is_valid(), form.errors
     m = form.save()
     assert not m.check_from_dashboard and m.quorum == 2
@@ -142,9 +144,9 @@ def test_form_allows_internal_urls_only_when_agents_alone_check(servers):
 
 def test_form_refuses_secret_headers_and_impossible_quorum(servers):
     data = form_data(url="https://app.example.com/", probe_servers=[servers[0].pk])
-    form = MonitorForm({**data, "headers": "Authorization: Bearer x"})
+    form = MonitorForm({**data, "headers": "Authorization: Bearer x"}, account=acme())
     assert not form.is_valid() and "relay would see" in str(form.errors["probe_servers"])
-    form = MonitorForm({**data, "quorum": 3})
+    form = MonitorForm({**data, "quorum": 3}, account=acme())
     assert not form.is_valid() and "quorum" in form.errors
 
 

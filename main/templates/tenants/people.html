@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}{{ ACCOUNT.people_label }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">{{ ACCOUNT.people_label }}</h1>
+    <p class="page-sub">{% if ACCOUNT.kind == "family" %}The people whose phones, tablets and computers you look after. Each child's devices show their last online time, location and battery.{% else %}Staff whose company devices you manage. Devices are assigned to a person, so you see whose laptop went quiet.{% endif %}</p>
+  </div>
+  {% if perms.tenants.add_person %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'tenants:person_create' %}">{% icon "plus" %} Add {{ ACCOUNT.person_label }}</a></div>{% endif %}
+</div>
+{% if people %}
+<div class="people-grid">
+  {% for p in people %}
+  <div class="card person-card">
+    <span class="avatar" aria-hidden="true">{{ p.initials }}</span>
+    <div class="flex-grow-1" style="min-width:0">
+      <div class="person-name">{{ p.name }}</div>
+      <div class="person-meta text-truncate">{% if p.email %}{{ p.email }}{% else %}{{ p.get_kind_display }}{% endif %}{% if p.notes %} · {{ p.notes }}{% endif %}</div>
+      <div class="person-meta mt-2">{% icon "monitor" 13 %} No devices yet</div>
+    </div>
+    {% if perms.tenants.change_person %}<a class="icon-btn" href="{% url 'tenants:person_update' p.pk %}" title="Edit {{ p.name }}" aria-label="Edit {{ p.name }}">{% icon "edit" 16 %}</a>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+<p class="form-text mt-3">{% icon "clock" 13 %} Device apps for Android, iOS, macOS, Windows and Linux are on the way; enrolled devices will appear under each person.</p>
+{% else %}
+<div class="card empty-state"><div class="card-body text-center p-5">
+  <p class="fw-medium mb-1">No {{ ACCOUNT.people_label|lower }} yet</p>
+  <p class="text-body-secondary mb-3">{% if ACCOUNT.kind == "family" %}Add each child, then enrol their devices.{% else %}Add staff members, then assign their devices.{% endif %}</p>
+  {% if perms.tenants.add_person %}<a class="btn btn-primary" href="{% url 'tenants:person_create' %}">{% icon "plus" %} Add {{ ACCOUNT.person_label }}</a>{% endif %}
+</div></div>
+{% endif %}
+{% endblock %}

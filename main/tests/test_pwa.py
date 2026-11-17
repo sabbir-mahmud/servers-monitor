@@ -13,6 +13,7 @@ from django.urls import reverse
 from apps.alerts import channels, delivery, webpush
 from apps.alerts.models import Alert, AlertKind, Channel, DeliveryEvent, Severity
 
+from .conftest import acme
 from .test_channels import _form
 
 pytestmark = pytest.mark.django_db
@@ -100,10 +101,14 @@ def browser():
 
 def test_push_delivers_an_encrypted_alert_only_the_browser_can_read(push_service, browser, server):
     key, p256dh, auth_b64, auth = browser
-    ch = Channel.objects.create(name="phone", kind="webpush",
+    ch = Channel.objects.create(account=acme(), name="phone", kind="webpush",
                                 config=json.dumps({"endpoint": push_service, "p256dh": p256dh, "auth": auth_b64}))  # fmt: skip
     alert = Alert.objects.create(
-        server=server, kind=AlertKind.DISK, severity=Severity.CRITICAL, message="Disk at 97%"
+        account=acme(),
+        server=server,
+        kind=AlertKind.DISK,
+        severity=Severity.CRITICAL,
+        message="Disk at 97%",
     )
     delivery.send(ch, delivery.compose(alert, DeliveryEvent.OPENED))
     (req,) = _PushService.got

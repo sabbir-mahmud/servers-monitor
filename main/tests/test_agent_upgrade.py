@@ -109,11 +109,12 @@ def test_upgrade_all_moves_the_fleet_in_batches(
     assert Job.objects.get().state == JobState.HALTED  # web-3 failed: reported, not hidden
 
 
-def test_upgrade_buttons(client, admin_user, operator, fake_relay):
+def test_upgrade_buttons(client, admin_user, operator, superuser, fake_relay):
     agent = old_agent(fake_relay, "web-01")
     client.force_login(admin_user)
     page = client.get(reverse("fleet:server_detail", args=[agent.server.pk])).content.decode()
     assert "Upgrade agent now" in page and "update available" in page
+    client.force_login(superuser)
     assert "Upgrade all outdated" in client.get(reverse("system")).content.decode()
     client.force_login(operator)
     assert client.post(reverse("fleet:server_upgrade", args=[agent.server.pk])).status_code == 403

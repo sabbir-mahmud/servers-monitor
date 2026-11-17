@@ -5,6 +5,7 @@ from datetime import timedelta
 from django import forms
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect
 from django.utils import timezone
 from django.views import View
@@ -30,13 +31,25 @@ class TokenForm(forms.Form):
             field.widget.attrs["class"] = "form-select" if name != "name" else "form-control"
 
 
-class TokenListView(LoginRequiredMixin, TemplateView):
+class _ApiFeatureMixin(LoginRequiredMixin):
+    """Tokens belong to the current account and need an account type with an API."""
+
+    def dispatch(self, request, *args, **kwargs):
+        account = getattr(request, "account", None)
+        if request.user.is_authenticated and (account is None or not account.has("api")):
+            raise Http404
+        return super().dispatch(request, *args, **kwargs)
+
+
+class TokenListView(_ApiFeatureMixin, TemplateView):
     template_name = "api/tokens.html"
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         ctx.setdefault("form", TokenForm(user=self.request.user))
-        ctx["tokens"] = ApiToken.objects.filter(owner=self.request.user, revoked_at__isnull=True)
+        ctx["tokens"] = ApiToken.objects.filter(
+            owner=self.request.user, account=self.request.account, revoked_at__isnull=True
+        )
         return ctx
 
     def post(self, request):
@@ -45,7 +58,7 @@ class TokenListView(LoginRequiredMixin, TemplateView):
             return self.render_to_response(self.get_context_data(form=form))
         days = int(form.cleaned_data["expires"])
         token, raw = ApiToken.issue(
-            request.user, form.cleaned_data["name"], form.cleaned_data["scope"],
+            request.user, request.account, form.cleaned_data["name"], form.cleaned_data["scope"],
             timezone.now() + timedelta(days=days) if days else None,
         )  # fmt: skip
         record(
@@ -57,7 +70,7 @@ class TokenListView(LoginRequiredMixin, TemplateView):
         )
 
 
-class TokenRevokeView(LoginRequiredMixin, View):
+class TokenRevokeView(_ApiFeatureMixin, View):
     http_method_names = ["post"]
 
     def post(self, request, pk):

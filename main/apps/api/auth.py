@@ -15,6 +15,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from apps.core.utils import client_ip
+from apps.tenants.permissions import bind_account
 from apps.users import throttle
 
 from .models import ApiToken, hash_token
@@ -35,7 +36,7 @@ def _authenticate(request):
         return None, error(401, "Send your API token: Authorization: Bearer smt_…",
                            WWW_Authenticate='Bearer realm="api"')  # fmt: skip
     token = (
-        ApiToken.objects.select_related("owner")
+        ApiToken.objects.select_related("owner", "account")
         .filter(token_hash=hash_token(header[7:].strip()))
         .first()
     )
@@ -70,6 +71,11 @@ def api_view(*, perm: str, methods=("GET",), write_perm: str | None = None):
             if failure is not None:
                 return failure
             request.user, request.api_token = token.owner, token
+            # The token works inside its account only, with the owner's role there now.
+            request.account = token.account
+            request.membership = bind_account(token.owner, token.account)
+            if request.membership is None and not token.owner.is_superuser:
+                return error(403, "The token's owner is no longer a member of its account.")
             if not token.owner.has_perm(perm):
                 return error(403, "Your role doesn't allow this.")
             if request.method != "GET":

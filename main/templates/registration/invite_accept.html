@@ -1,12 +1,22 @@
 {% extends "registration/auth_base.html" %}
 {% load monitor %}
-{% block auth_title %}Join {{ SITE_NAME }}{% endblock %}
+{% block auth_title %}Join {{ invite.account.name }}{% endblock %}
 {% block auth_form %}
       <div class="login-heading">
-        <h1>Join {{ SITE_NAME }}</h1>
-        <p>{% if invite.invited_by %}{{ invite.invited_by.display_name }} invited{% else %}You're invited{% endif %} <b>{{ invite.email }}</b> as <span class="chip">{{ invite.role }}</span>. Choose how you'll sign in.</p>
+        <h1>Join {{ invite.account.name }}</h1>
+        <p>{% if invite.invited_by %}{{ invite.invited_by.display_name }} invited{% else %}You're invited:{% endif %} <b>{{ invite.email }}</b> as <span class="chip">{{ invite.role_label }}</span> in this {{ invite.account.get_kind_display|lower }} account.</p>
       </div>
-      {% if logout_first %}<div class="alert alert-warning" role="status">{% icon "alert" %}<div>You're signed in as {{ user.get_username }}. Finishing this creates a separate account and signs you in to it.</div></div>{% endif %}
+      {% if can_join %}
+        <form method="post" data-loading-form>{% csrf_token %}
+          <button class="btn btn-primary btn-lg w-100 login-submit"><span class="spinner" aria-hidden="true"></span><span class="login-submit-label">Join as {{ user.get_username }}</span></button>
+        </form>
+      {% elif logout_first %}
+        <div class="alert alert-warning" role="status">{% icon "alert" %}<div>You're signed in as <b>{{ user.get_username }}</b>, but this invitation is for {{ invite.email }}. Sign out, then open the link again.</div></div>
+        <form method="post" action="{% url 'logout' %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><button class="btn btn-outline-secondary w-100">{% icon "logout" %} Sign out</button></form>
+      {% elif existing %}
+        <p>You already have a login with this email. Sign in, and you'll come back here to join.</p>
+        <a class="btn btn-primary btn-lg w-100" href="{% url 'login' %}?next={{ request.path|urlencode }}">Sign in to join</a>
+      {% else %}
       <form method="post" class="form-section" data-loading-form novalidate>{% csrf_token %}
         {% if form.non_field_errors %}<div class="alert alert-danger mb-0" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
         <div class="row g-3">
@@ -16,7 +26,8 @@
         {% include "alerts/_field.html" with field=form.username %}
         {% include "alerts/_field.html" with field=form.password1 %}
         {% include "alerts/_field.html" with field=form.password2 %}
-        <button class="btn btn-primary btn-lg w-100 login-submit"><span class="spinner" aria-hidden="true"></span><span class="login-submit-label">Create my account</span></button>
+        <button class="btn btn-primary btn-lg w-100 login-submit"><span class="spinner" aria-hidden="true"></span><span class="login-submit-label">Create my login and join</span></button>
       </form>
+      {% endif %}
       <p class="login-note">{% icon "clock" 13 %} This invitation expires {{ invite.expires_at|date:"M j" }}.</p>
 {% endblock %}

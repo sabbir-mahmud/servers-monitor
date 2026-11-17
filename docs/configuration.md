@@ -18,7 +18,7 @@ the defaults when a variable is unset.
 | `DEBUG` | `False` | Development mode. Never in production. |
 | `ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` | Hostnames/IPs the UI may be opened with, comma-separated. |
 | `CSRF_TRUSTED_ORIGINS` | *(empty)* | Full origins (`https://monitor.example.com`) when served through a proxy or Tailscale. |
-| `SITE_NAME` | `Server Monitor` | Shown in the UI, emails and notifications. |
+| `SITE_NAME` | `Vigil` | Shown in the UI, emails and notifications. |
 | `TIME_ZONE` | `UTC` | Zone for maintenance windows and displayed times, e.g. `Asia/Dhaka`. |
 | `DASHBOARD_URL` | *(empty)* | How people open the dashboard. Used for links in emails, invitations, reset links and alerts. Recommended in production. |
 | `ADMIN_URL` | `admin/` | Path of Django admin (superusers only). |
@@ -102,8 +102,8 @@ Notification channels are configured in the UI, not here.
 
 | Variable | Default | Description |
 |---|---|---|
-| `ALLOW_SIGNUP` | `False` | Public sign-up. New accounts wait for Admin approval with no access. |
-| `REQUIRE_2FA_FOR_ADMINS` | `True` | Admins must set up an authenticator app before using the dashboard. Others can opt in under *My account*. |
+| `ALLOW_SIGNUP` | `False` | Public sign-up: anyone can create their own account (parent, solo developer or company) and becomes its owner. Accounts never see each other's data. Signed-in members can also create further accounts. Off: people join by invitation, and only superusers create accounts. |
+| `REQUIRE_2FA_FOR_ADMINS` | `True` | Owners and admins of solo-developer and company accounts (they can run commands on servers), and superusers, must set up an authenticator app. Parents and everyone else can opt in under *My account*. |
 | `INVITATION_DAYS` | `7` | Lifetime of invitation links. |
 | `PASSWORD_RESET_TIMEOUT` | `7200` | Lifetime of password-reset links, in seconds. |
 | `LOGIN_FAILURE_LIMIT` | `6` | Failed sign-ins per account + IP before a lock… |
@@ -133,7 +133,8 @@ endpoint URLs are in the provider's `/.well-known/openid-configuration`.
 | `OIDC_PROVIDER_NAME` | `single sign-on` | Shown on the button: "Sign in with Okta". |
 | `OIDC_GROUPS_CLAIM` | `groups` | The claim listing the person's groups. |
 | `OIDC_ADMIN_GROUPS`, `OIDC_OPERATOR_GROUPS`, `OIDC_VIEWER_GROUPS` | *(empty)* | Comma-separated groups for each role. The highest matching role wins, and it's re-applied at every sign-in. |
-| `OIDC_DEFAULT_ROLE` | *(empty)* | Role for people in no mapped group (`Viewer`, …). Empty: they can't sign in. |
+| `OIDC_DEFAULT_ROLE` | *(empty)* | Role for people in no mapped group (`viewer`, …). Empty: they can't sign in. |
+| `OIDC_ACCOUNT` | *(empty)* | Slug of the company account SSO users join (see *Account settings*). Empty: the oldest company account. Their mapped role applies in that account only; an owner is never demoted by SSO. |
 | `OIDC_CREATE_USERS` | `True` | Create accounts on first sign-in (no invitation needed). `False`: only people who already have an account (matched by verified email) can use SSO. |
 | `OIDC_ALLOW_UNVERIFIED_EMAIL` | `False` | Accept emails the provider doesn't mark `email_verified` (needed for some Entra ID setups). Only if you trust every account at the provider. |
 
@@ -160,7 +161,7 @@ links from the Users page.
 | `EMAIL_HOST_PASSWORD` | *(empty)* | SMTP password or app password. |
 | `EMAIL_USE_TLS` | `True` | STARTTLS. |
 | `EMAIL_USE_SSL` | `False` | Implicit TLS (port 465). Use one or the other. |
-| `DEFAULT_FROM_EMAIL` | `Server Monitor <noreply@localhost>` | Sender address. |
+| `DEFAULT_FROM_EMAIL` | `Vigil <noreply@localhost>` | Sender address. |
 
 ## Agent configuration
 

@@ -5,7 +5,7 @@
 <div class="page-head"><div class="d-flex align-items-center gap-3">
   <span class="avatar avatar-lg" aria-hidden="true">{{ user.initials }}</span>
   <div><h1 class="page-title">{{ user.display_name }}</h1>
-    <p class="page-sub mt-1"><span class="mono">{{ user.get_username }}</span> · {% if role %}<span class="role-pill role-{{ role|lower }}">{{ role }}</span> {{ role_help }}{% else %}No role assigned yet{% endif %}</p></div>
+    <p class="page-sub mt-1"><span class="mono">{{ user.get_username }}</span> · {% if role %}<span class="role-pill role-{{ role|lower }}">{{ role }}</span> in {{ ACCOUNT.name }}. {{ role_help }}{% else %}Not a member of any account yet{% endif %}</p></div>
 </div></div>
 <div class="row g-3 align-items-start">
   <div class="col-12 col-xl-6">

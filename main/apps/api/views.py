@@ -11,7 +11,6 @@ import uuid
 from django.conf import settings
 from django.db.models import Q
 from django.http import HttpResponse, JsonResponse
-from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
 from apps.alerts.models import Alert
@@ -20,6 +19,7 @@ from apps.monitors import stats
 from apps.monitors.models import Monitor, MonitorStatus
 from apps.operations import services as ops
 from apps.operations.models import Command, Job
+from apps.tenants.scoping import get_scoped_or_404, scoped
 
 from .auth import api_view, error
 
@@ -95,7 +95,7 @@ def server_json(s: Server, detail: bool = False) -> dict:
 
 @api_view(perm="fleet.view_server")
 def servers(request):
-    qs = Server.objects.prefetch_related("groups").order_by("name")
+    qs = scoped(request, Server).prefetch_related("groups").order_by("name")
     if env := request.GET.get("environment"):
         qs = qs.filter(environment=env)
     if group := request.GET.get("group"):
@@ -105,7 +105,7 @@ def servers(request):
 
 @api_view(perm="fleet.view_server")
 def server_detail(request, pk):
-    server = get_object_or_404(Server.objects.prefetch_related("groups"), pk=pk)
+    server = get_scoped_or_404(request, Server.objects.prefetch_related("groups"), pk=pk)
     return JsonResponse(server_json(server, detail=True))
 
 
@@ -134,7 +134,7 @@ def monitor_json(m: Monitor, uptime: dict | None = None) -> dict:
 
 @api_view(perm="monitors.view_monitor")
 def monitors(request):
-    qs = Monitor.objects.order_by("name")
+    qs = scoped(request, Monitor).order_by("name")
     if status := request.GET.get("status"):
         qs = qs.filter(status=status, is_enabled=True)
     uptime = stats.uptime_by_monitor(list(qs.values_list("pk", flat=True)), 24)
@@ -143,7 +143,7 @@ def monitors(request):
 
 @api_view(perm="monitors.view_monitor")
 def monitor_detail(request, pk):
-    m = get_object_or_404(Monitor, pk=pk)
+    m = get_scoped_or_404(request, Monitor, pk=pk)
     return JsonResponse(monitor_json(m, stats.uptime_by_monitor([m.pk], 24)))
 
 
@@ -166,7 +166,7 @@ def alert_json(a: Alert) -> dict:
 
 @api_view(perm="alerts.view_alert")
 def alerts(request):
-    qs = Alert.objects.order_by("-opened_at")
+    qs = scoped(request, Alert).order_by("-opened_at")
     state = request.GET.get("state", "open")
     if state == "open":
         qs = qs.filter(resolved_at__isnull=True)
@@ -225,7 +225,7 @@ def _create_job(request):
         return error(400, "servers must be a non-empty list of server ids or names.")
     ids = [u for u in (_uuid(w) for w in wanted) if u]
     names = [str(w) for w in wanted if not _uuid(w)]
-    targets = list(Server.objects.filter(Q(pk__in=ids) | Q(name__in=names)))
+    targets = list(scoped(request, Server).filter(Q(pk__in=ids) | Q(name__in=names)))
     if len(targets) != len(set(map(str, wanted))):
         found = {str(s.pk) for s in targets} | {s.name for s in targets}
         return error(
@@ -259,18 +259,20 @@ def jobs(request):
     if request.method == "POST":
         return _create_job(request)
     return _page(
-        request, Job.objects.select_related("created_by").prefetch_related("commands"), job_json
+        request,
+        scoped(request, Job).select_related("created_by").prefetch_related("commands"),
+        job_json,
     )
 
 
 @api_view(perm="operations.view_job")
 def job_detail(request, pk):
-    return JsonResponse(job_json(get_object_or_404(Job, pk=pk), detail=True))
+    return JsonResponse(job_json(get_scoped_or_404(request, Job, pk=pk), detail=True))
 
 
 @api_view(perm="operations.view_command")
 def command_detail(request, pk):
-    command = get_object_or_404(Command.objects.select_related("server"), pk=pk)
+    command = get_scoped_or_404(request, Command.objects.select_related("server"), pk=pk)
     return JsonResponse(command_json(command, output=True))
 
 
@@ -303,7 +305,7 @@ def metrics(request):
     """Prometheus text format. Scrape with `authorization: {credentials: smt_…}`."""
     now = timezone.now()
     out = _Exposition()
-    servers = list(Server.objects.filter(is_enabled=True).order_by("name"))
+    servers = list(scoped(request, Server).filter(is_enabled=True).order_by("name"))
     base = [(s, {"server": s.name, "environment": s.environment}) for s in servers]
     out.metric(
         "sm_build_info", "Dashboard version.", "gauge", [({"version": settings.APP_VERSION}, 1)]
@@ -325,7 +327,7 @@ def metrics(request):
                [({**lb, "service": v.get("name"), "kind": v.get("kind")}, v.get("state") == "up")
                 for s, lb in base for v in s.services])  # fmt: skip
 
-    mons = list(Monitor.objects.filter(is_enabled=True).order_by("name"))
+    mons = list(scoped(request, Monitor).filter(is_enabled=True).order_by("name"))
     mlb = [(m, {"monitor": m.name, "kind": m.kind}) for m in mons]
     out.metric("sm_monitor_up", "1 if up or slow, 0 if down.", "gauge",
                [(lb, m.status != MonitorStatus.DOWN) for m, lb in mlb if m.status != MonitorStatus.PENDING])  # fmt: skip
@@ -334,7 +336,9 @@ def metrics(request):
     out.metric("sm_monitor_tls_expiry_timestamp_seconds", "Certificate expiry.", "gauge",
                [(lb, m.tls_expires_at.timestamp() if m.tls_expires_at else None) for m, lb in mlb])  # fmt: skip
     counts = {}
-    for sev in Alert.objects.filter(resolved_at__isnull=True).values_list("severity", flat=True):
+    for sev in (
+        scoped(request, Alert).filter(resolved_at__isnull=True).values_list("severity", flat=True)
+    ):
         counts[sev] = counts.get(sev, 0) + 1
     out.metric("sm_alerts_open", "Open alerts.", "gauge",
                [({"severity": sev}, counts.get(sev, 0)) for sev in ("warning", "critical")])  # fmt: skip

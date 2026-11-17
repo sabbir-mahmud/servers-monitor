@@ -1,6 +1,6 @@
 # Security model
 
-Server Monitor can run commands on every server it watches, so it's built on the assumption
+Vigil can run commands on every server it watches, so it's built on the assumption
 that any one part (the dashboard, the Redis relay, a monitored server, the GitHub repository)
 might be compromised, and limits what that part can do.
 

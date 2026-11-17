@@ -5,6 +5,10 @@ from django.db import models
 class AuditLog(models.Model):
     """Append-only record of who did what. Rows outlive the user and server they mention."""
 
+    # Blank for events outside any account (sign-ins, sign-ups, the dashboard itself).
+    account = models.ForeignKey(
+        "tenants.Account", null=True, blank=True, on_delete=models.CASCADE, related_name="+"
+    )
     actor = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL
     )
@@ -21,7 +25,10 @@ class AuditLog(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
-        indexes = [models.Index(fields=["action", "-created_at"])]
+        indexes = [
+            models.Index(fields=["action", "-created_at"]),
+            models.Index(fields=["account", "-created_at"], name="audit_account_recent"),
+        ]
 
     def __str__(self):
         return f"{self.actor_label or 'system'} {self.action} {self.target}"

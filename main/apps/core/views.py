@@ -17,17 +17,20 @@ def _size(path) -> int:
 
 
 class SystemView(StaffViewMixin, TemplateView):
-    """The dashboard's own health: is it watched, backed up, affordable and current?"""
+    """The dashboard's own health: is it watched, backed up, affordable and current?
+    About the whole installation, so for superusers (whoever runs it) only."""
 
-    permission_required = "users.view_user"
     template_name = "core/system.html"
+
+    def has_permission(self):
+        return self.request.user.is_superuser
 
     def get_context_data(self, **kwargs):
         from apps.agent_api import relay
         from apps.fleet.models import Server
 
         ctx = super().get_context_data(**kwargs)
-        servers = Server.objects.all()
+        servers = Server.objects.all()  # every account: this page is about the installation
         versions = list(
             servers.exclude(agent_version="")
             .values("agent_version")
@@ -55,7 +58,9 @@ class SystemView(StaffViewMixin, TemplateView):
                 ("HTTPS", "on" if settings.HTTPS else "off (plain HTTP)"),
                 (
                     "Public sign-up",
-                    "on, with approval" if settings.ALLOW_SIGNUP else "off (invite-only)",
+                    "on (anyone can create an account)"
+                    if settings.ALLOW_SIGNUP
+                    else "off (invite-only)",
                 ),
                 (
                     "Private check targets",

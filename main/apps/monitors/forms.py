@@ -3,6 +3,8 @@ import json
 
 from django import forms
 
+from apps.tenants.scoping import AccountFormMixin
+
 from .models import DnsType, Kind, Method, Monitor
 
 ALL = {k.value for k in Kind}
@@ -79,7 +81,7 @@ def _parse_headers(text: str) -> dict:
     return headers
 
 
-class MonitorForm(forms.ModelForm):
+class MonitorForm(AccountFormMixin, forms.ModelForm):
     port = forms.IntegerField(required=False, min_value=1, max_value=65535, label="Port")
     tls = forms.BooleanField(required=False, label="Complete a TLS handshake",
                              help_text="Also checks the certificate and warns before it expires.")  # fmt: skip
@@ -160,7 +162,7 @@ class MonitorForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         instance = self.instance
-        self.saved_headers = instance.headers if instance.pk else {}
+        self.saved_headers = {} if instance._state.adding else instance.headers
         for key in {f for names in OPTION_FIELDS.values() for f in names}:
             if key in instance.options:
                 self.initial[key] = instance.options[key]
@@ -171,11 +173,14 @@ class MonitorForm(forms.ModelForm):
         else:
             del self.fields["clear_headers"]
         self.fields["server"].empty_label = "None"
-        self.initial["agents_only"] = bool(instance.pk) and not instance.check_from_dashboard
+        self.initial["agents_only"] = (
+            not instance._state.adding and not instance.check_from_dashboard
+        )
         from apps.fleet.models import Server
 
-        servers = list(Server.objects.filter(is_enabled=True).only("name", "capabilities"))
-        self.fields["probe_servers"].queryset = Server.objects.filter(is_enabled=True)
+        mine = Server.objects.filter(account=self.account, is_enabled=True)
+        servers = list(mine.only("name", "capabilities"))
+        self.fields["probe_servers"].queryset = mine
         self.fields["probe_servers"].required = False
         self.fields["quorum"].required = False  # older clients post none: 1
         self.probe_ready = {

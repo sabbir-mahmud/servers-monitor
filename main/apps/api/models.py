@@ -26,6 +26,8 @@ class ApiToken(models.Model):
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="api_tokens"
     )
+    # A token acts as its owner inside this one account, with their role there.
+    account = models.ForeignKey("tenants.Account", on_delete=models.CASCADE, related_name="+")
     name = models.CharField(max_length=100)
     token_hash = models.CharField(max_length=64, unique=True, editable=False)
     prefix = models.CharField(max_length=12, editable=False)
@@ -43,10 +45,10 @@ class ApiToken(models.Model):
         return f"{self.name} ({self.prefix}…)"
 
     @classmethod
-    def issue(cls, owner, name: str, scope: str, expires_at=None) -> tuple[ApiToken, str]:
+    def issue(cls, owner, account, name: str, scope: str, expires_at=None) -> tuple[ApiToken, str]:
         """Create a token. Returns (token, the raw value to show once)."""
         raw = PREFIX + secrets.token_urlsafe(32)
-        token = cls.objects.create(owner=owner, name=name, scope=scope, expires_at=expires_at,
+        token = cls.objects.create(owner=owner, account=account, name=name, scope=scope, expires_at=expires_at,
                                    token_hash=hash_token(raw), prefix=raw[: len(PREFIX) + 6])  # fmt: skip
         return token, raw
 

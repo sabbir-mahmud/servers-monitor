@@ -304,7 +304,11 @@ def _open_alert(monitor, kind, severity, message) -> None:
     try:
         with transaction.atomic():
             Alert.objects.create(
-                monitor=monitor, kind=kind, severity=severity, message=message[:300]
+                account_id=monitor.account_id,
+                monitor=monitor,
+                kind=kind,
+                severity=severity,
+                message=message[:300],
             )  # announced by the relay's notification outbox
     except IntegrityError:  # opened concurrently by a "check now"
         return
@@ -614,7 +618,7 @@ def probe_assignments(server) -> list[dict]:
     messages are signed but readable by whoever runs Redis (the form refuses that combo)."""
     out = []
     monitors = Monitor.objects.filter(
-        probe_servers=server, is_enabled=True, kind__in=PROBE_KINDS
+        probe_servers=server, account_id=server.account_id, is_enabled=True, kind__in=PROBE_KINDS
     ).order_by("pk")[:MAX_PROBES_PER_AGENT]
     for m in monitors:
         spec = {"id": str(m.pk), "kind": m.kind, "interval": m.interval_seconds,
@@ -655,7 +659,11 @@ def receive_probe_results(server, results) -> int:
         except ValueError:
             continue
     monitors = Monitor.objects.filter(
-        pk__in=list(wanted), probe_servers=server, is_enabled=True, kind__in=PROBE_KINDS
+        pk__in=list(wanted),
+        probe_servers=server,
+        account_id=server.account_id,
+        is_enabled=True,
+        kind__in=PROBE_KINDS,
     )
     stored = 0
     for monitor in monitors:

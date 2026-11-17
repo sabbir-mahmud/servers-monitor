@@ -13,7 +13,7 @@ from apps.audit.models import AuditLog
 from apps.monitors.models import Monitor, MonitorStatus
 from apps.operations.models import Job
 
-from .conftest import AgentClient, make_server, report
+from .conftest import AgentClient, acme, make_server, report
 
 pytestmark = pytest.mark.django_db
 
@@ -24,12 +24,12 @@ def bearer(raw):
 
 @pytest.fixture
 def read_token(operator):
-    return ApiToken.issue(operator, "grafana", Scope.READ)[1]
+    return ApiToken.issue(operator, acme(), "grafana", Scope.READ)[1]
 
 
 @pytest.fixture
 def operate_token(operator):
-    return ApiToken.issue(operator, "deploy-bot", Scope.OPERATE)[1]
+    return ApiToken.issue(operator, acme(), "deploy-bot", Scope.OPERATE)[1]
 
 
 @pytest.fixture
@@ -48,7 +48,7 @@ def test_requires_a_valid_token(client, read_token, operator):
 
 
 def test_revoked_expired_and_deactivated_tokens_stop_working(client, operator):
-    token, raw = ApiToken.issue(operator, "t", Scope.READ)
+    token, raw = ApiToken.issue(operator, acme(), "t", Scope.READ)
     url = reverse("api_servers")
     ApiToken.objects.filter(pk=token.pk).update(expires_at=timezone.now() - timedelta(seconds=1))
     assert client.get(url, **bearer(raw)).status_code == 401
@@ -61,7 +61,7 @@ def test_revoked_expired_and_deactivated_tokens_stop_working(client, operator):
 
 
 def test_only_a_hash_is_stored(operator):
-    token, raw = ApiToken.issue(operator, "t", Scope.READ)
+    token, raw = ApiToken.issue(operator, acme(), "t", Scope.READ)
     assert raw.startswith("smt_") and raw not in json.dumps(
         list(ApiToken.objects.values()), default=str
     )
@@ -98,9 +98,15 @@ def test_pagination(client, read_token):
 
 
 def test_monitors_and_alerts(client, read_token):
-    m = Monitor.objects.create(name="site", url="https://example.com", status=MonitorStatus.DOWN)
+    m = Monitor.objects.create(
+        account=acme(), name="site", url="https://example.com", status=MonitorStatus.DOWN
+    )
     Alert.objects.create(
-        monitor=m, kind=AlertKind.APP_DOWN, severity=Severity.CRITICAL, message="site is down"
+        account=acme(),
+        monitor=m,
+        kind=AlertKind.APP_DOWN,
+        severity=Severity.CRITICAL,
+        message="site is down",
     )
     mons = client.get(reverse("api_monitors") + "?status=down", **bearer(read_token)).json()
     assert [r["name"] for r in mons["results"]] == ["site"]
@@ -135,7 +141,7 @@ def test_operate_token_runs_an_allowlisted_action_and_is_audited(
 
 
 def test_api_cannot_run_shell_or_unknown_servers(client, admin_user, online):
-    raw = ApiToken.issue(admin_user, "admin-bot", Scope.OPERATE)[1]
+    raw = ApiToken.issue(admin_user, acme(), "admin-bot", Scope.OPERATE)[1]
     for body, code in (({"action": "shell", "args": {"command": "id"}, "servers": ["web-01"]}, 403),
                        ({"action": "deploy_api", "servers": ["nope"]}, 400),
                        ({"action": "not_offered", "servers": ["web-01"]}, 400)):  # fmt: skip
@@ -147,7 +153,7 @@ def test_api_cannot_run_shell_or_unknown_servers(client, admin_user, online):
 
 
 def test_viewer_token_cannot_operate_even_with_operate_scope(client, viewer, online):
-    raw = ApiToken.issue(viewer, "x", Scope.OPERATE)[
+    raw = ApiToken.issue(viewer, acme(), "x", Scope.OPERATE)[
         1
     ]  # the form never offers it; the API still checks
     body = json.dumps({"action": "deploy_api", "servers": ["web-01"]})
@@ -158,7 +164,7 @@ def test_viewer_token_cannot_operate_even_with_operate_scope(client, viewer, onl
 def test_prometheus_metrics(client, read_token, fake_relay):
     server = make_server("web-02")[0]
     AgentClient(server, fake_relay).heartbeat(report())
-    Monitor.objects.create(name='quote"d', url="https://example.com", status=MonitorStatus.UP,
+    Monitor.objects.create(account=acme(), name='quote"d', url="https://example.com", status=MonitorStatus.UP,
                            last_response_ms=87)  # fmt: skip
     r = client.get(reverse("metrics"), **bearer(read_token))
     assert r.status_code == 200 and r["Content-Type"].startswith("text/plain; version=0.0.4")
@@ -191,5 +197,5 @@ def test_viewers_can_only_create_read_tokens_and_not_revoke_others(client, viewe
     client.force_login(viewer)
     client.post(reverse("api_tokens"), {"name": "x", "scope": "operate", "expires": "30"})
     assert not ApiToken.objects.exists()  # "operate" isn't a valid choice for a Viewer
-    theirs = ApiToken.issue(operator, "theirs", Scope.READ)[0]
+    theirs = ApiToken.issue(operator, acme(), "theirs", Scope.READ)[0]
     assert client.post(reverse("api_token_revoke", args=[theirs.pk])).status_code == 404

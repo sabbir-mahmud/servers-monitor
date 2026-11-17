@@ -5,7 +5,7 @@ from apps.audit.models import AuditLog
 from apps.fleet.models import Server
 from apps.fleet.tokens import hash_token
 
-from .conftest import make_server
+from .conftest import acme, make_server
 
 pytestmark = pytest.mark.django_db
 
@@ -43,8 +43,9 @@ def test_dashboard_query_budget(client, viewer, django_assert_max_num_queries):
     for i in range(20):
         make_server(f"s{i:02}")
     client.force_login(viewer)
-    # Constant regardless of server count: servers + groups prefetch + groups + alerts + session/user.
-    with django_assert_max_num_queries(8):
+    # Constant regardless of server count: session/user + membership + servers + groups
+    # prefetch + groups + alerts.
+    with django_assert_max_num_queries(9):
         resp = client.get(reverse("fleet:dashboard"), HTTP_HX_REQUEST="true")
     assert resp.status_code == 200 and b"s19" in resp.content
     assert b"<html" not in resp.content  # partial only
@@ -164,7 +165,9 @@ def test_sidebar_categories_and_problem_badges(client, admin_user, viewer):
 
     server, _ = make_server("web-09")
     Server.objects.filter(pk=server.pk).update(last_health=Health.OFFLINE)
-    Monitor.objects.create(name="shop", url="https://shop.test/", status=MonitorStatus.DOWN)
+    Monitor.objects.create(
+        account=acme(), name="shop", url="https://shop.test/", status=MonitorStatus.DOWN
+    )
     client.force_login(admin_user)
     page = client.get(reverse("fleet:dashboard")).content.decode()
     for category in ("Infrastructure", "Incidents", "Operations", "Administration"):
@@ -173,7 +176,8 @@ def test_sidebar_categories_and_problem_badges(client, admin_user, viewer):
     # Viewers don't see categories they have no pages in.
     client.force_login(viewer)
     page = client.get(reverse("fleet:dashboard")).content.decode()
-    assert "<span>Administration</span>" not in page and "<span>Infrastructure</span>" in page
+    assert "<span>Infrastructure</span>" in page
+    assert reverse("users:list") not in page and reverse("audit:list") not in page
 
 
 def test_dashboard_and_agent_versions_agree(settings):

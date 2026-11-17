@@ -5,14 +5,16 @@ from datetime import timedelta
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Group
 from django.db import IntegrityError
 from django.urls import reverse
 from django.utils import timezone
 
 from apps.audit.models import AuditLog
+from apps.tenants.models import Membership
 from apps.users import accounts
 from apps.users.models import Invitation
+
+from .conftest import acme, add_member, make_account, make_server
 
 pytestmark = pytest.mark.django_db
 User = get_user_model()
@@ -33,7 +35,7 @@ def email_on(settings):
 def make_user(username, role="Viewer", password=GOOD_PASSWORD, **kw):
     user = User.objects.create_user(username, password=password, **kw)
     if role:
-        user.groups.add(Group.objects.get(name=role))
+        add_member(user, role)
     return user
 
 
@@ -46,7 +48,7 @@ def login(client, username, password=GOOD_PASSWORD):
 
 def test_sign_in_with_username_or_email_case_insensitive(client, roles):
     make_user("sabbir", email="Sabbir@Example.com")
-    assert login(client, "SABBIR")["Location"] == reverse("fleet:dashboard")
+    assert login(client, "SABBIR")["Location"] == reverse("home")
     client.logout()
     assert login(client, "sabbir@example.com").status_code == 302
 
@@ -144,28 +146,28 @@ def test_reset_rejects_weak_password(client, rf, roles):
 
 def test_invite_accept_creates_account_with_role(client, admin_user):
     client.force_login(admin_user)
-    page = client.post(reverse("users:invite"), {"email": "dev@example.com", "role": "Operator"})
+    page = client.post(reverse("users:invite"), {"email": "dev@example.com", "role": "operator"})
     link = page.content.decode().split('id="invite-link" class="text-break">')[1].split("<")[0]
     client.logout()
     path = link.split("testserver")[-1]
     assert b"dev@example.com" in client.get(path).content
     resp = client.post(path, {"username": "dev", "first_name": "Dev", "last_name": "One",
                               "password1": GOOD_PASSWORD, "password2": GOOD_PASSWORD})  # fmt: skip
-    assert resp["Location"] == reverse("fleet:dashboard")
+    assert resp["Location"] == reverse("home")
     user = User.objects.get(username="dev")
-    assert user.email == "dev@example.com" and accounts.role_of(user) == "Operator"
+    assert user.email == "dev@example.com" and accounts.role_of(user, acme()) == "operator"
     assert client.get(reverse("fleet:dashboard")).status_code == 200  # signed in
     client.logout()
     assert client.get(path).status_code == 404  # single use
 
 
 def test_invitations_expire_and_can_be_revoked(client, admin_user):
-    expired, raw1 = Invitation.issue("a@example.com", "Viewer", admin_user)
+    expired, raw1 = Invitation.issue(acme(), "a@example.com", "Viewer", admin_user)
     Invitation.objects.filter(pk=expired.pk).update(
         expires_at=timezone.now() - timedelta(seconds=1)
     )
     assert client.get(reverse("accept_invite", args=[raw1])).status_code == 404
-    live, raw2 = Invitation.issue("b@example.com", "Viewer", admin_user)
+    live, raw2 = Invitation.issue(acme(), "b@example.com", "Viewer", admin_user)
     client.force_login(admin_user)
     client.post(reverse("users:invite_revoke", args=[live.pk]))
     client.logout()
@@ -175,27 +177,43 @@ def test_invitations_expire_and_can_be_revoked(client, admin_user):
 
 def test_reinviting_replaces_the_old_link(client, admin_user):
     client.force_login(admin_user)
-    client.post(reverse("users:invite"), {"email": "dev@example.com", "role": "Viewer"})
-    client.post(reverse("users:invite"), {"email": "DEV@example.com", "role": "Admin"})
+    client.post(reverse("users:invite"), {"email": "dev@example.com", "role": "viewer"})
+    client.post(reverse("users:invite"), {"email": "DEV@example.com", "role": "admin"})
     states = sorted(i.state for i in Invitation.objects.all())
     assert states == ["pending", "revoked"]
 
 
-def test_cannot_invite_an_existing_address(client, admin_user):
+def test_cannot_invite_a_current_member(client, admin_user):
     make_user("taken", email="taken@example.com")
     client.force_login(admin_user)
-    resp = client.post(reverse("users:invite"), {"email": "Taken@example.com", "role": "Viewer"})
-    assert b"already has an account" in resp.content and not Invitation.objects.exists()
+    resp = client.post(reverse("users:invite"), {"email": "Taken@example.com", "role": "viewer"})
+    assert b"already a member of Acme" in resp.content and not Invitation.objects.exists()
+
+
+def test_existing_login_joins_a_second_account(client, admin_user):
+    """A parent who is also a developer: one login, two accounts, a role in each."""
+    family = make_account("The Rahmans", kind="family")
+    parent = make_user("parent", role=None, email="parent@example.com")
+    add_member(parent, "owner", family)
+    _, raw = Invitation.issue(acme(), "parent@example.com", "operator", admin_user)
+    path = reverse("accept_invite", args=[raw])
+    assert b"Sign in to join" in client.get(path).content  # not signed in: no new login
+    client.force_login(parent)
+    assert b"Join as parent" in client.get(path).content
+    assert client.post(path)["Location"] == reverse("home")
+    assert accounts.role_of(parent, acme()) == "operator"
+    assert accounts.role_of(parent, family) == "owner"  # untouched
+    assert User.objects.filter(email__iexact="parent@example.com").count() == 1
 
 
 def test_invitation_token_stored_hashed(admin_user):
-    invite, raw = Invitation.issue("x@example.com", "Viewer", admin_user)
+    invite, raw = Invitation.issue(acme(), "x@example.com", "Viewer", admin_user)
     assert raw not in invite.token_hash and Invitation.find(raw) == invite
 
 
 def test_invite_email_sent_when_configured(client, admin_user, email_on, mailoutbox):
     client.force_login(admin_user)
-    client.post(reverse("users:invite"), {"email": "dev@example.com", "role": "Viewer"})
+    client.post(reverse("users:invite"), {"email": "dev@example.com", "role": "viewer"})
     (message,) = mailoutbox
     assert message.to == ["dev@example.com"] and "/invite/" in message.body
 
@@ -207,34 +225,37 @@ def test_signup_off_by_default(client):
     assert client.get(reverse("signup")).status_code == 404
 
 
-def test_signup_needs_admin_approval(client, admin_user, settings):
+@pytest.mark.parametrize("kind", ["family", "solo", "company"])
+def test_signup_creates_an_account_of_the_chosen_kind(client, admin_user, settings, kind):
     settings.ALLOW_SIGNUP = True
+    server = make_server("acme-db")[0]
     resp = client.post(reverse("signup"), {
-        "email": "new@example.com", "username": "newbie", "first_name": "New", "last_name": "",
-        "password1": GOOD_PASSWORD, "password2": GOOD_PASSWORD,
+        "kind": kind, "account_name": "Mine", "email": "new@example.com", "username": "newbie",
+        "first_name": "New", "last_name": "", "password1": GOOD_PASSWORD, "password2": GOOD_PASSWORD,
     })  # fmt: skip
-    assert b"waiting for an administrator" in resp.content
+    assert resp["Location"] == reverse("home")
     user = User.objects.get(username="newbie")
-    assert not user.is_active and user.pending_approval and accounts.role_of(user) is None
-    assert login(client, "newbie").status_code == 200  # can't sign in yet
-    client.force_login(admin_user)
-    client.post(reverse("users:detail", args=[user.pk]), {"action": "approve", "role": "Operator"})
-    client.logout()
-    assert login(client, "newbie").status_code == 302
-    user.refresh_from_db()
-    assert accounts.role_of(user) == "Operator" and not user.pending_approval
+    (membership,) = Membership.objects.filter(user=user)
+    assert user.is_active and membership.role == "owner" and membership.account.kind == kind
+    assert membership.account.name == "Mine"
+    # Signed in, in the new account, and Acme's server is nowhere to be seen.
+    assert client.get(reverse("fleet:server_detail", args=[server.pk])).status_code in (403, 404)
+    if kind != "family":
+        assert b"acme-db" not in client.get(reverse("fleet:dashboard")).content
 
 
 # ---------------------------------------------------------------- management guards
 
 
-def test_admin_cannot_lock_themselves_out(client, admin_user):
-    client.force_login(admin_user)
-    client.post(reverse("users:detail", args=[admin_user.pk]), {"action": "deactivate"})
-    admin_user.refresh_from_db()
-    assert admin_user.is_active
-    with pytest.raises(accounts.AccountError, match="last Admin"):
-        accounts.set_role(admin_user, "Viewer")
+def test_owner_cannot_lock_themselves_out(client, roles):
+    owner = make_user("boss", role="owner")
+    client.force_login(owner)
+    client.post(reverse("users:detail", args=[owner.pk]), {"action": "deactivate"})
+    client.post(reverse("users:detail", args=[owner.pk]), {"action": "remove"})
+    owner.refresh_from_db()
+    assert owner.is_active and accounts.role_of(owner, acme()) == "owner"
+    with pytest.raises(accounts.AccountError, match="only owner"):
+        accounts.set_role(Membership.objects.get(user=owner), "viewer")
 
 
 def test_role_change_and_deactivation_sign_out(client, admin_user, roles):
@@ -243,19 +264,27 @@ def test_role_change_and_deactivation_sign_out(client, admin_user, roles):
     other.force_login(victim)
     assert other.get(reverse("fleet:dashboard")).status_code == 200
     client.force_login(admin_user)
-    client.post(reverse("users:detail", args=[victim.pk]),
-                {"action": "save", "first_name": "", "last_name": "", "email": "ops@example.com", "role": "Viewer"})  # fmt: skip
-    assert accounts.role_of(victim) == "Viewer"
+    client.post(reverse("users:detail", args=[victim.pk]), {"action": "role", "role": "viewer"})
+    assert accounts.role_of(victim, acme()) == "viewer"
     client.post(reverse("users:detail", args=[victim.pk]), {"action": "deactivate"})
     assert other.get(reverse("fleet:dashboard")).status_code == 302  # session dead
     assert AuditLog.objects.filter(action="user.deactivate", target="ops").exists()
 
 
-def test_two_admins_can_demote_each_other_but_not_the_last(admin_user, roles):
-    second = make_user("boss", role="Admin")
-    accounts.set_role(second, "Viewer", actor=admin_user)
+def test_two_owners_can_demote_each_other_but_not_the_last(roles):
+    first, second = make_user("one", role="owner"), make_user("two", role="owner")
+    accounts.set_role(Membership.objects.get(user=second), "admin", actor=first)
     with pytest.raises(accounts.AccountError):
-        accounts.set_role(admin_user, "Operator", actor=second)
+        accounts.set_role(Membership.objects.get(user=first), "admin", actor=second)
+
+
+def test_admins_cannot_touch_owners(admin_user, roles):
+    owner = make_user("boss", role="owner")
+    with pytest.raises(accounts.AccountError, match="Only an owner"):
+        accounts.set_role(Membership.objects.get(user=owner), "viewer", actor=admin_user)
+    viewer = make_user("v", role="viewer")
+    with pytest.raises(accounts.AccountError, match="Only an owner"):
+        accounts.set_role(Membership.objects.get(user=viewer), "owner", actor=admin_user)
 
 
 def test_admin_reset_link_shown_once(client, admin_user, roles):
@@ -298,7 +327,7 @@ def test_profile_email_must_be_unique(client, roles):
 
 
 def test_invite_page_while_signed_in_uses_auth_layout(client, admin_user):
-    _, raw = Invitation.issue("x@example.com", "Viewer", admin_user)
+    _, raw = Invitation.issue(acme(), "x@example.com", "Viewer", admin_user)
     client.force_login(admin_user)
     page = client.get(reverse("accept_invite", args=[raw])).content.decode()
-    assert "Join" in page and "separate account" in page and 'class="sidebar"' not in page
+    assert "Join Acme" in page and "Sign out" in page and 'class="sidebar"' not in page

@@ -24,13 +24,19 @@ def is_enabled(user) -> bool:
 
 
 def is_required(user) -> bool:
-    """Admins must use 2FA when REQUIRE_2FA_FOR_ADMINS is on (the default): this dashboard
-    can deploy to every server."""
+    """With REQUIRE_2FA_FOR_ADMINS (the default), owners and admins of any account that
+    can run things on servers (solo and company) must use 2FA, as must superusers. Family
+    accounts can't deploy anything, so parents may opt in instead."""
     if not settings.REQUIRE_2FA_FOR_ADMINS or not user.is_authenticated:
         return False
-    from .accounts import role_of
+    if user.is_superuser:
+        return True
+    from apps.tenants.models import Membership
+    from apps.tenants.roles import Kind, Role
 
-    return role_of(user) == "Admin"
+    return Membership.objects.filter(
+        user=user, role__in=[Role.OWNER, Role.ADMIN], account__kind__in=[Kind.SOLO, Kind.COMPANY]
+    ).exists()
 
 
 def start_setup(user, *, regenerate: bool = False) -> TOTPDevice:

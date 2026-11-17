@@ -1,12 +1,33 @@
 import json
 
 import pytest
-from django.contrib.auth.models import Group
 from django.core.cache import cache
 
 from apps.fleet.models import Server
 from apps.fleet.tokens import generate_token
-from apps.users.roles import sync_roles
+from apps.tenants.models import Account, Membership
+
+# The tests' default account: a company, so every feature (servers, apps, jobs, members)
+# is on. Isolation tests make more accounts of every kind.
+LEGACY_ROLE = {"Viewer": "viewer", "Operator": "operator", "Admin": "admin", "Owner": "owner"}
+
+
+def acme() -> Account:
+    account, _ = Account.objects.get_or_create(
+        slug="acme", defaults={"name": "Acme", "kind": "company"}
+    )
+    return account
+
+
+def make_account(name, kind="company") -> Account:
+    return Account.objects.create(name=name, kind=kind)
+
+
+def add_member(user, role, account=None) -> Membership:
+    account = account or acme()
+    return Membership.objects.update_or_create(
+        account=account, user=user, defaults={"role": LEGACY_ROLE.get(role, role)}
+    )[0]
 
 
 @pytest.fixture(autouse=True)
@@ -23,14 +44,20 @@ def _no_forced_2fa(settings):
 
 
 @pytest.fixture
+def account(db):
+    return acme()
+
+
+@pytest.fixture
 def roles(db):
-    sync_roles()
+    """Kept for older tests: makes sure the default account exists."""
+    return acme()
 
 
-def _user(django_user_model, name, role):
+def _user(django_user_model, name, role, account=None):
     user = django_user_model.objects.create_user(name, password="pw-not-used-1!")
     if role:
-        user.groups.add(Group.objects.get(name=role))
+        add_member(user, role, account)
     return user
 
 
@@ -49,7 +76,16 @@ def admin_user(django_user_model, roles):
     return _user(django_user_model, "admin", "Admin")
 
 
+@pytest.fixture
+def superuser(django_user_model, roles):
+    """Runs the installation (System page); also an owner of the default account."""
+    user = django_user_model.objects.create_superuser("root", "root@example.com", "root-pass-1!x")
+    add_member(user, "owner")
+    return user
+
+
 def make_server(name="web-01", **kwargs):
+    kwargs.setdefault("account", acme())
     raw, digest, prefix = generate_token()
     server = Server.objects.create(name=name, token_hash=digest, token_prefix=prefix, **kwargs)
     return server, raw

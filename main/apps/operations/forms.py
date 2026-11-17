@@ -2,6 +2,7 @@ from django import forms
 
 from apps.fleet.models import Environment, Server, ServerGroup
 from apps.monitors.models import Monitor
+from apps.tenants.scoping import AccountFormMixin
 
 from .cron import CronError, validate
 from .models import Schedule, Strategy
@@ -14,7 +15,7 @@ BUILTIN_LABELS = {
 }
 
 
-class JobForm(forms.Form):
+class JobForm(AccountFormMixin, forms.Form):
     action = forms.ChoiceField()
     name = forms.CharField(
         required=False,
@@ -51,7 +52,9 @@ class JobForm(forms.Form):
 
     def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
-        servers = Server.objects.filter(is_enabled=True).prefetch_related("groups")
+        servers = Server.objects.filter(account=self.account, is_enabled=True).prefetch_related(
+            "groups"
+        )
         self.fields["servers"].queryset = servers
         custom = sorted(
             {
@@ -71,9 +74,10 @@ class JobForm(forms.Form):
         if custom:
             choices.append(("Agent actions", [(n, f"{n} — {d}") for n, d in custom]))
         self.fields["action"].choices = choices
-        self.fields["health_gates"].queryset = Monitor.objects.filter(is_enabled=True).order_by(
-            "name"
-        )
+        self.fields["health_gates"].queryset = Monitor.objects.filter(
+            account=self.account, is_enabled=True
+        ).order_by("name")
+        self.scope_choices()
         for name in ("batch_size", "pause_seconds"):
             self.fields[name].widget.attrs["class"] = "form-control"
         for name in ("rolling", "stop_on_failure"):
@@ -137,7 +141,7 @@ class ScheduleForm(JobForm):
 
     def clean_sched_name(self):
         name = self.cleaned_data["sched_name"].strip()
-        clash = Schedule.objects.filter(name=name)
+        clash = Schedule.objects.filter(account=self.account, name=name)
         if self.instance is not None:
             clash = clash.exclude(pk=self.instance.pk)
         if clash.exists():
@@ -163,7 +167,7 @@ class ScheduleForm(JobForm):
         from .services import schedule_next
 
         d = self.cleaned_data
-        sched = self.instance or Schedule(created_by=user)
+        sched = self.instance or Schedule(account=self.account, created_by=user)
         sched.name, sched.cron, sched.action = d["sched_name"], d["cron"], d["action"]
         sched.args = self.clean_action_args
         sched.environments = list(d.get("environments") or [])

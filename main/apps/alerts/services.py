@@ -27,6 +27,7 @@ def _open(server, open_alerts, kind, message, severity, subject="", value=None) 
     try:
         with transaction.atomic():  # savepoint: a lost race must not poison the heartbeat
             alert = Alert.objects.create(
+                account_id=server.account_id,
                 server=server,
                 kind=kind,
                 subject=subject,

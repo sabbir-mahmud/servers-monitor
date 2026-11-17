@@ -1,0 +1,13 @@
+{% load monitor %}<fieldset>
+  <legend class="form-label">{{ form.kind.label }}</legend>
+  <div class="kind-grid">
+    {% for radio in form.kind %}
+    <label class="kind-card">{{ radio.tag }}
+      <span class="kind-title">{{ radio.choice_label }}</span>
+      <span class="kind-help">{% for value, text in form.kind_help.items %}{% if value == radio.data.value %}{{ text }}{% endif %}{% endfor %}</span>
+    </label>
+    {% endfor %}
+  </div>
+  {% for e in form.kind.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+</fieldset>
+{% include "alerts/_field.html" with field=form.account_name %}

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}New account{% endblock %}
+{% block content %}
+{% if has_accounts %}<a class="back-link" href="{% url 'home' %}">{% icon "arrow-left" 15 %} Back</a>{% endif %}
+<div class="page-head"><div>
+  <h1 class="page-title">{% if has_accounts %}New account{% else %}Welcome{% endif %}</h1>
+  <p class="page-sub">{% if has_accounts %}A separate account with its own devices, servers, people and notifications. You'll be its owner.{% else %}Your login doesn't belong to any account yet.{% endif %}</p>
+</div></div>
+{% if allowed %}
+<form method="post" novalidate style="max-width: 52rem">{% csrf_token %}
+  <div class="card mb-3"><div class="card-body form-section">
+    {% include "tenants/_kind_picker.html" %}
+  </div></div>
+  <button class="btn btn-primary">{% icon "plus" %} Create account</button>
+</form>
+{% else %}
+<div class="card" style="max-width: 40rem"><div class="card-body">
+  <p class="mb-2">Ask the owner of the account you need to invite you. The invitation link adds it to this login.</p>
+  <p class="text-body-secondary small mb-0">New accounts can't be created here on this installation.</p>
+</div></div>
+{% endif %}
+{% endblock %}

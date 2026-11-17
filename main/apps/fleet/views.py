@@ -1,6 +1,6 @@
 from django.conf import settings
 from django.contrib import messages
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import redirect
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.views import View
@@ -14,6 +14,7 @@ from apps.alerts.services import resolve_all
 from apps.audit.services import record
 from apps.core import crypto
 from apps.core.mixins import HtmxTemplateMixin, StaffViewMixin
+from apps.tenants.scoping import AccountScopedMixin, get_scoped_or_404, scoped
 
 from . import agentdist, services
 from .forms import ServerForm
@@ -23,16 +24,17 @@ ENROLL_SESSION_KEY = "enroll-token:{}"
 MUTE_CHOICES = [(60, "Mute for 1 hour"), (240, "Mute for 4 hours"), (1440, "Mute for 24 hours")]
 
 
-class DashboardView(StaffViewMixin, HtmxTemplateMixin, ListView):
+class DashboardView(StaffViewMixin, AccountScopedMixin, HtmxTemplateMixin, ListView):
     """Fleet overview. The `fleet` partial re-renders every 10 s via HTMX polling."""
 
     permission_required = "fleet.view_server"
     template_name = "fleet/dashboard.html"
     htmx_partial = "fleet"
     context_object_name = "servers"
+    model = Server
 
     def get_queryset(self):
-        qs = Server.objects.prefetch_related("groups")
+        qs = super().get_queryset().prefetch_related("groups")
         g = self.request.GET
         if env := g.get("environment"):
             qs = qs.filter(environment=env)
@@ -55,16 +57,16 @@ class DashboardView(StaffViewMixin, HtmxTemplateMixin, ListView):
         ctx.update(
             servers=servers,
             summary=services.fleet_summary(ctx["servers"]),
-            open_alerts=Alert.objects.filter(resolved_at__isnull=True).count(),
+            open_alerts=scoped(self.request, Alert).filter(resolved_at__isnull=True).count(),
             environments=Environment.choices,
-            groups=ServerGroup.objects.all(),
+            groups=scoped(self.request, ServerGroup),
             healths=Health.choices,
             filters=self.request.GET,
         )
         return ctx
 
 
-class ServerCreateView(StaffViewMixin, CreateView):
+class ServerCreateView(StaffViewMixin, AccountScopedMixin, CreateView):
     permission_required = "fleet.add_server"
     template_name = "fleet/server_form.html"
     form_class = ServerForm
@@ -93,7 +95,7 @@ class ServerEnrollView(StaffViewMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        server = get_object_or_404(Server, pk=kwargs["pk"])
+        server = get_scoped_or_404(self.request, Server, pk=kwargs["pk"])
         token = None
         if self.request.GET.get("part") != "status":  # don't burn the one-time token on a poll
             stored = self.request.session.pop(ENROLL_SESSION_KEY.format(server.pk), None)
@@ -118,7 +120,7 @@ class ServerEnrollView(StaffViewMixin, TemplateView):
         return ctx
 
 
-class ServerDetailView(StaffViewMixin, DetailView):
+class ServerDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
     permission_required = "fleet.view_server"
     template_name = "fleet/server_detail.html"
     model = Server
@@ -131,7 +133,7 @@ class ServerDetailView(StaffViewMixin, DetailView):
         return [self.template_name]
 
     def get_queryset(self):
-        return Server.objects.prefetch_related("groups")
+        return super().get_queryset().prefetch_related("groups")
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -148,13 +150,15 @@ class ServerDetailView(StaffViewMixin, DetailView):
             can_operate=self.request.user.has_perm("operations.add_job"),
             can_shell=self.request.user.has_perm("operations.run_shell"),
             can_admin=self.request.user.has_perm("fleet.change_server"),
-            maintenance_window=maintenance.coverage().window_for_server(server.pk),
+            maintenance_window=maintenance.coverage(account=server.account_id).window_for_server(
+                server.pk
+            ),
             mute_choices=MUTE_CHOICES,
         )
         return ctx
 
 
-class ServerUpdateView(StaffViewMixin, UpdateView):
+class ServerUpdateView(StaffViewMixin, AccountScopedMixin, UpdateView):
     permission_required = "fleet.change_server"
     template_name = "fleet/server_form.html"
     form_class = ServerForm
@@ -173,7 +177,7 @@ class ServerUpdateView(StaffViewMixin, UpdateView):
         return reverse("fleet:server_detail", args=[self.object.pk])
 
 
-class ServerDeleteView(StaffViewMixin, DeleteView):
+class ServerDeleteView(StaffViewMixin, AccountScopedMixin, DeleteView):
     permission_required = "fleet.delete_server"
     template_name = "confirm_delete.html"
     model = Server
@@ -196,7 +200,7 @@ class ServerRotateTokenView(StaffViewMixin, View):
     http_method_names = ["post"]
 
     def post(self, request, pk):
-        server = get_object_or_404(Server, pk=pk)
+        server = get_scoped_or_404(request, Server, pk=pk)
         try:
             agent_url = services.rotate_token(request, server)
         except RelayError as exc:
@@ -219,9 +223,11 @@ class AgentUpgradeView(StaffViewMixin, View):
         from apps.operations import services as ops
 
         if pk is not None:
-            targets, batch = [get_object_or_404(Server, pk=pk)], 0
+            targets, batch = [get_scoped_or_404(request, Server, pk=pk)], 0
         else:
-            targets = [s for s in Server.objects.filter(is_enabled=True) if s.agent_outdated]
+            targets = [
+                s for s in scoped(request, Server).filter(is_enabled=True) if s.agent_outdated
+            ]
             try:
                 batch = max(1, min(50, int(request.POST.get("batch_size") or 2)))
             except ValueError:

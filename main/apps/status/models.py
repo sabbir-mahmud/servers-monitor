@@ -24,7 +24,8 @@ class PublishKind(models.TextChoices):
 
 class StatusPage(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
-    name = models.CharField(max_length=80, unique=True, help_text="Only shown in this dashboard.")
+    account = models.ForeignKey("tenants.Account", on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=80, help_text="Only shown in this dashboard.")
     title = models.CharField(max_length=120, help_text="Shown at the top of the public page.")
     description = models.CharField(max_length=300, blank=True)
     logo_url = models.URLField(max_length=300, blank=True, help_text="Optional https:// image.")
@@ -55,6 +56,13 @@ class StatusPage(models.Model):
 
     class Meta:
         ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["account", "name"],
+                name="statuspage_name_per_account",
+                violation_error_message="A status page with this name already exists.",
+            ),
+        ]
 
     def __str__(self):
         return self.name
@@ -79,6 +87,8 @@ class StatusPage(models.Model):
 
 
 class StatusPageMonitor(models.Model):
+    account_path = "page__account"
+
     page = models.ForeignKey(StatusPage, on_delete=models.CASCADE, related_name="entries")
     monitor = models.ForeignKey("monitors.Monitor", on_delete=models.CASCADE, related_name="+")
     display_name = models.CharField(max_length=80)
@@ -108,6 +118,8 @@ class Impact(models.TextChoices):
 
 
 class StatusIncident(models.Model):
+    account_path = "page__account"
+
     page = models.ForeignKey(StatusPage, on_delete=models.CASCADE, related_name="incidents")
     title = models.CharField(max_length=160)
     impact = models.CharField(max_length=12, choices=Impact.choices, default=Impact.MINOR)

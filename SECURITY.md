@@ -1,6 +1,6 @@
 # Security policy
 
-Server Monitor can run commands on the servers it monitors, so security reports are taken
+Vigil can run commands on the servers it monitors, so security reports are taken
 seriously and handled first.
 
 ## Reporting a vulnerability

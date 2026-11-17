@@ -11,6 +11,8 @@ from apps.users import accounts
 from apps.users.models import SSOIdentity
 from apps.users.sso import SSOBackend
 
+from .conftest import acme
+
 pytestmark = pytest.mark.django_db
 
 IDP = "https://idp.example.com"
@@ -69,9 +71,9 @@ def test_redirects_to_the_provider_with_state_nonce_and_pkce(client, sso):
 
 def test_first_sign_in_creates_the_account_with_the_mapped_role(client, sso):
     r = sign_in(client, sso)
-    assert r.status_code == 302 and r["Location"] == reverse("fleet:dashboard")
+    assert r.status_code == 302 and r["Location"] == reverse("home")
     user = get_user_model().objects.get(email="dana@example.com")
-    assert user.username == "dana" and accounts.role_of(user) == "Operator"
+    assert user.username == "dana" and accounts.role_of(user, acme()) == "operator"
     assert not user.has_usable_password() and user.sso.subject == "idp|42"
     assert client.get(reverse("fleet:dashboard")).status_code == 200
     assert {"user.sso_create", "auth.sso_login"} <= set(
@@ -83,7 +85,8 @@ def test_role_follows_the_provider_groups(client, sso):
     sign_in(client, sso)
     client.logout()
     sign_in(client, sso, groups=["sre"])
-    assert accounts.role_of(get_user_model().objects.get(email="dana@example.com")) == "Admin"
+    dana = get_user_model().objects.get(email="dana@example.com")
+    assert accounts.role_of(dana, acme()) == "admin"
 
 
 def test_no_mapped_group_or_unverified_email_is_refused(client, sso):

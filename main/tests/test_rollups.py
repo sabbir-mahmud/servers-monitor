@@ -12,7 +12,7 @@ from apps.fleet.models import MetricRollup, MetricSample, Server
 from apps.monitors import stats
 from apps.monitors.models import Monitor, MonitorCheck, MonitorDaily
 
-from .conftest import make_server
+from .conftest import acme, make_server
 
 pytestmark = pytest.mark.django_db
 
@@ -53,7 +53,7 @@ def test_hourly_rollups_cover_complete_hours_once(server):
 
 def test_daily_uptime_outlives_raw_checks(settings):
     settings.TIME_ZONE = "UTC"
-    m = Monitor.objects.create(name="site", url="https://example.com")
+    m = Monitor.objects.create(account=acme(), name="site", url="https://example.com")
     old = timezone.now() - timedelta(days=30)
     for i, ok in enumerate((True, True, True, False)):
         MonitorCheck.objects.create(

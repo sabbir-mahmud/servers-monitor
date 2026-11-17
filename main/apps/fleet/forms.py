@@ -1,9 +1,11 @@
 from django import forms
 
+from apps.tenants.scoping import AccountFormMixin
+
 from .models import Server, ServerGroup
 
 
-class ServerForm(forms.ModelForm):
+class ServerForm(AccountFormMixin, forms.ModelForm):
     groups = forms.ModelMultipleChoiceField(
         queryset=ServerGroup.objects.all(), required=False, widget=forms.CheckboxSelectMultiple
     )
@@ -43,5 +45,5 @@ class ServerForm(forms.ModelForm):
     def _save_m2m(self):
         super()._save_m2m()
         for slug in self.cleaned_data.get("new_groups", []):
-            group, _ = ServerGroup.objects.get_or_create(name=slug)
+            group, _ = ServerGroup.objects.get_or_create(account=self.instance.account, name=slug)
             self.instance.groups.add(group)

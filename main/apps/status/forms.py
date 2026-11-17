@@ -3,6 +3,7 @@ import json
 from django import forms
 
 from apps.monitors.models import Monitor
+from apps.tenants.scoping import AccountFormMixin
 
 from .models import (
     IncidentStatus,
@@ -27,7 +28,7 @@ def _style(form):
             widget.attrs.setdefault("class", "form-control")
 
 
-class StatusPageForm(forms.ModelForm):
+class StatusPageForm(AccountFormMixin, forms.ModelForm):
     repo = forms.CharField(required=False, max_length=140, validators=[repo_validator], label="Repository",
                            help_text="owner/repository, e.g. acme/status. Enable Pages on it (or connect it to Cloudflare Pages).")  # fmt: skip
     branch = forms.CharField(required=False, max_length=100, initial="main", label="Branch")
@@ -55,15 +56,18 @@ class StatusPageForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        cfg = self.instance.config if self.instance.pk else {}
+        cfg = {} if self.instance._state.adding else self.instance.config
         for key in ("repo", "branch", "path", "domain"):
             if cfg.get(key):
                 self.initial[key] = cfg[key]
         if cfg.get("token"):
             self.fields["token"].help_text = "Saved and hidden. Leave blank to keep it."
-        entries = {e.monitor_id: e for e in self.instance.entries.all()} if self.instance.pk else {}
+        entries = (
+            {} if self.instance._state.adding
+            else {e.monitor_id: e for e in self.instance.entries.all()}
+        )  # fmt: skip
         self.monitor_rows = []
-        for m in Monitor.objects.order_by("name"):
+        for m in Monitor.objects.filter(account=self.account).order_by("name"):
             entry = entries.get(m.pk)
             pick = forms.BooleanField(required=False, initial=entry is not None, label=m.name)
             label = forms.CharField(required=False, max_length=80, initial=entry.display_name if entry else m.name,

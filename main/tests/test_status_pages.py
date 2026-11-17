@@ -15,18 +15,22 @@ from apps.status import publish
 from apps.status.models import StatusIncident, StatusPage, StatusPageMonitor
 from apps.status.render import content_hash, render, snapshot
 
+from .conftest import acme
+
 pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
 def page(server):
-    shop = Monitor.objects.create(name="shop-internal", url="https://10.1.2.3:8443/health?token=abc",
+    shop = Monitor.objects.create(account=acme(), name="shop-internal", url="https://10.1.2.3:8443/health?token=abc",
                                   status=MonitorStatus.UP, server=server,
                                   last_error="connection refused by 10.1.2.3")  # fmt: skip
-    db = Monitor.objects.create(name="pg-primary", kind=Kind.TCP, target="db.internal.corp",
+    db = Monitor.objects.create(account=acme(), name="pg-primary", kind=Kind.TCP, target="db.internal.corp",
                                 options={"port": 5432}, status=MonitorStatus.DOWN)  # fmt: skip
-    Monitor.objects.create(name="secret-admin", url="https://admin.example.com")  # not on the page
-    p = StatusPage.objects.create(name="public", title="Acme status")
+    Monitor.objects.create(
+        account=acme(), name="secret-admin", url="https://admin.example.com"
+    )  # not on the page
+    p = StatusPage.objects.create(account=acme(), name="public", title="Acme status")
     StatusPageMonitor.objects.create(page=p, monitor=shop, display_name="Shop", position=0)
     StatusPageMonitor.objects.create(page=p, monitor=db, display_name="Database", position=1)
     now = timezone.now()

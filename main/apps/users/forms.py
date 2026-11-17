@@ -3,12 +3,12 @@ from django.contrib.auth import get_user_model, password_validation
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.validators import UnicodeUsernameValidator
 
-from .accounts import ROLE_HELP, ROLES
+from apps.tenants.models import Membership
+from apps.tenants.roles import KIND_HELP, ROLE_HELP, Kind, Role
+
 from .models import Invitation
 
 User = get_user_model()
-NO_ACCESS = ""
-ROLE_CHOICES = [(r, r) for r in ROLES] + [(NO_ACCESS, "No access")]
 
 
 def _style(form):
@@ -116,9 +116,27 @@ class AcceptInviteForm(_NewAccountForm):
     pass
 
 
-class SignupForm(_NewAccountForm):
+class AccountKindForm(forms.Form):
+    """What kind of account, and its name: sign-up and "create another account"."""
+
+    kind = forms.ChoiceField(
+        choices=Kind.choices, widget=forms.RadioSelect, label="Who is it for?", initial=Kind.FAMILY
+    )
+    account_name = forms.CharField(
+        max_length=100, label="Account name",
+        help_text="e.g. The Rahmans, Acme Ltd or your name. You can change it later.",
+    )  # fmt: skip
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.kind_help = KIND_HELP
+        _style(self)
+
+
+class SignupForm(AccountKindForm, _NewAccountForm):
     email = forms.EmailField()
-    field_order = ["email", "username", "first_name", "last_name", "password1", "password2"]
+    field_order = ["kind", "account_name", "email", "username", "first_name", "last_name",
+                   "password1", "password2"]  # fmt: skip
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -127,9 +145,11 @@ class SignupForm(_NewAccountForm):
     def clean_email(self):
         email = self.cleaned_data["email"].strip()
         if _email_taken(email):
-            # Sign-up is approval-gated, so naming the clash here costs little and saves
-            # the person a confused wait. Password reset never does this.
-            raise forms.ValidationError("An account with this email already exists.")
+            # Naming the clash costs little (sign-up is throttled) and saves a confused
+            # person a dead end. Password reset never does this.
+            raise forms.ValidationError(
+                "An account with this email already exists. Sign in instead."
+            )
         return email
 
 
@@ -143,27 +163,52 @@ class ForgotPasswordForm(forms.Form):
         _style(self)
 
 
-class InviteForm(forms.Form):
-    email = forms.EmailField()
-    role = forms.ChoiceField(
-        choices=[(r, r) for r in ROLES], initial="Viewer", widget=forms.RadioSelect
-    )
+def role_choices(account, actor_role: str | None, *, actor_is_superuser=False):
+    """Roles this account type has; only owners hand out "owner"."""
+    can_grant_owner = actor_role == Role.OWNER or actor_is_superuser
+    return [(r.value, r.label) for r in account.roles if r != Role.OWNER or can_grant_owner]
 
-    def __init__(self, *args, **kwargs):
+
+class InviteForm(forms.Form):
+    """Invite someone into the current account. They may already have a login (a parent
+    who is also a developer): accepting adds a membership to their existing account."""
+
+    email = forms.EmailField()
+    role = forms.ChoiceField(widget=forms.RadioSelect)
+
+    def __init__(self, *args, account, actor_role=None, actor_is_superuser=False, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["email"].widget.attrs["placeholder"] = "teammate@company.com"
-        self.role_help = ROLE_HELP
+        self.account = account
+        choices = role_choices(account, actor_role, actor_is_superuser=actor_is_superuser)
+        self.fields["role"].choices = choices
+        default = Role.VIEWER if Role.VIEWER in account.roles else choices[-1][0]
+        self.fields["role"].initial = default
+        self.fields["email"].widget.attrs["placeholder"] = (
+            "partner@example.com" if account.kind == Kind.FAMILY else "teammate@company.com"
+        )
+        self.role_help = {r: ROLE_HELP[r] for r, _ in choices}
         _style(self)
 
     def clean_email(self):
         email = self.cleaned_data["email"].strip()
-        if _email_taken(email):
-            raise forms.ValidationError("Someone already has an account with this email.")
+        if Membership.objects.filter(account=self.account, user__email__iexact=email).exists():
+            raise forms.ValidationError(f"They're already a member of {self.account.name}.")
         return email
 
 
+class MemberRoleForm(forms.Form):
+    role = forms.ChoiceField()
+
+    def __init__(self, *args, account, actor_role=None, actor_is_superuser=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["role"].choices = role_choices(
+            account, actor_role, actor_is_superuser=actor_is_superuser
+        )
+        _style(self)
+
+
 class UserEditForm(forms.ModelForm):
-    role = forms.ChoiceField(choices=ROLE_CHOICES, required=False)
+    """A member's login details: only for people managed by this account alone."""
 
     class Meta:
         model = User
@@ -226,10 +271,12 @@ def styled(form):
 
 __all__ = [
     "AcceptInviteForm",
+    "AccountKindForm",
     "ForgotPasswordForm",
     "Invitation",
     "InviteForm",
     "LoginForm",
+    "MemberRoleForm",
     "ProfileForm",
     "SignupForm",
     "UserEditForm",

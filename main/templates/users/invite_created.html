@@ -5,7 +5,7 @@
 <a class="back-link" href="{% url 'users:list' %}">{% icon "arrow-left" 15 %} Users</a>
 <div class="page-head"><div>
   <h1 class="page-title">Invitation for {{ invite.email }}</h1>
-  <p class="page-sub">Role <span class="role-pill role-{{ invite.role|lower }}">{{ invite.role }}</span> · works once · expires {{ invite.expires_at|date:"M j, H:i" }}</p>
+  <p class="page-sub">Role <span class="role-pill role-{{ invite.role }}">{{ invite.role_label }}</span> · works once · expires {{ invite.expires_at|date:"M j, H:i" }}</p>
 </div></div>
 <div style="max-width: 46rem">
   {% if email_enabled %}<div class="alert alert-success" role="status">{% icon "check" %}<div>Emailed to <b>{{ invite.email }}</b>. You can also share the link below.</div></div>

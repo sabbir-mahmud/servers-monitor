@@ -1,5 +1,5 @@
 from django.contrib import messages
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import redirect
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.views import View
@@ -11,13 +11,14 @@ from apps.audit.services import record
 from apps.core.mixins import HtmxTemplateMixin, StaffViewMixin
 from apps.core.utils import safe_next
 from apps.fleet.views import MUTE_CHOICES
+from apps.tenants.scoping import AccountScopedMixin, get_scoped_or_404, scoped
 
 from . import checker, stats
 from .forms import MonitorForm
 from .models import Monitor, MonitorStatus
 
 
-class MonitorListView(StaffViewMixin, HtmxTemplateMixin, ListView):
+class MonitorListView(StaffViewMixin, AccountScopedMixin, HtmxTemplateMixin, ListView):
     """Every application with its 24 h uptime bar. The `board` partial refreshes every 15 s."""
 
     permission_required = "monitors.view_monitor"
@@ -25,8 +26,10 @@ class MonitorListView(StaffViewMixin, HtmxTemplateMixin, ListView):
     htmx_partial = "board"
     context_object_name = "monitors"
 
+    model = Monitor
+
     def get_queryset(self):
-        return Monitor.objects.select_related("server")
+        return super().get_queryset().select_related("server")
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -53,7 +56,7 @@ class MonitorListView(StaffViewMixin, HtmxTemplateMixin, ListView):
         return ctx
 
 
-class MonitorDetailView(StaffViewMixin, DetailView):
+class MonitorDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
     permission_required = "monitors.view_monitor"
     template_name = "monitors/detail.html"
     model = Monitor
@@ -95,9 +98,11 @@ class MonitorDetailView(StaffViewMixin, DetailView):
             series=stats.response_series(m, range_key),
             incidents=stats.incidents(m),
             recent=recent,
-            open_alerts=Alert.objects.filter(monitor=m, resolved_at__isnull=True),
+            open_alerts=scoped(self.request, Alert).filter(monitor=m, resolved_at__isnull=True),
             can_change=self.request.user.has_perm("monitors.change_monitor"),
-            maintenance_window=maintenance.coverage().window_for_monitor(m.pk, m.server_id),
+            maintenance_window=maintenance.coverage(account=m.account_id).window_for_monitor(
+                m.pk, m.server_id
+            ),
             mute_choices=MUTE_CHOICES,
         )
         return ctx
@@ -147,7 +152,7 @@ FORM_SECTIONS = [
 ]  # fmt: skip
 
 
-class MonitorCreateView(StaffViewMixin, CreateView):
+class MonitorCreateView(StaffViewMixin, AccountScopedMixin, CreateView):
     permission_required = "monitors.add_monitor"
     template_name = "monitors/form.html"
     form_class = MonitorForm
@@ -171,7 +176,7 @@ class MonitorCreateView(StaffViewMixin, CreateView):
         return reverse("monitors:detail", args=[self.object.pk])
 
 
-class MonitorUpdateView(StaffViewMixin, UpdateView):
+class MonitorUpdateView(StaffViewMixin, AccountScopedMixin, UpdateView):
     permission_required = "monitors.change_monitor"
     template_name = "monitors/form.html"
     form_class = MonitorForm
@@ -197,7 +202,7 @@ class MonitorUpdateView(StaffViewMixin, UpdateView):
         return reverse("monitors:detail", args=[self.object.pk])
 
 
-class MonitorDeleteView(StaffViewMixin, DeleteView):
+class MonitorDeleteView(StaffViewMixin, AccountScopedMixin, DeleteView):
     permission_required = "monitors.delete_monitor"
     template_name = "confirm_delete.html"
     model = Monitor
@@ -223,7 +228,7 @@ class MonitorCheckNowView(StaffViewMixin, View):
     http_method_names = ["post"]
 
     def post(self, request, pk):
-        monitor = get_object_or_404(Monitor, pk=pk)
+        monitor = get_scoped_or_404(request, Monitor, pk=pk)
         if monitor.is_heartbeat:
             messages.info(
                 request, f"{monitor.name} is checked when its job pings: run it on the server."
@@ -242,7 +247,7 @@ class MonitorToggleView(StaffViewMixin, View):
     http_method_names = ["post"]
 
     def post(self, request, pk):
-        monitor = get_object_or_404(Monitor, pk=pk)
+        monitor = get_scoped_or_404(request, Monitor, pk=pk)
         monitor.is_enabled = not monitor.is_enabled
         if monitor.is_enabled:
             monitor.next_check_at = timezone.now()

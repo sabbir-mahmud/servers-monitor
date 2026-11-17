@@ -1,7 +1,7 @@
 from django.contrib import messages
 from django.db import transaction
 from django.http import HttpResponse
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import redirect
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -11,13 +11,14 @@ from django.views.generic import CreateView, DeleteView, DetailView, ListView, U
 
 from apps.audit.services import record
 from apps.core.mixins import StaffViewMixin
+from apps.tenants.scoping import AccountScopedMixin, get_scoped_or_404
 
 from .forms import IncidentForm, IncidentUpdateForm, StatusPageForm
 from .models import IncidentStatus, StatusIncident, StatusIncidentUpdate, StatusPage
 from .render import as_zip, render, snapshot
 
 
-class StatusPageListView(StaffViewMixin, ListView):
+class StatusPageListView(StaffViewMixin, AccountScopedMixin, ListView):
     permission_required = "status.view_statuspage"
     template_name = "status/list.html"
     model = StatusPage
@@ -27,7 +28,7 @@ class StatusPageListView(StaffViewMixin, ListView):
         return super().get_queryset().prefetch_related("entries", "incidents")
 
 
-class StatusPageDetailView(StaffViewMixin, DetailView):
+class StatusPageDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
     permission_required = "status.view_statuspage"
     template_name = "status/detail.html"
     model = StatusPage
@@ -59,7 +60,7 @@ class _PageFormMixin:
         return reverse("status:detail", args=[self.object.pk])
 
 
-class StatusPageCreateView(StaffViewMixin, _PageFormMixin, CreateView):
+class StatusPageCreateView(StaffViewMixin, AccountScopedMixin, _PageFormMixin, CreateView):
     permission_required = "status.add_statuspage"
 
     def form_valid(self, form):
@@ -70,7 +71,7 @@ class StatusPageCreateView(StaffViewMixin, _PageFormMixin, CreateView):
         return response
 
 
-class StatusPageUpdateView(StaffViewMixin, _PageFormMixin, UpdateView):
+class StatusPageUpdateView(StaffViewMixin, AccountScopedMixin, _PageFormMixin, UpdateView):
     permission_required = "status.change_statuspage"
 
     def form_valid(self, form):
@@ -82,7 +83,7 @@ class StatusPageUpdateView(StaffViewMixin, _PageFormMixin, UpdateView):
         return response
 
 
-class StatusPageDeleteView(StaffViewMixin, DeleteView):
+class StatusPageDeleteView(StaffViewMixin, AccountScopedMixin, DeleteView):
     permission_required = "status.delete_statuspage"
     model = StatusPage
     template_name = "confirm_delete.html"
@@ -111,7 +112,7 @@ class StatusPagePreviewView(StaffViewMixin, View):
     permission_required = "status.view_statuspage"
 
     def get(self, request, pk):
-        page = get_object_or_404(StatusPage, pk=pk)
+        page = get_scoped_or_404(request, StatusPage, pk=pk)
         _, html, data = render(page)
         if request.GET.get("format") == "json":
             return HttpResponse(data, content_type="application/json")
@@ -122,7 +123,7 @@ class StatusPageDownloadView(StaffViewMixin, View):
     permission_required = "status.view_statuspage"
 
     def get(self, request, pk):
-        page = get_object_or_404(StatusPage, pk=pk)
+        page = get_scoped_or_404(request, StatusPage, pk=pk)
         response = HttpResponse(as_zip(page), content_type="application/zip")
         response["Content-Disposition"] = f'attachment; filename="status-{page.pk.hex[:8]}.zip"'
         return response
@@ -133,7 +134,7 @@ class StatusPagePublishView(StaffViewMixin, View):
     http_method_names = ["post"]
 
     def post(self, request, pk):
-        page = get_object_or_404(StatusPage, pk=pk)
+        page = get_scoped_or_404(request, StatusPage, pk=pk)
         StatusPage.objects.filter(pk=pk).update(needs_publish=True)
         record(request, "status_page.publish", target=page.name)
         messages.success(request, "Publishing within a few seconds (the relay process does it).")
@@ -145,7 +146,7 @@ class IncidentCreateView(StaffViewMixin, View):
     http_method_names = ["post"]
 
     def post(self, request, pk):
-        page = get_object_or_404(StatusPage, pk=pk)
+        page = get_scoped_or_404(request, StatusPage, pk=pk)
         form = IncidentForm(request.POST, page=page)
         if not form.is_valid():
             messages.error(request, "Incident not posted: " + "; ".join(
@@ -169,7 +170,7 @@ class IncidentUpdateView(StaffViewMixin, View):
     http_method_names = ["post"]
 
     def post(self, request, pk, incident_id):
-        incident = get_object_or_404(StatusIncident, pk=incident_id, page_id=pk)
+        incident = get_scoped_or_404(request, StatusIncident, pk=incident_id, page_id=pk)
         form = IncidentUpdateForm(request.POST)
         if not form.is_valid():
             messages.error(request, "Write an update message.")

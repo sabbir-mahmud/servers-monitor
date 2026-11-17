@@ -8,6 +8,7 @@ from apps.api import ui as api_ui
 from apps.api import views as api_views
 from apps.core import pwa
 from apps.core import views as core_views
+from apps.tenants import views as tenant_views
 from apps.users import views as user_views
 
 
@@ -56,6 +57,8 @@ urlpatterns = [
     path("alerts/", include("apps.alerts.urls")),
     path("apps/", include("apps.monitors.urls")),
     path("audit/", include("apps.audit.urls")),
+    path("", tenant_views.HomeView.as_view(), name="home"),
+    path("", include("apps.tenants.urls")),
     path("", include("apps.fleet.urls")),
 ]
 if settings.OIDC_ENABLED:  # its views read the provider's endpoints when they're created

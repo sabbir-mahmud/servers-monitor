@@ -28,6 +28,9 @@ class Severity(models.TextChoices):
 
 class Alert(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    # Copied from the server or monitor when the alert opens: routing and listing filter
+    # on it without a join, and a channel only ever hears about its own account.
+    account = models.ForeignKey("tenants.Account", on_delete=models.CASCADE, related_name="+")
     # Exactly one of these is set: server alerts come from heartbeats, monitor alerts from
     # application health checks.
     server = models.ForeignKey(
@@ -75,7 +78,7 @@ class Alert(models.Model):
                 condition=Q(resolved_at__isnull=True),
                 name="alert_open_by_server",
             ),
-            models.Index(fields=["-opened_at"], name="alert_opened"),
+            models.Index(fields=["account", "-opened_at"], name="alert_account_opened"),
         ]
 
     def __str__(self):
@@ -107,7 +110,8 @@ class Channel(models.Model):
     database outbox (see delivery.py): retried on failure, never sent twice."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
-    name = models.CharField(max_length=80, unique=True)
+    account = models.ForeignKey("tenants.Account", on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=80)
     kind = models.CharField(max_length=10, choices=ChannelKind.choices)
     is_enabled = models.BooleanField(default=True)
 
@@ -149,6 +153,11 @@ class Channel(models.Model):
             models.CheckConstraint(
                 condition=Q(repeat_minutes__lte=1440), name="channel_repeat_at_most_a_day"
             ),
+            models.UniqueConstraint(
+                fields=["account", "name"],
+                name="channel_name_per_account",
+                violation_error_message="A channel with this name already exists.",
+            ),
         ]
 
     def __str__(self):
@@ -177,6 +186,8 @@ class Channel(models.Model):
         return urlsplit(self.webhook_url).hostname or "—"
 
     def matches(self, alert: Alert) -> bool:
+        if alert.account_id != self.account_id:
+            return False  # never tell one account about another's alerts
         if SEVERITY_RANK.get(alert.severity, 0) < SEVERITY_RANK.get(self.min_severity, 0):
             return False
         if alert.server_id and not self.include_servers:
@@ -201,6 +212,8 @@ class DeliveryEvent(models.TextChoices):
 
 class Delivery(models.Model):
     """One notification to one channel; also the outbox's memory of what was sent."""
+
+    account_path = "channel__account"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
     channel = models.ForeignKey(Channel, on_delete=models.CASCADE, related_name="deliveries")
@@ -236,11 +249,12 @@ class MaintenanceWindow(models.Model):
     notified. Muting a server also mutes the applications linked to it."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    account = models.ForeignKey("tenants.Account", on_delete=models.CASCADE, related_name="+")
     title = models.CharField(max_length=120)
     starts_at = models.DateTimeField()
     ends_at = models.DateTimeField()
     all_targets = models.BooleanField(
-        default=False, help_text="Mute everything: every server and application."
+        default=False, help_text="Mute everything in this account: every server and application."
     )
     servers = models.ManyToManyField("fleet.Server", blank=True, related_name="maintenance")
     monitors = models.ManyToManyField("monitors.Monitor", blank=True, related_name="maintenance")

@@ -5,6 +5,42 @@ All notable changes are recorded here. The format follows
 [Semantic Versioning](https://semver.org/). Releases marked **agents must be upgraded**
 change files under `agent/`: run the upgrade command from each server's page.
 
+## [3.0.0] - unreleased
+
+The project is now **Vigil**: one install serves many separate accounts. Agents are
+unchanged and need no upgrade (`server-monitor-agent`, `smctl` and the relay keys keep their
+names).
+
+### Added
+- **Accounts** of three kinds. **Parent**: children and the people who look after them.
+  **Solo developer**: servers, uptime monitors, jobs, status pages and the API, just you.
+  **Company**: all of that plus a team. Every server, monitor, alert, channel, job, schedule,
+  status page, API token, invitation and audit entry belongs to one account, and accounts
+  never see each other's data (`tests/test_isolation.py`).
+- One login can belong to several accounts with a different role in each (owner, admin,
+  guardian, operator, viewer), with an account switcher in the sidebar. Inviting an
+  address that already has a login asks them to sign in and join.
+- **People**: the children of a family, or company staff, with or without a login. Devices
+  attach to them in the next release.
+- Sign-up (`ALLOW_SIGNUP`) asks for the account kind and makes the person its owner.
+- `OIDC_ACCOUNT`: which company account SSO users join.
+
+### Changed
+- Roles are per account memberships, not Django groups. `manage.py sync_roles` is gone.
+  Migrating puts existing data in a company account named "My company" (rename it under
+  *Account settings*), the first superuser as owner, and keeps everyone's role.
+- Server, monitor, channel, schedule and status page names are unique per account.
+- The **System page** is for superusers only: it covers the whole installation.
+- 2FA is required for owners and admins of solo and company accounts (and superusers),
+  not for parents.
+- Admins can only manage the login (email, password reset, 2FA, deactivation) of people
+  whose only account is theirs; superusers can manage any login.
+- After sign-in you land on Home: servers if the account has them, otherwise people.
+  The server dashboard moved to `/servers/`.
+
+### Removed
+- Sign-up waiting for administrator approval: a new sign-up gets its own empty account.
+
 ## [2.2.0] - unreleased · agents must be upgraded
 
 ### Added

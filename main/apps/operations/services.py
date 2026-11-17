@@ -143,12 +143,35 @@ def create_job(
     note: str = "",
     rollout: dict | None = None,
     schedule=None,
+    account=None,
 ) -> tuple[Job, list]:
     """Queue `action` on every eligible server. Returns (job, [(server, skip reason)]).
     `request` may be a request or a bare user (scheduled runs). With a rolling `rollout`
     ({batch_size, pause_seconds, stop_on_failure, health_gates}) only the first batch is
-    sent; advance_rollouts() releases the rest."""
+    sent; advance_rollouts() releases the rest.
+
+    The job belongs to `account` (default: the request's). Every server must be in it,
+    and permissions are the user's role there: a scheduled run re-checks them, so a
+    schedule's author who lost their role can't keep running shell through it."""
+    from apps.tenants.permissions import bind_account, membership_of
+
     user = getattr(request, "user", request)
+    servers = list(servers)
+    account = account or getattr(request, "account", None)
+    if account is None and servers:
+        # A bare user (scripts, the shell): the servers' own account, if they share one.
+        owners = {s.account_id for s in servers}
+        account = servers[0].account if len(owners) == 1 else None
+    if account is None:
+        raise JobError("No account to run this in.")
+    if any(s.account_id != account.pk for s in servers):
+        raise JobError("Some of those servers aren't in this account.")
+    if user is not None and getattr(user, "pk", None):
+        bound = membership_of(user)
+        if bound is None or bound.account_id != account.pk:
+            bound = bind_account(user, account)
+        if bound is None and not user.is_superuser:
+            raise JobError(f"{user.get_username()} is no longer a member of {account.name}.")
     if action == "shell" and not (user and user.has_perm("operations.run_shell")):
         raise JobError("You do not have permission to run shell commands.")
     if action == "_upgrade" and not (user and user.has_perm("fleet.change_server")):
@@ -171,7 +194,7 @@ def create_job(
     deliver_by = timezone.now() + timedelta(seconds=settings.MONITOR_COMMAND_DELIVERY_SECONDS)
     with transaction.atomic():
         job = Job.objects.create(
-            action=action, args=args, note=note, created_by=user if getattr(user, "pk", None) else None,
+            account=account, action=action, args=args, note=note, created_by=user if getattr(user, "pk", None) else None,
             schedule=schedule,
             **({"strategy": Strategy.ROLLING, "batch_size": batch_size,
                 "pause_seconds": int(rollout.get("pause_seconds") or 0),
@@ -338,12 +361,19 @@ def run_due_schedules(now=None) -> int:
                        "health_gates": list(sched.health_gates.all())}  # fmt: skip
         try:
             create_job(sched.created_by, sched.action, sched.args, list(sched.targets()),
-                       note=f"Scheduled: {sched.name}", rollout=rollout, schedule=sched)  # fmt: skip
+                       note=f"Scheduled: {sched.name}", rollout=rollout, schedule=sched,
+                       account=sched.account)  # fmt: skip
             Schedule.objects.filter(pk=sched.pk).update(last_error="")
             started += 1
         except JobError as exc:
             Schedule.objects.filter(pk=sched.pk).update(last_error=str(exc)[:300])
-            record(None, "schedule.failed", target=sched.name, error=str(exc)[:300])
+            record(
+                None,
+                "schedule.failed",
+                target=sched.name,
+                account=sched.account,
+                error=str(exc)[:300],
+            )
     return started
 
 
@@ -453,14 +483,16 @@ def cancel_command(request, command: Command) -> bool:
     return bool(updated)
 
 
-def upgrade_agents(request, servers, batch_size: int = 0) -> tuple[Job, list]:
+def upgrade_agents(request, servers, batch_size: int = 0, account=None) -> tuple[Job, list]:
     """Upgrade agents to the release this dashboard ships; with `batch_size`, a rolling job
     that stops at the first failure."""
     rollout = None
     if batch_size:
         rollout = {"strategy": Strategy.ROLLING, "batch_size": batch_size, "pause_seconds": 30,
                    "stop_on_failure": True}  # fmt: skip
-    return create_job(request, "_upgrade", {}, servers, note="Agent upgrade", rollout=rollout)
+    return create_job(
+        request, "_upgrade", {}, servers, note="Agent upgrade", rollout=rollout, account=account
+    )
 
 
 def stop_follow(request, command: Command) -> bool:

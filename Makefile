@@ -11,7 +11,7 @@ install: ## Create the virtualenv and install everything
 	python3 -m venv venv
 	venv/bin/pip install -r main/requirements-dev.txt
 
-migrate: ## Apply migrations (also syncs the Viewer/Operator/Admin roles)
+migrate: ## Apply migrations
 	$(MANAGE) migrate
 
 superuser: ## Create an admin account

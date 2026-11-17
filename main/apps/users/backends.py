@@ -2,8 +2,10 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.backends import ModelBackend
 from django.db.models import Q
 
+from apps.tenants.permissions import MembershipPermissionsMixin
 
-class UsernameOrEmailBackend(ModelBackend):
+
+class UsernameOrEmailBackend(MembershipPermissionsMixin, ModelBackend):
     """ModelBackend that also accepts an email address in the username box.
 
     Emails are unique case-insensitively (see User.Meta), so at most one account matches.

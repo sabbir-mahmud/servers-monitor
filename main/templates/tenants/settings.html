@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Account{% endblock %}
+{% block content %}
+<div class="page-head"><div>
+  <h1 class="page-title">{{ account.name }}</h1>
+  <p class="page-sub"><span class="chip">{{ account.get_kind_display }}</span> {{ kind_help }}</p>
+</div></div>
+<div class="row g-3 align-items-start">
+  <div class="col-12 col-xl-7">
+    {% if can_edit %}
+    <form method="post" novalidate>{% csrf_token %}<input type="hidden" name="action" value="save">
+      <div class="card mb-3"><div class="card-header">{% icon "edit" 17 %} Details</div><div class="card-body form-section">
+        {% include "alerts/_field.html" with field=form.name %}
+        <div class="form-text">The account type can't be changed. Create a new account for a different one.</div>
+      </div></div>
+      <button class="btn btn-primary">Save</button>
+    </form>
+    {% else %}
+    <div class="card"><div class="card-body text-body-secondary">Only an owner can change the account's details.</div></div>
+    {% endif %}
+  </div>
+  <div class="col-12 col-xl-5">
+    <div class="card mb-3"><div class="card-header">{% icon "user" 17 %} Owners</div><ul class="list-unstyled mb-0 p-3 d-flex flex-column gap-2">
+      {% for m in owners %}<li>{% include "users/_person.html" with u=m.user %}</li>{% endfor %}
+    </ul><div class="card-footer small text-body-secondary">{{ member_count }} member{{ member_count|pluralize }} in all.</div></div>
+    <div class="card danger-zone"><div class="card-header">{% icon "logout" 17 %} Leave this account</div><div class="card-body">
+      {% if is_last_owner %}
+        <p class="text-body-secondary small mb-0">You're its only owner. Make someone else owner before you leave.</p>
+      {% else %}
+        <p class="text-body-secondary small">You lose access to everything in {{ account.name }}. Someone has to invite you again to come back.</p>
+        <form method="post" data-confirm="Leave {{ account.name }}?">{% csrf_token %}<input type="hidden" name="action" value="leave"><button class="btn btn-sm btn-outline-danger">Leave account</button></form>
+      {% endif %}
+    </div></div>
+  </div>
+</div>
+{% endblock %}

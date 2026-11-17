@@ -9,6 +9,8 @@ from apps.audit.models import AuditLog
 from apps.users import totp, twofactor
 from apps.users.models import RecoveryCode
 
+from .conftest import add_member
+
 pytestmark = pytest.mark.django_db
 
 PASSWORD = "correct horse battery 9"
@@ -45,10 +47,9 @@ def test_window_and_replay():
 
 
 def _user_with_2fa(django_user_model, roles, role="Admin"):
-    from django.contrib.auth.models import Group
 
     user = django_user_model.objects.create_user("ada", password=PASSWORD)
-    user.groups.add(Group.objects.get(name=role))
+    add_member(user, role)
     device = twofactor.start_setup(user)
     codes = twofactor.confirm(device, totp.totp(device.secret, at=time.time() - 30))
     return user, device, codes
@@ -118,10 +119,9 @@ def test_admins_are_forced_into_setup(client, admin_user, viewer, settings):
 
 
 def test_setup_then_disable_needs_password_and_code(client, django_user_model, roles):
-    from django.contrib.auth.models import Group
 
     user = django_user_model.objects.create_user("bo", password=PASSWORD)
-    user.groups.add(Group.objects.get(name="Viewer"))
+    add_member(user, "Viewer")
     client.force_login(user)
     assert "Set up your authenticator" in client.get(reverse("account_2fa")).content.decode()
     device = twofactor.device_for(user)

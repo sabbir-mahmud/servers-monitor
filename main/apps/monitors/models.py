@@ -92,7 +92,10 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
 
 class Monitor(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
-    name = models.CharField(max_length=100, unique=True)
+    account = models.ForeignKey(
+        "tenants.Account", on_delete=models.CASCADE, related_name="monitors"
+    )
+    name = models.CharField(max_length=100)
     kind = models.CharField(max_length=10, choices=Kind.choices, default=Kind.HTTP)
     url = models.URLField(
         max_length=500, blank=True, help_text="The health or home page URL, http(s) only."
@@ -188,6 +191,11 @@ class Monitor(models.Model):
             models.CheckConstraint(
                 condition=models.Q(interval_seconds__gte=30, interval_seconds__lte=3600),
                 name="monitor_interval_range",
+            ),
+            models.UniqueConstraint(
+                fields=["account", "name"],
+                name="monitor_name_per_account",
+                violation_error_message="A monitor with this name already exists.",
             ),
         ]
 

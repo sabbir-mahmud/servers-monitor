@@ -1,6 +1,6 @@
 <div align="center">
 
-# Server Monitor
+# Vigil
 
 **Monitor, operate and deploy to all your servers from one calm dashboard,
 without opening a single inbound port.**
@@ -20,10 +20,10 @@ rolling and scheduled deploys · alerts everywhere · SSO, 2FA and an API · ful
 
 ---
 
-## Why Server Monitor?
+## Why Vigil?
 
 Most self-hosted monitoring makes you choose: either your dashboard is reachable from the
-internet, or every server needs SSH keys, VPNs and open ports. Server Monitor needs neither.
+internet, or every server needs SSH keys, VPNs and open ports. Vigil needs neither.
 
 - **No inbound access, anywhere.** The dashboard and every agent dial *out* to a Redis relay
   (Upstash's free tier works) and meet there. Run the dashboard on a laptop, a Raspberry Pi

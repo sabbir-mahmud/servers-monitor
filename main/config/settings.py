@@ -1,5 +1,5 @@
 """
-Settings for the Server Monitor control plane ("main").
+Settings for the Vigil control plane ("main").
 
 Environment-driven (12-factor): copy `.env.example` to `.env` and override per
 environment. Nothing in this file should need editing between local, staging
@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "apps.core",
+    "apps.tenants",
     "apps.users",
     "apps.audit",
     "apps.fleet",
@@ -62,6 +63,8 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # request.account + the user's permissions in it; before anything checks permissions.
+    "apps.tenants.middleware.CurrentAccountMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django.middleware.csp.ContentSecurityPolicyMiddleware",
@@ -161,6 +164,8 @@ OIDC_OPERATOR_GROUPS = config("OIDC_OPERATOR_GROUPS", default="", cast=Csv())
 OIDC_VIEWER_GROUPS = config("OIDC_VIEWER_GROUPS", default="", cast=Csv())
 OIDC_DEFAULT_ROLE = config("OIDC_DEFAULT_ROLE", default="")  # for people in no mapped group
 OIDC_CREATE_USERS = config("OIDC_CREATE_USERS", default=True, cast=bool)  # no invitation needed
+# The account SSO users join (its slug); default: the oldest company account.
+OIDC_ACCOUNT = config("OIDC_ACCOUNT", default="")
 OIDC_ALLOW_UNVERIFIED_EMAIL = config("OIDC_ALLOW_UNVERIFIED_EMAIL", default=False, cast=bool)
 OIDC_USE_PKCE = True
 OIDC_USERNAME_ALGO = "apps.users.sso.username_for"
@@ -168,7 +173,7 @@ LOGIN_REDIRECT_URL_FAILURE = "/login/?sso=failed"
 if OIDC_ENABLED:
     AUTHENTICATION_BACKENDS.append("apps.users.sso.SSOBackend")
 LOGIN_URL = "login"
-LOGIN_REDIRECT_URL = "fleet:dashboard"
+LOGIN_REDIRECT_URL = "home"
 LOGOUT_REDIRECT_URL = "login"
 
 SESSION_COOKIE_AGE = config("SESSION_COOKIE_AGE", default=60 * 60 * 12, cast=int)
@@ -178,8 +183,8 @@ SESSION_COOKIE_SAMESITE = CSRF_COOKIE_SAMESITE = "Lax"
 # Accounts: invitations (the default way in), password resets, optional self sign-up.
 INVITATION_DAYS = config("INVITATION_DAYS", default=7, cast=int)
 PASSWORD_RESET_TIMEOUT = config("PASSWORD_RESET_TIMEOUT", default=2 * 60 * 60, cast=int)
-# Public sign-up is off: this dashboard can deploy to servers. When on, new accounts wait
-# for an Admin to approve them and start with no access.
+# Public sign-up (off by default). When on, anyone can create a Parent, Solo developer or
+# Company account; it starts empty and sees nothing of any other account.
 ALLOW_SIGNUP = config("ALLOW_SIGNUP", default=False, cast=bool)
 # Admins must sign in with a second factor (authenticator app); everyone else may opt in.
 REQUIRE_2FA_FOR_ADMINS = config("REQUIRE_2FA_FOR_ADMINS", default=True, cast=bool)
@@ -211,7 +216,7 @@ MAILERS = {
         else {"BACKEND": "apps.core.mail.DisabledEmailBackend"}
     )
 }
-DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="Server Monitor <noreply@localhost>")
+DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="Vigil <noreply@localhost>")
 SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
 LOGIN_FAILURE_LIMIT = config("LOGIN_FAILURE_LIMIT", default=6, cast=int)
@@ -293,7 +298,7 @@ AGENT_DIST_DIR = Path(config("AGENT_DIST_DIR", default=str(BASE_DIR.parent / "ag
 # Monitoring behaviour
 # ---------------------------------------------------------------------------#
 
-SITE_NAME = config("SITE_NAME", default="Server Monitor")
+SITE_NAME = config("SITE_NAME", default="Vigil")
 # A server is "late" after this many missed intervals and "offline" after OFFLINE many.
 MONITOR_LATE_AFTER_INTERVALS = config("MONITOR_LATE_AFTER_INTERVALS", default=2, cast=int)
 MONITOR_OFFLINE_AFTER_INTERVALS = config("MONITOR_OFFLINE_AFTER_INTERVALS", default=6, cast=int)
