@@ -2,7 +2,7 @@
 {% load monitor %}
 {% block title %}{{ server }}{% endblock %}
 {% block content %}
-<a class="back-link" href="{% url 'fleet:dashboard' %}">{% icon "arrow-left" 15 %} Servers</a>
+<a class="back-link" href="{% url 'fleet:dashboard' %}">{% icon "arrow-left" 15 %} {{ MACHINES|capfirst }}</a>
 
 {# ---------- Identity ---------- #}
 <header class="card hero mb-3">
@@ -29,7 +29,7 @@
       <div class="dropdown">
         <button class="btn btn-outline-secondary btn-sm btn-icon" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="More actions">{% icon "more" %}</button>
         <div class="dropdown-menu dropdown-menu-end">
-          <a class="dropdown-item" href="{% url 'fleet:server_enroll' server.pk %}">{% icon "terminal" 16 %}<span><span class="d-block">Install / upgrade agent</span><small>Verified command for this server</small></span></a>
+          <a class="dropdown-item" href="{% url 'fleet:server_enroll' server.pk %}">{% icon "terminal" 16 %}<span><span class="d-block">Install / upgrade agent</span><small>Verified command for this {{ MACHINE }}</small></span></a>
           {% if server.agent_outdated and server.can_remote_upgrade %}
           <form method="post" action="{% url 'fleet:server_upgrade' server.pk %}" data-confirm="Upgrade {{ server.name }}'s agent from v{{ server.agent_version }}? It restarts once.">{% csrf_token %}
             <button class="dropdown-item">{% icon "download" 16 %}<span><span class="d-block">Upgrade agent now</span><small>From v{{ server.agent_version }}, verified, no SSH</small></span></button>
@@ -40,7 +40,7 @@
           </form>
           {% if perms.fleet.delete_server %}
           <div class="dropdown-divider"></div>
-          <a class="dropdown-item text-danger-soft" href="{% url 'fleet:server_delete' server.pk %}">{% icon "trash" 16 %}<span><span class="d-block">Delete server</span><small>Remove it and its history</small></span></a>
+          <a class="dropdown-item text-danger-soft" href="{% url 'fleet:server_delete' server.pk %}">{% icon "trash" 16 %}<span><span class="d-block">Delete {{ MACHINE }}</span><small>Remove it and its history</small></span></a>
           {% endif %}
         </div>
       </div>
@@ -59,7 +59,7 @@
 {% include "alerts/_maintenance_banner.html" with window=maintenance_window %}
 {% if not server.signing_salt %}
 <div class="alert alert-warning mb-3" role="alert">{% icon "shield" %}
-  <div class="flex-grow-1"><strong>Commands to this server aren't signed.</strong> It was enrolled before message signing, so anyone with your Redis admin password could send it allowlisted commands. Rotate its credentials, then run <code>sudo smctl connect</code> on the server with the new connection string.</div>
+  <div class="flex-grow-1"><strong>Commands to this {{ MACHINE }} aren't signed.</strong> It was enrolled before message signing, so anyone with your Redis admin password could send it allowlisted commands. Rotate its credentials, then run <code>sudo smctl connect</code> on the server with the new connection string.</div>
   {% if can_admin %}<form method="post" action="{% url 'fleet:server_rotate_token' server.pk %}" class="align-self-center" data-confirm="Rotate credentials for {{ server.name }}? It disconnects until you run smctl connect on the server.">{% csrf_token %}<button class="btn btn-sm btn-outline-secondary text-nowrap">{% icon "key" %} Rotate now</button></form>{% endif %}
 </div>
 {% endif %}
@@ -122,7 +122,7 @@
               </form>{% endif %}</td>
           </tr>
         {% empty %}
-          <tr><td colspan="4" class="empty-small">No services yet. On the server, run <code>sudo smctl detect --apply</code></td></tr>
+          <tr><td colspan="4" class="empty-small">No services yet. On the {{ MACHINE }}, run <code>sudo smctl detect --apply</code></td></tr>
         {% endfor %}
         </tbody>
       </table></div>
@@ -219,7 +219,7 @@
         </form>
       {% endfor %}
       </div>
-    {% else %}<p class="text-body-secondary small mb-0">No actions yet. On the server, add one with<br><code>sudo smctl action add deploy -- /opt/deploy/deploy.sh</code></p>{% endif %}
+    {% else %}<p class="text-body-secondary small mb-0">No actions yet. On the {{ MACHINE }}, add one with<br><code>sudo smctl action add deploy -- /opt/deploy/deploy.sh</code></p>{% endif %}
     {% if can_shell and server.shell_enabled %}
       <form class="shell-form" hx-post="{% url 'operations:job_create' %}" hx-target="#action-output">
         <input type="hidden" name="servers" value="{{ server.pk }}"><input type="hidden" name="action" value="shell">
@@ -250,13 +250,13 @@
     <div id="log-output" class="mt-3 flex-grow-1">
       <div class="terminal-empty">{% icon "file" 22 %}<span>Pick a log and tail it{% if server.can_follow_logs %}, or follow new lines live{% endif %}. Output streams here.</span></div>
     </div>
-    {% else %}<p class="text-body-secondary small mb-0">No logs yet. On the server, run<br><code>sudo smctl log add app /var/log/app.log</code></p>{% endif %}
+    {% else %}<p class="text-body-secondary small mb-0">No logs yet. On the {{ MACHINE }}, run<br><code>sudo smctl log add app /var/log/app.log</code></p>{% endif %}
   </div></div></div>
 </div>
 {% endif %}
 
 {% with apps=server.monitors.all %}{% if apps %}
-<div id="apps" class="anchor card mb-3"><div class="card-header">{% icon "globe" 17 %} Applications on this server
+<div id="apps" class="anchor card mb-3"><div class="card-header">{% icon "globe" 17 %} Applications on this {{ MACHINE }}
   <div class="card-actions"><a class="btn btn-sm btn-link" href="{% url 'monitors:list' %}">All applications {% icon "chevron" %}</a></div></div>
   <div class="table-responsive"><table class="table table-sm table-hover align-middle">
     <thead><tr><th>Application</th><th>Status</th><th class="num">Response</th><th class="num">Checked</th></tr></thead>
@@ -278,7 +278,7 @@
     {% for c in recent_commands %}
       <tr><td class="text-body-secondary text-nowrap">{{ c.created_at|ago }}</td><td class="mono">{{ c.job.summary }}</td><td>{% command_badge c.status %}</td>
         <td class="num">{{ c.exit_code|default_if_none:"—" }}</td><td class="text-end"><a class="btn btn-sm btn-link" href="{% url 'operations:command_detail' c.pk %}">Output {% icon "chevron" %}</a></td></tr>
-    {% empty %}<tr><td colspan="5" class="empty">{% icon "layers" 26 %}<div class="empty-title">Nothing run yet</div><div>Actions, restarts and log tails on this server show up here.</div></td></tr>{% endfor %}
+    {% empty %}<tr><td colspan="5" class="empty">{% icon "layers" 26 %}<div class="empty-title">Nothing run yet</div><div>Actions, restarts and log tails on this {{ MACHINE }} show up here.</div></td></tr>{% endfor %}
     </tbody>
   </table></div>
 </div>

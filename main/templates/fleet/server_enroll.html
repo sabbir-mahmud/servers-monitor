@@ -6,7 +6,7 @@
 <div class="page-head">
   <div>
     <h1 class="page-title">Connect {{ server }}</h1>
-    <p class="page-sub">Run one command on the server. No SSH, no open ports and no public dashboard: the agent and this dashboard both dial out to your Redis relay and meet there.</p>
+    <p class="page-sub">Run one command on the {{ MACHINE }}. No SSH, no open ports and no public dashboard: the agent and this dashboard both dial out to your Redis relay and meet there.</p>
   </div>
 </div>
 <div class="enroll">
@@ -31,12 +31,12 @@
 {% endpartialdef %}
 
 {% if agent_url %}
-<div class="alert alert-warning" role="alert">{% icon "alert" %}<div><strong>Copy the command now.</strong> It holds this server's own Redis password, shown once and never stored here. Lost it? Rotate the credentials.</div></div>
+<div class="alert alert-warning" role="alert">{% icon "alert" %}<div><strong>Copy the command now.</strong> It holds this {{ MACHINE }}'s own Redis password, shown once and never stored here. Lost it? Rotate the credentials.</div></div>
 {% endif %}
 
 <div class="card mb-3"><div class="card-body p-4"><div class="steps">
   <div class="step"><span class="step-num"></span><div>
-    <h2>Run this on the server</h2>
+    <h2>Run this on the {{ MACHINE }}</h2>
     {% if dist_error %}
     <div class="alert alert-danger" role="alert">{% icon "alert" %}<div><b>Can't build a verified install command.</b> {{ dist_error }}. The dashboard needs the repo's <code>agent/</code> folder (set <code>AGENT_DIST_DIR</code>).</div></div>
     {% elif agent_url %}
@@ -44,10 +44,10 @@
     <div class="copy-block"><pre class="output" id="install">{{ install_command }}</pre>
       <button type="button" class="btn btn-sm copy-btn" data-copy="#install">{% icon "copy" %} <span data-copy-label>Copy</span></button></div>
     <h3 class="h6 mt-4 mb-2">When it asks, paste this connection string</h3>
-    <p class="small text-body-secondary mb-2">It's typed at a hidden prompt so it never lands in shell history or <code>ps</code>. It holds this server's Redis password and its command-signing key.</p>
+    <p class="small text-body-secondary mb-2">It's typed at a hidden prompt so it never lands in shell history or <code>ps</code>. It holds this {{ MACHINE }}'s Redis password and its command-signing key.</p>
     <div class="token-box"><code id="token" class="fs-6 text-break">{{ agent_url }}</code>
       <button type="button" class="btn btn-sm btn-outline-secondary" data-copy="#token">{% icon "copy" %} <span data-copy-label>Copy</span></button></div>
-    <p class="small muted mt-2 mb-0">Already installed? Run <code>sudo smctl connect</code> on the server and paste it there instead.</p>
+    <p class="small muted mt-2 mb-0">Already installed? Run <code>sudo smctl connect</code> on the {{ MACHINE }} and paste it there instead.</p>
     {% else %}
     <p class="mb-2">The connection string was already shown. To <b>upgrade or repair</b> the agent (keeps its config):</p>
     <div class="copy-block"><pre class="output" id="upgrade">{{ upgrade_command }}</pre>
@@ -61,7 +61,7 @@
 
   <div class="step"><span class="step-num"></span><div>
     <h2>Choose what the dashboard can do there</h2>
-    <p>The server decides what it allows; the dashboard can only ask. Use <code>smctl</code> on the server, and the change shows up here with the next heartbeat.</p>
+    <p>The {{ MACHINE }} decides what it allows; the dashboard can only ask. Use <code>smctl</code> on the {{ MACHINE }}, and the change shows up here with the next heartbeat.</p>
 <pre class="output smctl-cheats"><span class="c"># one-click deploy (runs your script; --sudo runs it as root)</span>
 sudo smctl action add deploy -d "Pull and restart" -- /opt/deploy/deploy.sh
 

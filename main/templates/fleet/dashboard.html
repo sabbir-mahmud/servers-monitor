@@ -1,20 +1,20 @@
 {% extends "base.html" %}
 {% load monitor %}
-{% block title %}Servers{% endblock %}
+{% block title %}{{ MACHINES|capfirst }}{% endblock %}
 {% block content %}
 <div class="page-head">
   <div>
-    <h1 class="page-title">Servers</h1>
+    <h1 class="page-title">{{ MACHINES|capfirst }}</h1>
     <p class="page-sub">Live health across your fleet. <span class="live-badge ms-1"><span class="dot"></span>Updates every 10s</span></p>
   </div>
   <div class="page-actions">
-    {% if perms.operations.add_job %}<a class="btn btn-outline-secondary" href="{% url 'operations:job_create' %}">{% icon "play" %} Run on servers</a>{% endif %}
-    {% if perms.fleet.add_server %}<a class="btn btn-primary" href="{% url 'fleet:server_create' %}">{% icon "plus" %} Add server</a>{% endif %}
+    {% if perms.operations.add_job %}<a class="btn btn-outline-secondary" href="{% url 'operations:job_create' %}">{% icon "play" %} Run on {{ MACHINES }}</a>{% endif %}
+    {% if perms.fleet.add_server %}<a class="btn btn-primary" href="{% url 'fleet:server_create' %}">{% icon "plus" %} Add {{ MACHINE }}</a>{% endif %}
   </div>
 </div>
 
 <form class="toolbar" method="get" role="search" hx-get="{% url 'fleet:dashboard' %}" hx-target="#fleet" hx-swap="outerHTML" hx-push-url="true" hx-trigger="change, keyup changed delay:300ms from:input[name=q]">
-  <div class="input-icon">{% icon "search" 16 %}<input class="form-control" type="search" name="q" placeholder="Search servers" value="{{ filters.q|default:'' }}" aria-label="Search"></div>
+  <div class="input-icon">{% icon "search" 16 %}<input class="form-control" type="search" name="q" placeholder="Search {{ MACHINES }}" value="{{ filters.q|default:'' }}" aria-label="Search"></div>
   <select class="form-select" name="environment" aria-label="Environment">
     <option value="">All environments</option>
     {% for value, label in environments %}<option value="{{ value }}" {% if filters.environment == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
@@ -32,7 +32,7 @@
 {% partialdef fleet inline %}
 <div id="fleet" hx-get="{{ request.get_full_path }}" hx-trigger="every 10s" hx-swap="outerHTML">
   <div class="stat-grid">
-    <div class="stat"><div class="stat-label">{% icon "server" 15 %} Total servers</div><div class="stat-value">{{ summary.total }}</div></div>
+    <div class="stat"><div class="stat-label">{% icon "server" 15 %} Total {{ MACHINES }}</div><div class="stat-value">{{ summary.total }}</div></div>
     <div class="stat"><div class="stat-label"><span class="dot dot-good"></span> Online</div><div class="stat-value">{{ summary.online }}</div></div>
     <div class="stat"><div class="stat-label"><span class="dot dot-warning"></span> Late</div><div class="stat-value">{{ summary.late }}</div></div>
     <div class="stat"><div class="stat-label"><span class="dot dot-critical"></span> Offline</div><div class="stat-value">{{ summary.offline }}</div></div>
@@ -42,7 +42,7 @@
   <div class="card"><div class="table-responsive">
     <table class="table table-hover align-middle">
       <thead><tr>
-        <th>Server</th><th>Health</th><th>CPU</th><th>Memory</th><th>Disk</th>
+        <th>{{ MACHINE|capfirst }}</th><th>Health</th><th>CPU</th><th>Memory</th><th>Disk</th>
         <th class="num">Load</th><th class="num">Network</th><th class="num d-none d-xxl-table-cell">Uptime</th><th class="num">Last report</th>
       </tr></thead>
       <tbody>
@@ -64,8 +64,8 @@
       {% empty %}
         <tr><td colspan="9" class="empty">
           {% icon "server" 28 %}
-          <div class="empty-title">No servers match</div>
-          <div>{% if perms.fleet.add_server %}Try a different filter, or <a href="{% url 'fleet:server_create' %}">add your first server</a>.{% else %}Try a different filter.{% endif %}</div>
+          <div class="empty-title">No {{ MACHINES }} match</div>
+          <div>{% if perms.fleet.add_server %}Try a different filter, or <a href="{% url 'fleet:server_create' %}">add your first {{ MACHINE }}</a>.{% else %}Try a different filter.{% endif %}</div>
         </td></tr>
       {% endfor %}
       </tbody>

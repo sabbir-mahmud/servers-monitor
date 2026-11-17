@@ -359,3 +359,24 @@ def test_login_without_an_account_is_sent_to_create_one(client, django_user_mode
     client.force_login(user)
     assert client.get(reverse("fleet:dashboard"))["Location"] == reverse("tenants:create")
     assert client.get(reverse("account")).status_code == 200  # own login still manageable
+
+
+def test_solo_accounts_call_servers_devices_and_have_no_maintenance(client, django_user_model):
+    from apps.tenants.models import Kind
+
+    account = make_account("Just me", kind=Kind.SOLO)
+    dev = django_user_model.objects.create_user("dev", "dev@example.com", "pw-x-1234567")
+    add_member(dev, "owner", account)
+    client.force_login(dev)
+    page = client.get(reverse("fleet:dashboard")).content.decode()
+    assert '<h1 class="page-title">Devices</h1>' in page and "Add device" in page
+    assert '<span class="side-text">Devices</span>' in page
+    assert '<span class="side-text">Applications</span>' in page
+    assert "Maintenance" not in page and reverse("alerts:maintenance") not in page
+    assert client.get(reverse("alerts:maintenance")).status_code in (403, 404)
+
+
+def test_companies_still_say_servers_and_keep_maintenance(client, admin_user):
+    client.force_login(admin_user)
+    page = client.get(reverse("fleet:dashboard")).content.decode()
+    assert '<h1 class="page-title">Servers</h1>' in page and "Maintenance" in page

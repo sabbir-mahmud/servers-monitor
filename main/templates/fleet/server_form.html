@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% load monitor %}
-{% block title %}{% if object %}Edit {{ object }}{% else %}Add server{% endif %}{% endblock %}
+{% block title %}{% if object %}Edit {{ object }}{% else %}Add {{ MACHINE }}{% endif %}{% endblock %}
 {% block content %}
-<a class="back-link" href="{% if object %}{% url 'fleet:server_detail' object.pk %}{% else %}{% url 'fleet:dashboard' %}{% endif %}">{% icon "arrow-left" 15 %} {% if object %}{{ object }}{% else %}Servers{% endif %}</a>
+<a class="back-link" href="{% if object %}{% url 'fleet:server_detail' object.pk %}{% else %}{% url 'fleet:dashboard' %}{% endif %}">{% icon "arrow-left" 15 %} {% if object %}{{ object }}{% else %}{{ MACHINES|capfirst }}{% endif %}</a>
 <div class="page-head">
   <div>
-    <h1 class="page-title">{% if object %}Edit {{ object }}{% else %}Add server{% endif %}</h1>
-    {% if not object %}<p class="page-sub">After you create the server you'll get a one-line install command and its agent token.</p>{% endif %}
+    <h1 class="page-title">{% if object %}Edit {{ object }}{% else %}Add {{ MACHINE }}{% endif %}</h1>
+    {% if not object %}<p class="page-sub">After you create the {{ MACHINE }} you'll get a one-line install command and its agent token.</p>{% endif %}
   </div>
 </div>
 <div class="card" style="max-width: 44rem"><div class="card-body p-4">

@@ -33,7 +33,7 @@
         </span>
         <span class="brand-text">
           <span class="brand-name">{% if SITE_NAME == "NexGuard" %}Nex<span class="brand-accent">Guard</span>{% else %}{{ SITE_NAME }}{% endif %}</span>
-          {% if ACCOUNT %}<span class="brand-sub"><span class="text-truncate">{{ ACCOUNT.name }}</span><span class="brand-kind">{{ ACCOUNT.get_kind_display }}</span></span>{% endif %}
+          {% if ACCOUNT %}<span class="brand-sub"><span class="text-truncate">{{ ACCOUNT.name }}</span><span class="brand-kind">{% if ACCOUNT.kind == "solo" %}Solo{% else %}{{ ACCOUNT.get_kind_display }}{% endif %}</span></span>{% endif %}
         </span>
       </a>
       <button class="icon-btn sidebar-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#sidenav" aria-controls="sidenav" aria-expanded="false" aria-label="Menu">{% icon "menu" 20 %}</button>
@@ -45,7 +45,7 @@
         <a class="side-link {% if url_name == 'people' or 'person' in url_name or ns == 'devices' %}active{% endif %}" href="{% url 'tenants:people' %}" {% if url_name == 'people' %}aria-current="page"{% endif %}>{% icon "users" %}<span class="side-text">{{ ACCOUNT.people_label }}</span>
           {% if NAV.people_attention %}<span class="nav-badge is-critical" title="{{ NAV.people_attention }} need a look">{{ NAV.people_attention }}</span>{% elif NAV.people %}<span class="nav-badge">{{ NAV.people }}</span>{% endif %}</a>
         {% endif %}
-        {% if perms.fleet.view_server %}<a class="side-link {% if ns == 'fleet' %}active{% endif %}" href="{% url 'fleet:dashboard' %}" {% if ns == 'fleet' %}aria-current="page"{% endif %}>{% icon "server" %}<span class="side-text">Servers</span>
+        {% if perms.fleet.view_server %}<a class="side-link {% if ns == 'fleet' %}active{% endif %}" href="{% url 'fleet:dashboard' %}" {% if ns == 'fleet' %}aria-current="page"{% endif %}>{% icon "server" %}<span class="side-text">{{ MACHINES|capfirst }}</span>
           {% if NAV.servers_offline %}<span class="nav-badge is-critical" title="{{ NAV.servers_offline }} offline">{{ NAV.servers_offline }}</span>{% elif NAV.servers %}<span class="nav-badge">{{ NAV.servers }}</span>{% endif %}</a>{% endif %}
         {% if perms.monitors.view_monitor %}<a class="side-link {% if ns == 'monitors' %}active{% endif %}" href="{% url 'monitors:list' %}" {% if ns == 'monitors' %}aria-current="page"{% endif %}>{% icon "globe" %}<span class="side-text">Applications</span>
           {% if NAV.apps_down %}<span class="nav-badge is-critical" title="{{ NAV.apps_down }} down">{{ NAV.apps_down }}</span>{% elif NAV.apps %}<span class="nav-badge">{{ NAV.apps }}</span>{% endif %}</a>{% endif %}
@@ -94,7 +94,7 @@
       {% endif %}
       {% if RELAY_DOWN %}
         <div class="alert alert-warning" role="alert">{% icon "alert" %}
-          <div><strong>The relay process isn't running.</strong> Agents keep reporting, but their heartbeats and job output wait in Redis until it starts: servers look offline and jobs don't finish here.
+          <div><strong>The relay process isn't running.</strong> Agents keep reporting, but their heartbeats and job output wait in Redis until it starts: {{ MACHINES }} look offline and jobs don't finish here.
             Start it with <code>make relay</code> (or <code>make dev</code>), <code>docker compose up -d relay</code>, or <code>systemctl start server-monitor-relay</code>.</div>
         </div>
       {% endif %}

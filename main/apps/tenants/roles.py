@@ -85,7 +85,6 @@ FEATURES_BY_KIND = {
         "api",
         "alerts",
         "notifications",
-        "maintenance",
         "audit",
     },  # fmt: skip
     Kind.COMPANY: {

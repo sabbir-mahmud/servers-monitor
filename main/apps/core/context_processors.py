@@ -37,6 +37,8 @@ def site(request):
     ctx["RELAY_DOWN"] = _cares_about_servers(user, account) and not relay.is_alive()
     ctx["INSECURE_TRANSPORT"] = _insecure_transport(request, user)
     ctx["ACCOUNT"] = account
+    ctx["MACHINE"] = account.machine_label if account is not None else "server"
+    ctx["MACHINES"] = ctx["MACHINE"] + "s"
     ctx["MEMBERSHIP"] = getattr(request, "membership", None)
     ctx["MEMBERSHIPS"] = getattr(request, "memberships", [])
     ctx["NAV"] = _nav_counts(user, account) if account is not None else {}

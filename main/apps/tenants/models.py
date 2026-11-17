@@ -60,6 +60,12 @@ class Account(models.Model):
         return "People" if self.kind == Kind.FAMILY else "Staff"
 
     @property
+    def machine_label(self) -> str:
+        """What the agent's machines are called: a solo developer's laptop and VPS are
+        "devices"; a company runs "servers"."""
+        return "device" if self.kind == Kind.SOLO else "server"
+
+    @property
     def person_label(self) -> str:
         return "person" if self.kind == Kind.FAMILY else "staff member"
 

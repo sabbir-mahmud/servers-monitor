@@ -170,7 +170,8 @@ class ServerUpdateView(StaffViewMixin, AccountScopedMixin, UpdateView):
         services.server_settings_changed(self.object, form.changed_data)
         if "is_enabled" in form.changed_data and not self.object.is_enabled:
             resolve_all(self.object)
-        messages.success(self.request, "Server updated. The agent picks up the change right away.")
+        word = self.request.account.machine_label.capitalize()
+        messages.success(self.request, f"{word} updated. The agent picks up the change right away.")
         return response
 
     def get_success_url(self):
