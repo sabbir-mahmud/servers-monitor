@@ -5,7 +5,7 @@
 <div class="page-head">
   <div>
     <h1 class="page-title">{{ ACCOUNT.people_label }}</h1>
-    <p class="page-sub">{% if family %}Who's online, where their phone was last, and anything that needs you.{% else %}Staff and the company devices assigned to them.{% endif %}</p>
+    <p class="page-sub">{% if family %}Your family's devices: who's online, where their phone was last, and anything that needs you.{% else %}Staff and the company devices assigned to them.{% endif %}</p>
   </div>
   {% if perms.tenants.add_person and people %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'tenants:person_create' %}">{% icon "plus" %} Add {{ ACCOUNT.person_label }}</a></div>{% endif %}
 </div>
@@ -63,7 +63,7 @@
         <span class="avatar avatar-tone-{{ p.pk|avatar_tone }}" aria-hidden="true">{{ p.initials }}</span>
         <div class="min-w-0">
           <a class="prow-link" href="{% url 'tenants:person_detail' p.pk %}">{{ p.name }}</a>
-          {% if p.notes %}<div class="prow-note text-truncate">{{ p.notes }}</div>{% endif %}
+          {% if family or p.notes %}<div class="prow-note text-truncate">{% if family %}{{ p.get_kind_display }}{% if p.notes %} · {% endif %}{% endif %}{{ p.notes }}</div>{% endif %}
         </div>
       </div>
       {% if show_devices %}
@@ -122,10 +122,10 @@
 <div class="card onboarding">
   <div class="onboarding-body">
     <span class="onboarding-mark" aria-hidden="true">{% icon "users" 26 %}</span>
-    <h2 class="onboarding-title">{% if family %}Start with your children{% else %}Start with your staff{% endif %}</h2>
+    <h2 class="onboarding-title">{% if family %}Start with your family{% else %}Start with your staff{% endif %}</h2>
     <p class="onboarding-sub">{% if family %}Three steps, about two minutes per device. Nothing happens on a device until you pair it on the device itself.{% else %}Add people, then assign and pair their company devices.{% endif %}</p>
     <ol class="onboarding-steps">
-      <li><span class="onboarding-num">1</span><div><strong>Add {% if family %}a child{% else %}a staff member{% endif %}</strong><span>Just a name. Email is optional.</span></div></li>
+      <li><span class="onboarding-num">1</span><div><strong>Add {% if family %}someone{% else %}a staff member{% endif %}</strong><span>{% if family %}A child, your partner or another relative. Just a name.{% else %}Just a name. Email is optional.{% endif %}</span></div></li>
       <li><span class="onboarding-num">2</span><div><strong>Add their devices</strong><span>Phones, tablets, Windows, Mac or Linux.</span></div></li>
       <li><span class="onboarding-num">3</span><div><strong>Pair on the device</strong><span>Enter the code in the {{ SITE_NAME }} app. It never expires.</span></div></li>
     </ol>

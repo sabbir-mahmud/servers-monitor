@@ -215,7 +215,7 @@ class PersonListView(StaffViewMixin, AccountScopedMixin, ListView):
 
 
 class PersonDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
-    """One child (or staff member) and their devices."""
+    """One person (child, partner, relative or staff member) and their devices."""
 
     permission_required = "tenants.view_person"
     template_name = "tenants/person_detail.html"

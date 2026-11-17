@@ -390,7 +390,9 @@ def test_computers_without_location_skip_the_history_card(client, parent, sara):
     token = api_pair(client, code, platform="windows").json()["token"]
     api_checkin(client, token, {})
     page = client.get(reverse("devices:detail", args=[device.pk])).content.decode()
-    assert "Location history" not in page and "Computers don't share" in page
+    # No location section at all for a computer: nothing to show and nothing to do.
+    assert "Location history" not in page and "No location yet" not in page
+    assert "About this device" in page and "Remove device" in page
 
 
 # --------------------------------------------------------------------------- the people list
@@ -429,3 +431,15 @@ def test_child_with_only_a_computer_gets_a_short_location_hint(client, parent, s
     assert "Computers don&#x27;t share it" in page or "Computers don't share it" in page
     assert f"?person={sara.pk}&amp;platform=ios" in page  # offer to add a phone
     assert "Not on computers" in page and "alert-line" not in page
+
+
+def test_a_family_can_add_a_partner_but_not_staff(client, parent, family):
+    client.force_login(parent)
+    page = client.get(reverse("tenants:person_create")).content.decode()
+    assert "Spouse or partner" in page and "Staff member" not in page
+    client.post(reverse("tenants:person_create"), {"kind": "partner", "name": "Nadia"})
+    assert Person.objects.get(name="Nadia").kind == "partner"
+    resp = client.post(reverse("tenants:person_create"), {"kind": "staff", "name": "Bob"})
+    assert resp.status_code == 200 and not Person.objects.filter(name="Bob").exists()
+    page = client.get(reverse("tenants:people")).content.decode()
+    assert '<h1 class="page-title">People</h1>' in page and "Spouse or partner" in page

@@ -10,8 +10,8 @@
     <h1 class="page-title mb-1">{{ device.name }}</h1>
     <div class="profile-sub">
       {% device_badge device.state %}
-      <span>{{ device.model|default:device.get_platform_display }}{% if device.os_version %} · {{ device.os_version }}{% endif %}</span>
-      {% if device.person %}<a href="{% url 'tenants:person_detail' device.person.pk %}">{% icon "user" 13 %} {{ device.person.name }}</a>{% else %}<span>Shared</span>{% endif %}
+      <span>{{ device.get_platform_display }}{% if device.os_version %} · {{ device.os_version }}{% endif %}</span>
+      {% if device.person %}<a href="{% url 'tenants:person_detail' device.person.pk %}">{% icon "user" 13 %} {{ device.person.name }}</a>{% else %}<span>Shared device</span>{% endif %}
     </div>
   </div>
   <div class="page-actions">
@@ -21,45 +21,64 @@
 </header>
 
 {% if not device.is_paired %}
-<div class="notice notice-info" role="status">{% icon "qr" 20 %}<div><strong>Not paired yet.</strong> Enter a pairing code in the NexGuard app on the {{ device.get_platform_display }}. {% if perms.devices.add_device %}<a href="{% url 'devices:pair' device.pk %}">Show pairing steps</a>{% endif %}</div></div>
+<a class="alert-line is-info" href="{% url 'devices:pair' device.pk %}">{% icon "qr" 18 %}<span class="min-w-0"><strong>Not paired yet.</strong> Enter the pairing code in the {{ SITE_NAME }} app on the {{ device.get_platform_display }}.</span><span class="alert-line-cta">Pairing steps {% icon "chevron" 14 %}</span></a>
 {% elif device.state == "offline" %}
-<div class="notice notice-critical" role="status">{% icon "alert" 20 %}<div><strong>Not heard from since {{ device.last_seen_at|date:"D j M, H:i" }}</strong> ({{ device.last_seen_at|ago }}). It may be switched off, out of signal or battery, or the app was removed.{% if perms.devices.add_device %} Reset or replaced? <a href="{% url 'devices:pair' device.pk %}">Pair it again</a>.{% endif %}</div></div>
+<div class="alert-line is-critical" role="status">{% icon "alert" 18 %}<span class="min-w-0"><strong>Offline since {{ device.last_seen_at|date:"D j M, H:i" }}</strong> ({{ device.last_seen_at|ago }}). Switched off, out of signal or battery, or the app was removed.</span>
+  {% if perms.devices.add_device %}<a class="alert-line-cta" href="{% url 'devices:pair' device.pk %}">Reset? Pair again {% icon "chevron" 14 %}</a>{% endif %}</div>
 {% elif device.battery_low %}
-<div class="notice notice-warning" role="status">{% icon "battery" 20 %}<div><strong>Battery at {{ device.battery_percent }}%</strong> and not charging. It will go quiet when it runs out.</div></div>
+<div class="alert-line is-warning" role="status">{% icon "battery" 18 %}<span class="min-w-0"><strong>Battery at {{ device.battery_percent }}%</strong> and not charging. It goes quiet when it runs out.</span></div>
 {% endif %}
 
-<div class="profile-grid device-layout">
-  <div class="profile-main">
-    <section class="card map-card" aria-labelledby="loc-title">
-      <div class="map-card-head">
-        <div class="min-w-0">
-          <h2 class="card-title-lg" id="loc-title">{% icon "map-pin" 17 %} Last location</h2>
-          {% if device.has_location %}<p class="map-card-sub">{{ device.location_at|ago }} · {{ device.location_at|date:"D j M, H:i" }}{% if device.location_accuracy_m is not None %} · within {{ device.location_accuracy_m }} m{% endif %}</p>{% endif %}
-        </div>
-        {% if device.has_location %}<a class="btn btn-sm btn-outline-secondary flex-none" href="https://www.google.com/maps/search/?api=1&query={{ device.latitude }},{{ device.longitude }}" target="_blank" rel="noopener noreferrer">Google Maps ↗</a>{% endif %}
-      </div>
+<section class="statbar" aria-label="Right now">
+  <div class="statbar-item">
+    <span class="statbar-label">Last online</span>
+    <span class="statbar-value {% if device.state == 'online' %}text-good{% elif device.state == 'offline' %}text-critical{% endif %}">{% if device.state == "online" %}Now{% elif device.last_seen_at %}{{ device.last_seen_at|ago }}{% else %}Never{% endif %}</span>
+    <span class="statbar-sub">{% if device.is_paired %}Checks in every {{ device.checkin_seconds|every }}{% else %}After pairing{% endif %}</span>
+  </div>
+  <div class="statbar-item">
+    <span class="statbar-label">Battery</span>
+    {% if device.battery_percent is not None %}
+    <span class="statbar-value {% if device.battery_low %}text-critical{% endif %}">{{ device.battery_percent }}%</span>
+    <div class="vbar {% if device.battery_low %}is-low{% elif device.charging %}is-good{% endif %}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ device.battery_percent }}" aria-label="Battery"><span style="width: {{ device.battery_percent }}%"></span></div>
+    <span class="statbar-sub">{% if device.charging %}Charging{% else %}On battery{% endif %}</span>
+    {% else %}<span class="statbar-value">—</span><span class="statbar-sub">{% if device.is_paired %}No battery (a desktop?){% else %}After pairing{% endif %}</span>{% endif %}
+  </div>
+  <div class="statbar-item">
+    <span class="statbar-label">Storage</span>
+    {% if device.storage_used_percent is not None %}
+    <span class="statbar-value">{{ device.storage_free|filesizeformat }} <span class="statbar-of">free</span></span>
+    <div class="vbar {% if device.storage_used_percent >= 90 %}is-low{% endif %}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ device.storage_used_percent }}" aria-label="Storage used"><span style="width: {{ device.storage_used_percent }}%"></span></div>
+    <span class="statbar-sub">{{ device.storage_used_percent }}% of {{ device.storage_total|filesizeformat }} used</span>
+    {% else %}<span class="statbar-value">—</span><span class="statbar-sub">Not reported</span>{% endif %}
+  </div>
+  <div class="statbar-item">
+    <span class="statbar-label">Network</span>
+    <span class="statbar-value">{% if device.network == "wifi" %}Wi-Fi{% elif device.network == "none" %}No connection{% elif device.network %}{{ device.network|title }}{% else %}—{% endif %}</span>
+    <span class="statbar-sub text-truncate">{% if device.network_name %}{{ device.network_name }}{% elif device.last_ip %}from {{ device.last_ip }}{% else %}Not reported{% endif %}</span>
+  </div>
+</section>
+
+{% if device.has_location %}
+<section class="card loc-card" aria-labelledby="where-title">
+  <div class="map-card-head">
+    <div class="min-w-0">
+      <h2 class="card-title-lg" id="where-title">{% icon "map-pin" 17 %} Last location</h2>
+      <p class="map-card-sub">{{ device.location_at|ago }} · {{ device.location_at|date:"D j M, H:i" }}{% if device.location_accuracy_m is not None %} · within {{ device.location_accuracy_m }} m{% endif %}</p>
+    </div>
+    <a class="btn btn-sm btn-outline-secondary flex-none" href="https://www.google.com/maps/search/?api=1&amp;query={{ device.latitude }},{{ device.longitude }}" target="_blank" rel="noopener noreferrer">Google Maps ↗</a>
+  </div>
+  <div class="loc-split">
+    <div class="loc-map">
       {% if map %}
         {% with initials=device.person.initials|default:"•" tone=device.person_id|avatar_tone %}
         {% include "devices/_map.html" with m=map label="Map of "|add:device.name|add:"'s last location" href=device|map_link %}
         {% endwith %}
-      {% elif device.has_location %}
-        <div class="map-empty"><div><div class="fw-semibold num">{{ device.latitude }}, {{ device.longitude }}</div><a href="{{ device|map_link }}" target="_blank" rel="noopener noreferrer">Open map ↗</a></div></div>
       {% else %}
-        <div class="map-empty">
-          <span class="map-empty-icon">{% icon "map-pin" 22 %}</span>
-          <div><div class="fw-semibold">No location yet</div>
-          <p class="small text-body-secondary mb-0">{% if device.is_phone %}It appears after the next check-in, if location access is allowed for NexGuard on the {{ device.get_platform_display }}.{% else %}Computers don't share their location yet.{% endif %}</p></div>
-        </div>
+        <div class="map-empty"><div><div class="fw-semibold num">{{ device.latitude }}, {{ device.longitude }}</div><a href="{{ device|map_link }}" target="_blank" rel="noopener noreferrer">Open map ↗</a></div></div>
       {% endif %}
-    </section>
-
-    {% if locations or device.is_phone %}
-    <section class="card history-card" aria-labelledby="history-title">
-      <div class="card-header d-flex align-items-center justify-content-between">
-        <h2 class="side-title mb-0" id="history-title">Location history</h2>
-        <span class="small text-body-secondary">kept {{ DEVICE_LOCATION_DAYS|default:30 }} days</span>
-      </div>
-      {% if locations %}
+    </div>
+    <div class="loc-places">
+      <h3 class="side-title d-flex justify-content-between">Location history <span class="fw-normal text-transform-none">{{ DEVICE_LOCATION_DAYS|default:30 }} days</span></h3>
       <ol class="timeline" role="list">
         {% for loc in locations %}
         {% ifchanged loc.recorded_at|date:"Ymd" %}<li class="timeline-day">{% if loc.recorded_at|date:"Ymd" == now_ymd %}Today{% else %}{{ loc.recorded_at|date:"l j F" }}{% endif %}</li>{% endifchanged %}
@@ -70,68 +89,39 @@
             <span class="place-meta">{{ loc.get_source_display }}{% if loc.accuracy_m is not None %} · ±{{ loc.accuracy_m }} m{% endif %}</span></span>
           <a class="place-map" href="{{ loc|map_link }}" target="_blank" rel="noopener noreferrer" aria-label="Open {{ loc.recorded_at|date:'H:i' }} on a map (new tab)">{% icon "map-pin" 15 %}</a>
         </li>
+        {% empty %}<li class="small text-body-secondary">Only the latest location so far.</li>
         {% endfor %}
       </ol>
-      {% else %}
-      <div class="card-body"><p class="small text-body-secondary mb-0">Nothing yet. Each check-in with a location adds a point here.</p></div>
-      {% endif %}
-    </section>
-    {% endif %}
+    </div>
   </div>
+</section>
+{% elif device.is_phone %}
+<section class="card loc-hint" aria-labelledby="where-title">
+  <span class="map-empty-icon">{% icon "map-pin" 20 %}</span>
+  <div class="min-w-0 flex-grow-1">
+    <h2 class="loc-hint-title" id="where-title">No location yet</h2>
+    <p class="small text-body-secondary mb-0">It appears after the next check-in, once location access is allowed for {{ SITE_NAME }} on the {{ device.get_platform_display }}.</p>
+  </div>
+</section>
+{% endif %}
 
-  <aside class="profile-side">
-    <section class="card side-card" aria-labelledby="vitals-title">
-      <h2 class="side-title" id="vitals-title">Right now</h2>
-      <div class="vital-row">
-        <span class="vital-icon">{% icon "clock" 17 %}</span>
-        <div class="min-w-0 flex-grow-1"><div class="vital-name">Last online</div><div class="vital-big">{% if device.state == "online" %}Now{% elif device.last_seen_at %}{{ device.last_seen_at|ago }}{% else %}Never{% endif %}</div>
-          {% if device.last_seen_at %}<div class="vital-hint">{{ device.last_seen_at|date:"D j M, H:i" }} · checks in about every {{ device.checkin_seconds|every }}</div>{% endif %}</div>
-      </div>
-      <div class="vital-row">
-        <span class="vital-icon">{% if device.charging %}{% icon "battery-charging" 17 %}{% else %}{% icon "battery" 17 %}{% endif %}</span>
-        <div class="min-w-0 flex-grow-1"><div class="vital-name">Battery</div>
-          {% if device.battery_percent is not None %}
-          <div class="vital-big {% if device.battery_low %}text-critical{% endif %}">{{ device.battery_percent }}%</div>
-          <div class="vbar {% if device.battery_low %}is-low{% elif device.charging %}is-good{% endif %}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ device.battery_percent }}" aria-label="Battery"><span style="width: {{ device.battery_percent }}%"></span></div>
-          <div class="vital-hint">{% if device.charging %}Charging{% else %}On battery{% endif %}</div>
-          {% else %}<div class="vital-big">—</div><div class="vital-hint">{% if device.is_paired %}No battery reported (a desktop?){% else %}After pairing{% endif %}</div>{% endif %}
-        </div>
-      </div>
-      <div class="vital-row">
-        <span class="vital-icon">{% icon "disk" 17 %}</span>
-        <div class="min-w-0 flex-grow-1"><div class="vital-name">Storage</div>
-          {% if device.storage_used_percent is not None %}
-          <div class="vital-big">{{ device.storage_free|filesizeformat }} <span class="vital-unit">free</span></div>
-          <div class="vbar {% if device.storage_used_percent >= 90 %}is-low{% endif %}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ device.storage_used_percent }}" aria-label="Storage used"><span style="width: {{ device.storage_used_percent }}%"></span></div>
-          <div class="vital-hint">{{ device.storage_used_percent }}% of {{ device.storage_total|filesizeformat }} used</div>
-          {% else %}<div class="vital-big">—</div>{% endif %}
-        </div>
-      </div>
-      <div class="vital-row">
-        <span class="vital-icon">{% icon "wifi" 17 %}</span>
-        <div class="min-w-0 flex-grow-1"><div class="vital-name">Network</div>
-          <div class="vital-big">{% if device.network == "wifi" %}Wi-Fi{% elif device.network == "none" %}No connection{% elif device.network %}{{ device.network|title }}{% else %}—{% endif %}</div>
-          {% if device.network_name %}<div class="vital-hint text-truncate">{{ device.network_name }}</div>{% endif %}
-        </div>
-      </div>
-    </section>
-
-    <section class="card side-card" aria-labelledby="about-title">
-      <h2 class="side-title" id="about-title">About this device</h2>
-      <dl class="kv-list mb-0">
-        <dt>Type</dt><dd>{{ device.get_platform_display }}</dd>
-        {% if device.model %}<dt>Model</dt><dd>{{ device.model }}</dd>{% endif %}
-        {% if device.os_version %}<dt>System</dt><dd>{{ device.os_version }}</dd>{% endif %}
-        {% if device.hostname %}<dt>Name on device</dt><dd>{{ device.hostname }}</dd>{% endif %}
-        <dt>Paired</dt><dd>{% if device.paired_at %}{{ device.paired_at|date:"j M Y" }}{% else %}Not yet{% endif %}</dd>
-        {% if device.app_version %}<dt>App</dt><dd>{{ device.app_version }}</dd>{% endif %}
-        {% if device.last_ip %}<dt>Last address</dt><dd class="num">{{ device.last_ip }}</dd>{% endif %}
-      </dl>
-      {% if perms.devices.delete_device %}
-      <div class="side-danger"><a class="text-danger small fw-semibold" href="{% url 'devices:delete' device.pk %}">{% icon "trash" 14 %} Remove this device</a>
-        <span class="small text-body-secondary">It stops reporting at once.</span></div>
-      {% endif %}
-    </section>
-  </aside>
-</div>
+<section class="card about-card" aria-labelledby="about-title">
+  <div class="dlist-head"><h2 class="card-title-lg mb-0" id="about-title">About this device</h2></div>
+  <dl class="about-grid">
+    <div><dt>Type</dt><dd>{{ device.get_platform_display }}{% if not device.is_phone %} · computer{% endif %}</dd></div>
+    <div><dt>Model</dt><dd>{{ device.model|default:"—" }}</dd></div>
+    <div><dt>System</dt><dd>{{ device.os_version|default:"—" }}</dd></div>
+    <div><dt>Name on device</dt><dd class="text-truncate" title="{{ device.hostname }}">{{ device.hostname|default:"—" }}</dd></div>
+    <div><dt>Belongs to</dt><dd>{% if device.person %}<a href="{% url 'tenants:person_detail' device.person.pk %}">{{ device.person.name }}</a>{% else %}Shared{% endif %}</dd></div>
+    <div><dt>Paired</dt><dd>{% if device.paired_at %}{{ device.paired_at|date:"j M Y, H:i" }}{% else %}Not yet{% endif %}</dd></div>
+    <div><dt>App</dt><dd>{{ device.app_version|default:"—" }}</dd></div>
+    <div><dt>Last address</dt><dd class="num">{{ device.last_ip|default:"—" }}</dd></div>
+  </dl>
+  {% if perms.devices.delete_device %}
+  <div class="dlist-foot justify-content-between">
+    <span class="small text-body-secondary">Removing it stops reporting at once and deletes its location history.</span>
+    <a class="btn btn-sm btn-outline-danger" href="{% url 'devices:delete' device.pk %}">{% icon "trash" 14 %} Remove device</a>
+  </div>
+  {% endif %}
+</section>
 {% endblock %}

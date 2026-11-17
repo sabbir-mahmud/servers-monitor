@@ -22,6 +22,7 @@ import os
 import platform
 import shutil
 import socket
+import subprocess
 import sys
 import time
 import urllib.error
@@ -129,12 +130,64 @@ def storage() -> dict | None:
     return {"total": usage.total, "free": usage.free}
 
 
+def _run(*cmd: str) -> str:
+    """One line of output from a quick system command, or "" (never raises)."""
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=5, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return out.stdout.strip().splitlines()[0].strip() if out.stdout.strip() else ""
+
+
+def model() -> str:
+    """What the parent would call it ("Mac · Apple M3", "Dell XPS 13 9340"), not the CPU
+    architecture. Falls back to the architecture only when nothing better is known."""
+    if sys.platform == "darwin":
+        chip = _run("sysctl", "-n", "machdep.cpu.brand_string")
+        return f"Mac · {chip}" if chip else "Mac"
+    if sys.platform == "win32":
+        try:
+            import winreg
+
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\BIOS"
+            ) as k:
+                maker = winreg.QueryValueEx(k, "SystemManufacturer")[0].strip()
+                name = winreg.QueryValueEx(k, "SystemProductName")[0].strip()
+            return " ".join(p for p in (maker, name) if p and p not in name)[:100] or name
+        except OSError:
+            return platform.machine()
+    try:
+        name = Path("/sys/devices/virtual/dmi/id/product_name").read_text().strip()
+        vendor = Path("/sys/devices/virtual/dmi/id/sys_vendor").read_text().strip()
+    except OSError:
+        return platform.machine()
+    junk = {"", "To Be Filled By O.E.M.", "System Product Name", "Default string"}
+    if name in junk:
+        return platform.machine()
+    return (name if not vendor or vendor in name or vendor in junk else f"{vendor} {name}")[:100]
+
+
+def short_hostname(name: str) -> str:
+    """'5-1-1-3.ipv4.isp.example' (a reverse-DNS name some networks hand out) or
+    'sara-mbp.local' → the first label only."""
+    first = name.split(".")[0]
+    return first if first and not first.replace("-", "").isdigit() else name
+
+
+def device_name() -> str:
+    """The name the owner gave the computer (macOS "Sara's MacBook Air"), else the host name."""
+    if sys.platform == "darwin" and (name := _run("scutil", "--get", "ComputerName")):
+        return name[:100]
+    return short_hostname(socket.gethostname())[:100]
+
+
 def device_info() -> dict:
     return {
         "platform": this_platform(),
         "os_version": os_version(),
-        "model": platform.machine(),
-        "hostname": socket.gethostname()[:100],
+        "model": model(),
+        "hostname": device_name(),
         "app_version": f"nexguard-device {VERSION}",
     }
 

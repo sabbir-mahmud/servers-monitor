@@ -11,6 +11,7 @@
     <h1 class="page-title mb-1">{{ person.name }}</h1>
     <div class="profile-sub">
       {% if show_devices %}<span class="child-status status-{{ s.tone }}"><span class="status-dot" aria-hidden="true"></span>{{ s.headline }}</span>{% endif %}
+      {% if ACCOUNT.kind == "family" %}<span>{{ person.get_kind_display }}</span>{% endif %}
       {% if person.notes %}<span>{{ person.notes }}</span>{% endif %}
       {% if person.email %}<span>{{ person.email }}</span>{% endif %}
     </div>

@@ -85,3 +85,12 @@ def test_report_has_the_basics():
     data = vd.report()
     assert data["platform"] == vd.this_platform() and data["os_version"]
     assert data["storage"]["total"] >= data["storage"]["free"] > 0
+
+
+def test_reverse_dns_host_names_are_shortened_only_when_meaningful():
+    import nexguard_device as n
+
+    assert n.short_hostname("sara-mbp.local") == "sara-mbp"
+    assert n.short_hostname("5-1-1-3.ipv4.isp.example") == "5-1-1-3.ipv4.isp.example"
+    assert n.short_hostname("desktop") == "desktop"
+    assert n.model()  # never empty: falls back to the CPU architecture

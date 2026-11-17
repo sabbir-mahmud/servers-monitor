@@ -329,15 +329,17 @@ def test_family_accounts_have_no_infrastructure(client, family_owner, url_name):
     assert client.get(reverse(url_name)).status_code in (403, 404)
 
 
-def test_family_home_is_the_children(client, family_owner):
+def test_family_home_is_its_people(client, family_owner):
     client.force_login(family_owner)
     assert client.get(reverse("home"))["Location"] == reverse("tenants:people")
     page = client.get(reverse("tenants:people")).content.decode()
-    assert "Children" in page and "Add child" in page and "Servers" not in page
-    client.post(reverse("tenants:person_create"), {"name": "Sara", "email": "", "notes": "iPad"})
+    assert "People" in page and "Add person" in page and "Servers" not in page
+    client.post(
+        reverse("tenants:person_create"), {"kind": "child", "name": "Sara", "notes": "iPad"}
+    )
     (sara,) = Person.objects.all()
     assert sara.kind == "child" and sara.account.kind == "family"
-    resp = client.post(reverse("tenants:person_create"), {"name": "sara", "email": "", "notes": ""})
+    resp = client.post(reverse("tenants:person_create"), {"kind": "child", "name": "sara"})
     assert "already has that name" in resp.content.decode()
     # Family owners don't have to use 2FA (they can't run anything on servers).
     from apps.users import twofactor

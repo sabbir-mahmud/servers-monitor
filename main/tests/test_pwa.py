@@ -167,3 +167,19 @@ def test_icons_are_real_pngs():
     for name in ("icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"):
         data = (settings.BASE_DIR / "static" / "img" / name).read_bytes()
         assert data[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_service_worker_only_caches_first_when_static_names_are_fingerprinted(client, settings):
+    """Without fingerprinted names (DEBUG), cache-first served a stale app.css until a
+    hard reload. Then it must go to the network first."""
+    url = reverse("service_worker")
+    settings.STORAGES = {**settings.STORAGES, "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"}}  # fmt: skip
+    resp = client.get(url)
+    body = resp.content.decode()
+    assert resp["Cache-Control"] == "no-cache"
+    assert "fetch(req).then" in body and "hit || fetch(req)" not in body
+    # Production (fingerprinted names): cache-first is safe and fast.
+    from django.template.loader import render_to_string
+
+    assert "hit || fetch(req)" in render_to_string("pwa/sw.js", {"fingerprinted": True})

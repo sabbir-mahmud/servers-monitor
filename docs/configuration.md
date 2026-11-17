@@ -73,7 +73,7 @@ the defaults when a variable is unset.
 | `MONITOR_GRACE_SECONDS` | `10` | Network jitter allowance added to both. |
 | `MONITOR_METRIC_RETENTION_DAYS` | `14` | Raw metric samples and application check history kept this long. |
 | `ROLLUP_RETENTION_DAYS` | `400` | Hourly server rollups and daily application uptime kept this long: charts up to 90 days, per-mount disk forecasts and status-page history. About 24 rows per server per day. |
-| `DEVICE_LOCATION_DAYS` | `30` | Location history of children's and staff devices is kept this long (the last location is always kept). Deleted with the device. |
+| `DEVICE_LOCATION_DAYS` | `30` | Location history of family and staff devices is kept this long (the last location is always kept). Deleted with the device. |
 | `MAP_TILE_URL` | `https://tile.openstreetmap.org/{z}/{x}/{y}.png` | Map tiles for device locations. The viewer's browser loads them (the tile server sees which area, not who). Use another tile provider for heavy use, or empty to show coordinates and map links only. |
 | `MAP_ATTRIBUTION` | `© OpenStreetMap contributors` | Credit shown on every map, as the tile provider requires. |
 | `MONITOR_COMMAND_DELIVERY_SECONDS` | `300` | Queued jobs not picked up within this window expire instead of running late. |

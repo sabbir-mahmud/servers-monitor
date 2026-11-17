@@ -60,6 +60,7 @@
       </nav>
 
       <div class="sidebar-foot">
+        <button type="button" class="btn btn-sm btn-outline-secondary w-100" data-install-app hidden>{% icon "download" 15 %} Install app</button>
         <div class="segmented theme-switch" role="group" aria-label="Appearance">
           <button type="button" data-theme-set="light" aria-pressed="false" title="Light">{% icon "sun" 15 %}<span class="visually-hidden">Light</span></button>
           <button type="button" data-theme-set="system" aria-pressed="true" title="Match system">{% icon "monitor" 15 %}<span class="visually-hidden">System</span></button>
@@ -71,11 +72,8 @@
             <div class="user-name">{{ user.display_name }}</div>
             <div class="user-role">{% if MEMBERSHIP %}{{ MEMBERSHIP.role_label }}{% elif user.is_superuser %}Superuser{% else %}No account{% endif %}</div>
           </a>
-          <form method="post" action="{% url 'logout' %}">{% csrf_token %}
-            <button class="icon-btn" title="Log out" aria-label="Log out">{% icon "logout" 17 %}</button>
-          </form>
+          <button type="button" class="icon-btn" title="Log out" aria-label="Log out" data-bs-toggle="modal" data-bs-target="#logout-dialog">{% icon "logout" 17 %}</button>
         </div>
-        <button type="button" class="btn btn-sm btn-outline-secondary w-100 mt-2" data-install-app hidden>{% icon "download" 15 %} Install app</button>
       </div>
     </div>
   </aside>
@@ -104,6 +102,22 @@
   </div>
 </div>
 {% endwith %}
+
+<div class="modal fade" id="logout-dialog" tabindex="-1" aria-labelledby="logout-title" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <form class="modal-content confirm-dialog" method="post" action="{% url 'logout' %}">{% csrf_token %}
+      <div class="modal-body">
+        <span class="confirm-dialog-icon" aria-hidden="true">{% icon "logout" 20 %}</span>
+        <h2 class="confirm-dialog-title" id="logout-title">Log out of {{ SITE_NAME }}?</h2>
+        <p class="confirm-dialog-text">You'll need to sign in again to see your dashboard on this device.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-danger">Log out</button>
+      </div>
+    </form>
+  </div>
+</div>
 {% else %}
 <main class="auth">{% block auth %}{% endblock %}</main>
 {% endif %}

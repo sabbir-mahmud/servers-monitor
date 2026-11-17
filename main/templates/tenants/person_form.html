@@ -7,6 +7,21 @@
 <form method="post" novalidate style="max-width: 40rem">{% csrf_token %}
   <div class="card mb-3"><div class="card-body form-section">
     {% if form.non_field_errors %}<div class="alert alert-danger mb-0" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+    {% if form.kind %}
+    <fieldset>
+      <legend class="form-label">{{ form.kind.label }}</legend>
+      <div class="platform-picker">
+        {% for radio in form.kind %}
+        <label class="kind-card platform-card">{{ radio.tag }}
+          <span class="platform-card-icon">{% if radio.data.value == "child" %}{% icon "user" 20 %}{% else %}{% icon "users" 20 %}{% endif %}</span>
+          <span class="kind-title">{{ radio.choice_label }}</span>
+          <span class="kind-help">{% if radio.data.value == "child" %}Son or daughter{% elif radio.data.value == "partner" %}Husband, wife or partner{% else %}Parent, grandparent, sibling…{% endif %}</span>
+        </label>
+        {% endfor %}
+      </div>
+      {% for e in form.kind.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+    </fieldset>
+    {% endif %}
     {% include "alerts/_field.html" with field=form.name %}
     {% include "alerts/_field.html" with field=form.email %}
     {% include "alerts/_field.html" with field=form.notes %}

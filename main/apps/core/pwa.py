@@ -31,8 +31,14 @@ def manifest(request):
 
 @cache_control(no_cache=True)  # browsers re-check it so a new version installs promptly
 def service_worker(request):
-    response = render(request, "pwa/sw.js", {"version": settings.APP_VERSION},
+    # Static URLs are fingerprinted (app.3f9a1c.css) only with the manifest storage used
+    # when DEBUG is off. Without fingerprints a cache-first worker would serve a stale
+    # app.css until a hard reload, so it goes to the network first instead.
+    fingerprinted = "Manifest" in settings.STORAGES["staticfiles"]["BACKEND"]
+    response = render(request, "pwa/sw.js",
+                      {"version": settings.APP_VERSION, "fingerprinted": fingerprinted},
                       content_type="text/javascript; charset=utf-8")  # fmt: skip
+    response["Cache-Control"] = "no-cache"  # browsers must check for a new worker each load
     response["Service-Worker-Allowed"] = "/"
     return response
 

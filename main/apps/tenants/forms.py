@@ -1,6 +1,6 @@
 from django import forms
 
-from .models import Account, Person, PersonKind
+from .models import FAMILY_KINDS, Account, Person, PersonKind
 from .roles import Kind
 from .scoping import AccountFormMixin
 
@@ -32,16 +32,23 @@ class AccountSettingsForm(forms.ModelForm):
 class PersonForm(AccountFormMixin, forms.ModelForm):
     class Meta:
         model = Person
-        fields = ["name", "email", "notes"]
-        labels = {"notes": "Note"}
+        fields = ["kind", "name", "email", "notes"]
+        labels = {"notes": "Note", "kind": "Who is this?"}
+        widgets = {"kind": forms.RadioSelect}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if self.instance._state.adding and self.account is not None:
-            self.instance.kind = (
-                PersonKind.CHILD if self.account.kind == Kind.FAMILY else PersonKind.STAFF
-            )
-        if self.account is not None and self.account.kind == Kind.FAMILY:
+        family = self.account is not None and self.account.kind == Kind.FAMILY
+        if family:
+            # A family picks the relationship; the choices never include "staff".
+            self.fields["kind"].choices = [(k.value, k.label) for k in FAMILY_KINDS]
+            if self.instance._state.adding:
+                self.initial.setdefault("kind", PersonKind.CHILD)
+        else:
+            del self.fields["kind"]
+            if self.instance._state.adding:
+                self.instance.kind = PersonKind.STAFF
+        if family:
             self.fields["name"].widget.attrs["placeholder"] = "Sara"
             self.fields["email"].help_text = "Optional."
             self.fields["notes"].widget.attrs["placeholder"] = (

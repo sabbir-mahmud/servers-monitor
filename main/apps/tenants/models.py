@@ -57,11 +57,11 @@ class Account(models.Model):
 
     @property
     def people_label(self) -> str:
-        return "Children" if self.kind == Kind.FAMILY else "Staff"
+        return "People" if self.kind == Kind.FAMILY else "Staff"
 
     @property
     def person_label(self) -> str:
-        return "child" if self.kind == Kind.FAMILY else "staff member"
+        return "person" if self.kind == Kind.FAMILY else "staff member"
 
 
 def unique_slug(name: str) -> str:
@@ -108,7 +108,13 @@ class Membership(models.Model):
 
 class PersonKind(models.TextChoices):
     CHILD = "child", "Child"
+    PARTNER = "partner", "Spouse or partner"
+    RELATIVE = "relative", "Other family"
     STAFF = "staff", "Staff member"
+
+
+# Who a family account can add; a company only adds staff.
+FAMILY_KINDS = (PersonKind.CHILD, PersonKind.PARTNER, PersonKind.RELATIVE)
 
 
 class Person(models.Model):
@@ -137,7 +143,8 @@ class Person(models.Model):
                 violation_error_message="Someone in this account already has that name.",
             ),
             models.CheckConstraint(
-                condition=Q(kind__in=["child", "staff"]), name="person_kind_valid"
+                condition=Q(kind__in=["child", "partner", "relative", "staff"]),
+                name="person_kind_valid",
             ),
         ]
 

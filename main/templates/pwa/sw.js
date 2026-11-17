@@ -24,7 +24,14 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   if (new URL(req.url).pathname.startsWith("{% get_static_prefix %}")) {
+    {% if fingerprinted %}// File names change with their content, so a cached copy is never stale.
     event.respondWith(caches.match(req).then((hit) => hit || fetch(req)));
+    {% else %}// Development: same name, new content. Fresh from the network; cache only when offline.
+    event.respondWith(fetch(req).then((res) => {
+      if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
+      return res;
+    }).catch(() => caches.match(req)));
+    {% endif %}
   }
 });
 
