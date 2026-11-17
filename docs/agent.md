@@ -261,7 +261,7 @@ Start with `sudo smctl doctor`. It names the problem and the fix. Common ones:
 
 | Symptom | Cause and fix |
 |---|---|
-| Dashboard says **Waiting for the agent** | The dashboard's **relay process** isn't running: start it (`make dev`, `docker compose up -d relay`, or `systemctl start server-monitor-relay`). A banner warns you when it's down. |
+| Dashboard says **Waiting for the agent** | The dashboard's **relay process** isn't running: start it (`./run.sh`, `make dev`, or `systemctl start server-monitor-relay`). A banner warns you when it's down. |
 | `relay refused the credentials` | Credentials were rotated or the server was deleted/disabled. Rotate and `sudo smctl connect`. |
 | `cannot reach the relay` | Outbound TCP 6379 (or your provider's port) is blocked, or DNS fails. |
 | `doesn't match what the dashboard expects` during install | GitHub has different agent files than your dashboard was deployed with. Redeploy the dashboard from the same commit, or pin `AGENT_REF` to a tag. |

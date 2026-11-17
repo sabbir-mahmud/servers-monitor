@@ -1,8 +1,9 @@
 # Continuous off-site replication of the dashboard database with Litestream.
-# Used by the `litestream` service in docker-compose.yml (profile "backup").
+# Run: set -a; . main/.env; set +a; litestream replicate -config deploy/litestream.yml
+# SQLITE_PATH must be an absolute path. See docs/deployment.md#backups.
 # Any S3-compatible store works: Cloudflare R2, Backblaze B2, AWS S3, MinIO.
 dbs:
-  - path: /data/db.sqlite3
+  - path: ${SQLITE_PATH}
     replicas:
       - type: s3
         bucket: ${LITESTREAM_BUCKET}

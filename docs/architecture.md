@@ -163,6 +163,6 @@ agent/
   install.sh               verified installer and upgrader
   server-monitor-agent.service, agent.example.toml
   tests/                   agent and smctl tests
-deploy/                    systemd units for running the dashboard without Docker
+deploy/                    systemd units for running the dashboard as a service
 docs/                      these guides
 ```

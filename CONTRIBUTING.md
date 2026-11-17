@@ -5,7 +5,7 @@ Thanks for helping! Bug reports, ideas, documentation and code are all welcome.
 ## Reporting bugs and requesting features
 
 - **Bugs:** open an issue with what you did, what you expected, what happened, and versions
-  (dashboard commit, agent version from `smctl status`, OS). Logs help: `docker compose logs`,
+  (dashboard commit, agent version from `smctl status`, OS). Logs help: the `./run.sh` output or `journalctl -u server-monitor-relay`,
   or `sudo smctl logs` on a server. **Remove secrets first:** connection strings, tokens and
   `.env` values.
 - **Features:** describe the problem you're trying to solve before the solution. The project

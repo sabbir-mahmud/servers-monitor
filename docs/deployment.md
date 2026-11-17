@@ -11,8 +11,8 @@ Neither needs to be reachable from the internet. Both dial out to your Redis rel
 
 - [1. Choose a Redis relay](#1-choose-a-redis-relay)
 - [2. Configure](#2-configure)
-- [3a. Docker (recommended)](#3a-docker-recommended)
-- [3b. systemd, without Docker](#3b-systemd-without-docker)
+- [3a. run.sh (one terminal)](#3a-runsh-one-terminal)
+- [3b. systemd (always on)](#3b-systemd-always-on)
 - [4. HTTPS and remote access](#4-https-and-remote-access)
 - [5. First steps](#5-first-steps)
 - [Email](#email)
@@ -62,22 +62,23 @@ Every variable is listed in [configuration.md](configuration.md).
 > `SECRET_KEY_FALLBACKS`, then rotate each server's credentials (see
 > [security.md](security.md#rotating-secret_key)).
 
-## 3a. Docker (recommended)
+## 3a. run.sh (one terminal)
 
-Works on any x86_64 or ARM64 machine, including a Raspberry Pi 4/5 with a 64-bit OS.
+Works on any Linux or macOS machine with Python 3.14, including a Raspberry Pi 4/5.
 
 ```bash
-docker compose up -d --build
-docker compose exec web python manage.py createsuperuser
+./run.sh                                   # first run creates ./venv and installs dependencies
+./venv/bin/python main/manage.py createsuperuser
+./run.sh prod                              # gunicorn instead of the development server
 ```
 
-- The UI listens on **127.0.0.1:8000** only. To open it to your LAN, change the port mapping in
-  `docker-compose.yml` to `"8000:8000"` and add the machine's LAN IP to `ALLOWED_HOSTS`.
-- Data lives in the `data` volume (`/data/db.sqlite3`).
-- `web` applies migrations on start; `relay` starts once `web` is healthy.
-- Memory limits: web 256 MB, relay 128 MB.
+- `run.sh` applies migrations, then starts **web** and **relay** together. Ctrl-C stops both,
+  and if either exits the other is stopped too.
+- `prod` runs `collectstatic` and serves with gunicorn (1 worker, 8 threads).
+- The UI listens on **127.0.0.1:8000**. `PORT=9000` changes the port; `HOST=0.0.0.0` opens it to
+  your LAN (add the machine's LAN IP to `ALLOWED_HOSTS`).
 
-## 3b. systemd, without Docker
+## 3b. systemd (always on)
 
 ```bash
 sudo useradd --system --create-home --home-dir /opt/server-monitor server-monitor-ui
@@ -91,6 +92,7 @@ sudo -u server-monitor-ui cp main/.env.example main/.env   # then edit it
 In `main/.env` also set `SQLITE_PATH=/opt/server-monitor/data/db.sqlite3`. Then:
 
 ```bash
+sudo -u server-monitor-ui venv/bin/python main/manage.py collectstatic --noinput
 sudo cp deploy/server-monitor-web.service deploy/server-monitor-relay.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now server-monitor-web server-monitor-relay
@@ -172,23 +174,26 @@ Snapshots sit on the same disk as the database, so copy them elsewhere, or use:
 
 **Continuous off-site replication (optional).** [Litestream](https://litestream.io) streams
 every change to any S3-compatible bucket (Cloudflare R2, Backblaze B2, AWS S3) within seconds.
-Set the `LITESTREAM_*` variables in `main/.env` (see [configuration](configuration.md)), then:
+Install the `litestream` binary, set the `LITESTREAM_*` variables and an absolute
+`SQLITE_PATH` in `main/.env` (see [configuration](configuration.md)), then run it next to the
+dashboard (under systemd, or in its own terminal):
 
 ```bash
-docker compose --profile backup up -d
+set -a; . main/.env; set +a
+litestream replicate -config deploy/litestream.yml
 ```
 
 **Restoring** a snapshot:
 
 ```bash
-docker compose stop web relay
-docker compose run --rm web python manage.py restore /data/backups/db-20261011-031500.sqlite3
-docker compose start web relay
+sudo systemctl stop server-monitor-web server-monitor-relay    # or Ctrl-C run.sh
+venv/bin/python main/manage.py restore data/backups/db-20261011-031500.sqlite3
+sudo systemctl start server-monitor-web server-monitor-relay
 ```
 
 `restore` refuses while the relay is running and checks the file's integrity first; the
 database it replaces is kept beside it. From Litestream, restore with
-`litestream restore -config deploy/litestream.yml -o /data/db.sqlite3 /data/db.sqlite3`
+`litestream restore -config deploy/litestream.yml -o "$SQLITE_PATH" "$SQLITE_PATH"`
 with both processes stopped.
 
 Keep `main/.env` (above all `SECRET_KEY`) with your backups: encrypted secrets and agent
@@ -207,7 +212,9 @@ notification channel is told how long monitoring was blind.
 
 ```bash
 git pull
-docker compose up -d --build      # or: make install && sudo systemctl restart server-monitor-web server-monitor-relay
+make install
+venv/bin/python main/manage.py collectstatic --noinput
+sudo systemctl restart server-monitor-web server-monitor-relay   # or restart ./run.sh
 ```
 
 Migrations run automatically. If the release changed anything under `agent/` (the

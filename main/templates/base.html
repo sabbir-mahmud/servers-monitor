@@ -95,7 +95,7 @@
       {% if RELAY_DOWN %}
         <div class="alert alert-warning" role="alert">{% icon "alert" %}
           <div><strong>The relay process isn't running.</strong> Agents keep reporting, but their heartbeats and job output wait in Redis until it starts: {{ MACHINES }} look offline and jobs don't finish here.
-            Start it with <code>make relay</code> (or <code>make dev</code>), <code>docker compose up -d relay</code>, or <code>systemctl start server-monitor-relay</code>.</div>
+            Start it with <code>./run.sh</code> (or <code>make relay</code>), or <code>systemctl start server-monitor-relay</code>.</div>
         </div>
       {% endif %}
       {% for message in messages %}

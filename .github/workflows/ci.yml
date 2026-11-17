@@ -47,10 +47,3 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: shellcheck agent/install.sh
-
-  docker:
-    name: Docker image builds
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -f main/Dockerfile -t server-monitor:ci .

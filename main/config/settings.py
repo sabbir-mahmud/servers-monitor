@@ -15,8 +15,7 @@ from django.utils.csp import CSP
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# One version for the dashboard and the agent: the repo's VERSION file (copied into the
-# Docker image). A test keeps agent/server_monitor_agent.py's VERSION in step.
+# One version for the dashboard and the agent: the repo's VERSION file. A test keeps agent/server_monitor_agent.py's VERSION in step.
 try:
     APP_VERSION = (BASE_DIR.parent / "VERSION").read_text().strip()
 except OSError:

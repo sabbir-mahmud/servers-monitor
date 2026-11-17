@@ -162,7 +162,7 @@ def _resolve_allowed(host: str) -> str:
 
 
 def probe_ping(monitor: Monitor) -> Result:
-    """Three ICMP echoes with the system `ping` (needs NET_RAW in Docker). Never raises."""
+    """Three ICMP echoes with the system `ping`. Never raises."""
     try:
         ip = _resolve_allowed(monitor.target)
     except OSError as exc:

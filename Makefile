@@ -2,7 +2,7 @@
 PY := $(CURDIR)/venv/bin/python
 MANAGE := cd main && $(PY) manage.py
 
-.PHONY: help install run relay dev test lint format check migrate superuser agent-dev docker-up
+.PHONY: help install run relay dev test lint format check migrate superuser agent-dev
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -46,6 +46,3 @@ check: ## Django system checks incl. the deployment audit (as if behind HTTPS)
 	$(MANAGE) makemigrations --check --dry-run
 	cd main && DEBUG=False HTTPS=True REDIS_URL=rediss://check@localhost:6379 SECRET_KEY=$$(python3 -c 'import secrets;print(secrets.token_urlsafe(50))') \
 	  ALLOWED_HOSTS=monitor.example.com $(PY) manage.py check --deploy --fail-level WARNING
-
-docker-up: ## Web + relay in Docker (UI on 127.0.0.1:8000)
-	docker compose up -d --build

@@ -39,11 +39,11 @@ the defaults when a variable is unset.
 
 | Variable | Default | Description |
 |---|---|---|
-| `SQLITE_PATH` | `main/db.sqlite3` | Database file. `/data/db.sqlite3` in Docker. |
+| `SQLITE_PATH` | `main/db.sqlite3` | Database file. Use an absolute path under systemd or with Litestream. |
 | `DB_CONN_MAX_AGE` | `600` | Seconds to reuse a database connection. |
 | `BACKUP_DIR` | *(next to the database)* `backups/` | Where the relay process writes its daily snapshot. |
 | `BACKUP_KEEP` | `14` | Snapshots to keep. |
-| `LITESTREAM_BUCKET`, `LITESTREAM_ENDPOINT`, `LITESTREAM_REGION`, `LITESTREAM_ACCESS_KEY_ID`, `LITESTREAM_SECRET_ACCESS_KEY` | *(empty)* | Off-site replication with the optional `litestream` service (`docker compose --profile backup`). |
+| `LITESTREAM_BUCKET`, `LITESTREAM_ENDPOINT`, `LITESTREAM_REGION`, `LITESTREAM_ACCESS_KEY_ID`, `LITESTREAM_SECRET_ACCESS_KEY` | *(empty)* | Off-site replication with optional [Litestream](deployment.md#backups). |
 
 ## Dashboard health
 

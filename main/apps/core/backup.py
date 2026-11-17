@@ -1,8 +1,8 @@
 """Local database snapshots (daily, by the relay process) and restore.
 
 Uses SQLite's online backup API, so a snapshot is consistent even while the dashboard and
-relay are writing. For continuous off-site copies, run the optional Litestream service
-(docker compose --profile backup); see docs/deployment.md.
+relay are writing. For continuous off-site copies, run Litestream alongside it; see
+docs/deployment.md#backups.
 """
 
 import logging

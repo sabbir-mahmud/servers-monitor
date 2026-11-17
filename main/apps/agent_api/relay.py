@@ -59,7 +59,7 @@ def client() -> redis.Redis:
 
 # The relay process touches this file every few seconds; the web process reads its age to
 # warn when nobody is receiving agent messages. A file next to the SQLite database works
-# across both processes (and both containers, which share that volume) with no extra I/O.
+# across both processes with no extra I/O.
 STALE_AFTER_SECONDS = 30
 
 

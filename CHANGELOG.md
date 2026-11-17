@@ -60,6 +60,10 @@ names).
   own computer or phone from the same page.
 
 ### Removed
+- **Docker**: `docker-compose.yml`, `main/Dockerfile`, `make docker-up`, the CI image build
+  and the GHCR image on releases. Run the dashboard with `./run.sh` (web + relay in one
+  terminal) or the systemd units in `deploy/`. Data in an old Docker `data` volume: copy
+  `/data/db.sqlite3` out and point `SQLITE_PATH` at it.
 - **Status pages** (public pages published to GitHub Pages or Cloudflare Pages). Migration
   `core.0003_drop_status_pages` drops their tables and permissions: export anything you
   need from them before upgrading. Pages already published to GitHub stay up until you

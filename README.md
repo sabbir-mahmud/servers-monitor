@@ -81,7 +81,7 @@ Deep dive: [docs/architecture.md](docs/architecture.md).
 
 ## Quick start
 
-You need **Docker** and a **Redis with TLS and ACL support**. A free
+You need **Python 3.14** and a **Redis with TLS and ACL support**. A free
 [Upstash](https://upstash.com) database is the easiest option.
 
 ```bash
@@ -104,13 +104,15 @@ WATCHDOG_URL=        # recommended: a healthchecks.io ping URL, so you hear if m
 Start it and create the first administrator:
 
 ```bash
-docker compose up -d --build
-docker compose exec web python manage.py createsuperuser
+make install                       # creates ./venv and installs dependencies
+./venv/bin/python main/manage.py migrate
+./venv/bin/python main/manage.py createsuperuser
+./run.sh                           # web on :8000 + relay; Ctrl-C stops both
 ```
 
 Open **http://localhost:8000**. As an Admin you'll first be asked to set up two-factor
 sign-in with an authenticator app (keep the recovery codes; locked out on the host:
-`docker compose exec web python manage.py reset_2fa <user>`). Then go to
+`./venv/bin/python main/manage.py reset_2fa <user>`). Then go to
 **Servers → Add server** and follow the two-step instructions on the page. The server appears
 as **Connected** within seconds.
 
@@ -121,7 +123,7 @@ Next steps:
    cron job (`smctl run nightly-backup -- /opt/backup.sh`).
 3. **Administration → System**: check the watchdog and backups are green.
 
-Not using Docker, running on a Raspberry Pi, or putting HTTPS in front? See
+Running it as a service (systemd), on a Raspberry Pi, or putting HTTPS in front? See
 [docs/deployment.md](docs/deployment.md).
 
 ## Managing a server with `smctl`
@@ -148,7 +150,7 @@ Full reference: [docs/agent.md](docs/agent.md).
 
 | Guide | What's inside |
 |---|---|
-| [Deployment](docs/deployment.md) | Docker, systemd and Raspberry Pi installs, HTTPS options, backups, upgrades, Redis cost |
+| [Deployment](docs/deployment.md) | `run.sh`, systemd and Raspberry Pi installs, HTTPS options, backups, upgrades, Redis cost |
 | [Agent & smctl](docs/agent.md) | Installing on servers, the allowlist, every `smctl` command, upgrades, troubleshooting |
 | [Configuration](docs/configuration.md) | Every environment variable with its default, including single sign-on |
 | [REST API](docs/api.md) | Tokens, endpoints, running actions from CI, Prometheus scraping |
@@ -159,7 +161,7 @@ Full reference: [docs/agent.md](docs/agent.md).
 
 ```bash
 git pull
-docker compose up -d --build      # migrations run automatically
+make install && ./run.sh          # migrations run automatically
 ```
 
 When the [changelog](CHANGELOG.md) says **agents must be upgraded**, use **Upgrade all
@@ -171,7 +173,7 @@ meanwhile; features they don't support simply aren't offered for them.
 
 | Component | Needs |
 |---|---|
-| Dashboard | Docker, or Python 3.14 on any Linux/macOS box (≈ 200 MB RAM) |
+| Dashboard | Python 3.14 on any Linux/macOS box (≈ 200 MB RAM) |
 | Relay | Redis 6+ with TLS and `ACL SETUSER` (Upstash, self-hosted Redis or Valkey) |
 | Monitored servers | Linux with systemd and Python 3.11+ (Ubuntu 22.04+, Debian 12+, RHEL 9+) |
 | Browser push, "Install app" | The dashboard on HTTPS (or opened as `localhost`) |
