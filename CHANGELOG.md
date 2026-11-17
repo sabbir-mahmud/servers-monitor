@@ -72,6 +72,12 @@ names).
 - Declining on the device no longer uses up the pairing code: the computer client asks
   first (a preview) and pairs only after a yes. Before, the code was spent even on a no,
   despite the message saying it still worked.
+- Re-running the agent installer on a server that already had a config (for example one
+  deleted and added again on the dashboard) kept the old, dead relay login without asking
+  and still printed "Done." It now asks for the new connection string (Enter keeps the
+  current one), checks it with the relay and switches to it, keeping services, logs and
+  actions. `smctl upgrade` doesn't ask. A failed test heartbeat now stops the installer
+  with an error instead of reporting success.
 - The consent message on computers no longer claims they share location or network; it
   names what they actually send (battery, storage and system version).
 

@@ -15,7 +15,9 @@
 #   4. detects services and logs on this host and adds them (monitor-only)
 #   5. starts the systemd service and confirms a real heartbeat
 #
-# Re-running upgrades the agent and smctl and keeps the existing config.
+# Re-running upgrades the agent and smctl and keeps the existing config (services, logs,
+# actions). Given new credentials (SM_REDIS / SM_REDIS_FILE), it switches to them: a
+# server that was deleted and added again must not keep the old, dead login.
 # Env: SM_SUMS (required), SM_REF, SM_REPO, SM_REDIS_FILE, SM_DETECT=0,
 #      SM_ALLOW_UNVERIFIED=1 (skip checksums: trusts whatever GitHub serves, as root).
 set -euo pipefail
@@ -46,16 +48,24 @@ if [ -z "$SM_SUMS" ] && [ "$SM_ALLOW_UNVERIFIED" != 1 ]; then
   die "SM_SUMS is missing: copy the full command from the dashboard (it verifies what gets installed)"
 fi
 command -v sha256sum >/dev/null || die "sha256sum is required (coreutils)"
+if [ -n "$SM_REDIS_FILE" ]; then
+  SM_REDIS=$(head -n1 "$SM_REDIS_FILE")
+fi
 if [ "$FIRST_INSTALL" = 1 ]; then
-  if [ -n "$SM_REDIS_FILE" ]; then
-    SM_REDIS=$(head -n1 "$SM_REDIS_FILE")
-  elif [ -z "$SM_REDIS" ]; then
+  if [ -z "$SM_REDIS" ]; then
     [ -r /dev/tty ] || die "no terminal to ask for the connection string: use SM_REDIS_FILE=/path"
     printf '%s' "Paste the connection string from the dashboard (input hidden): " > /dev/tty
     IFS= read -rs SM_REDIS < /dev/tty
     printf '\n' > /dev/tty
   fi
   [ -n "$SM_REDIS" ] || die "no connection string given"
+elif [ -z "$SM_REDIS" ] && [ "${SM_UPGRADE:-0}" != 1 ] && [ -r /dev/tty ]; then
+  # Run by hand on a server that already has a config: it may have been deleted and added
+  # again on the dashboard, and then the old login is dead. `smctl upgrade` skips this.
+  printf '%s\n%s' "This server already has a connection string." \
+    "Paste the new one from the dashboard, or press Enter to keep it (input hidden): " > /dev/tty
+  IFS= read -rs SM_REDIS < /dev/tty || SM_REDIS=""
+  printf '\n' > /dev/tty
 fi
 
 # ------------------------------------------------------------------ 1. prerequisites
@@ -142,21 +152,32 @@ TOML
 )
 }
 step "Connecting to the relay"
-if [ "$FIRST_INSTALL" = 1 ]; then
+check_credentials() {  # check_credentials FILE: a config holding SM_REDIS; dies if refused
   case "$SM_REDIS" in redis://*|rediss://*) ;; *) die "SM_REDIS must start with rediss://" ;; esac
+  write_config "$1" "$SM_REDIS"
+  "$PREFIX/venv/bin/python" "$PREFIX/server_monitor_agent.py" -c "$1" --ping >/dev/null 2>"$1.err" \
+    || die "$(cat "$1.err"). Rotate the credentials on the server's page and use the new command."
+  rm -f "$1.err"
+  ok "credentials accepted by the relay"
+}
+if [ "$FIRST_INSTALL" = 1 ]; then
   TMP_CONF=$(mktemp)
   trap 'rm -f "$TMP_CONF"' EXIT
-  write_config "$TMP_CONF" "$SM_REDIS"
-  "$PREFIX/venv/bin/python" "$PREFIX/server_monitor_agent.py" -c "$TMP_CONF" --ping >/dev/null 2>"$TMP_CONF.err" \
-    || die "$(cat "$TMP_CONF.err"). Rotate the credentials on the server's page and use the new command."
-  rm -f "$TMP_CONF.err"
-  ok "credentials accepted by the relay"
+  check_credentials "$TMP_CONF"
   install -d -m 750 -o root -g "$AGENT_USER" "$CONF_DIR"
   install -m 640 -o root -g "$AGENT_USER" "$TMP_CONF" "$CONF"
   ok "wrote $CONF"
   if [ "$SM_DETECT" = 1 ]; then
     smctl detect --apply --no-restart || printf '  %s!%s detection failed; add services later with smctl\n' "$Y" "$N"
   fi
+elif [ -n "$SM_REDIS" ]; then
+  # Already installed (an upgrade, or the server was deleted and added again): switch to
+  # the new login, keep everything else in the config.
+  TMP_CONF=$(mktemp)
+  trap 'rm -f "$TMP_CONF"' EXIT
+  check_credentials "$TMP_CONF"
+  printf '%s\n' "$SM_REDIS" | smctl connect - >/dev/null
+  ok "switched $CONF to the new credentials (services, logs and actions kept)"
 else
   ok "keeping existing $CONF"
 fi
@@ -180,7 +201,7 @@ systemctl is-active --quiet server-monitor-agent || die "the agent failed to sta
 if runuser -u "$AGENT_USER" -- "$PREFIX/venv/bin/python" "$PREFIX/server_monitor_agent.py" -c "$CONF" --once >/dev/null 2>&1; then
   ok "agent running and reporting"
 else
-  printf '  %s!%s agent running, but a test heartbeat failed. Diagnose with: sudo smctl doctor\n' "$Y" "$N"
+  die "the agent is running, but its test heartbeat didn't reach the dashboard. Diagnose with: sudo smctl doctor"
 fi
 
 cat <<MSG

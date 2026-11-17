@@ -941,6 +941,7 @@ def _upgrade(ref: str | None, sums: str | None, capture: bool = False) -> tuple[
         env["SM_SUMS"] = sums
     else:
         env["SM_ALLOW_UNVERIFIED"] = "1"
+    env["SM_UPGRADE"] = "1"  # keep the current login without asking
     if not capture:
         return subprocess.run(["bash", "-s"], input=script, env=env).returncode, ""
     try:
