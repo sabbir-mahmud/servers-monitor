@@ -224,9 +224,20 @@ elif [ "$PLATFORM" = macos ]; then
 </dict>
 </plist>
 EOF
-  launchctl bootout "gui/$(id -u)/com.nexguard.device" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || launchctl load -w "$PLIST"
+  JOB="gui/$(id -u)/com.nexguard.device"
+  launchctl bootout "$JOB" 2>/dev/null || true
+  # bootout finishes in the background: right after it, bootstrap often fails with
+  # "Input/output error". Try a few times, then the old `load`, and check it took.
+  tries=0
+  until launchctl print "$JOB" >/dev/null 2>&1 || [ "$tries" -ge 5 ]; do
+    tries=$((tries + 1))
+    LAUNCH_ERR=$(launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>&1) || sleep 1
+  done
+  launchctl print "$JOB" >/dev/null 2>&1 || launchctl load -w "$PLIST" 2>/dev/null || true
   SCHEDULE="every 5 minutes while you're signed in"
+  if ! launchctl print "$JOB" >/dev/null 2>&1; then
+    NOT_SCHEDULED="macOS didn't start the background check-in (${LAUNCH_ERR:-no reason given}). It starts by itself the next time you sign in to this Mac. If it still doesn't, allow \"sh\" in System Settings > General > Login Items."
+  fi
 elif command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
   UNITS="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
   mkdir -p "$UNITS"
@@ -252,8 +263,11 @@ Persistent=true
 WantedBy=timers.target
 EOF
   systemctl --user daemon-reload
-  systemctl --user enable --now nexguard-device.timer >/dev/null 2>&1
+  systemctl --user enable --now nexguard-device.timer >/dev/null 2>&1 || true
   SCHEDULE="every 5 minutes while you're signed in"
+  if ! systemctl --user is-active --quiet nexguard-device.timer; then
+    NOT_SCHEDULED="the background check-in didn't start. Check it with: systemctl --user status nexguard-device.timer"
+  fi
 elif command -v crontab >/dev/null 2>&1; then
   { crontab -l 2>/dev/null | grep -v nexguard || true
     echo "*/5 * * * * /bin/sh '$DIR/checkin.sh' >/dev/null 2>&1 # nexguard"
@@ -272,6 +286,10 @@ if [ -s "$DIR/error" ]; then
 else
   say "Done. This computer is connected as \"$NAME\" in $ACCOUNT."
   say "It reports $SCHEDULE. You can close this window."
+fi
+if [ -n "${NOT_SCHEDULED:-}" ]; then
+  say ""
+  say "Note: $NOT_SCHEDULED"
 fi
 say "To remove it later, paste:  curl -fsSL $SERVER/d/uninstall.sh | sh"
 say ""
