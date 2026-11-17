@@ -20,7 +20,6 @@ from apps.fleet.models import Server, ServerGroup
 from apps.monitors.models import Monitor
 from apps.operations import services as ops
 from apps.operations.models import Command, CommandStatus, Job, Schedule
-from apps.status.models import StatusIncident, StatusPage, StatusPageMonitor
 from apps.tenants.models import Account, Person
 from apps.users.models import Invitation
 
@@ -53,9 +52,6 @@ def globex(django_user_model):
                                      deliver_by=now + timedelta(minutes=5))  # fmt: skip
     schedule = Schedule.objects.create(account=b, name="globex-nightly", action="deploy_api",
                                        cron="0 3 * * *")  # fmt: skip
-    page = StatusPage.objects.create(account=b, name="globex-status", title="Globex status")
-    StatusPageMonitor.objects.create(page=page, monitor=monitor, display_name="Shop")
-    incident = StatusIncident.objects.create(page=page, title="globex-outage")
     alert = Alert.objects.create(account=b, server=server, kind=AlertKind.OFFLINE,
                                  severity=Severity.CRITICAL, message="globex-db is offline")  # fmt: skip
     person = Person.objects.create(account=b, kind="staff", name="Globex Gary")
@@ -67,7 +63,7 @@ def globex(django_user_model):
     return {
         "account": b, "boss": boss, "server": server, "group": group, "monitor": monitor,
         "channel": channel, "window": window, "job": job, "command": command,
-        "schedule": schedule, "page": page, "incident": incident, "alert": alert,
+        "schedule": schedule, "alert": alert,
         "person": person, "invite": invite, "token": raw, "device": device,
     }  # fmt: skip
 
@@ -98,13 +94,6 @@ OBJECT_URLS = [
     ("operations:command_stop", "command", {}),
     ("operations:schedule_update", "schedule", {}),
     ("operations:schedule_delete", "schedule", {}),
-    ("status:detail", "page", {}),
-    ("status:update", "page", {}),
-    ("status:delete", "page", {}),
-    ("status:preview", "page", {}),
-    ("status:download", "page", {}),
-    ("status:publish", "page", {}),
-    ("status:incident_create", "page", {}),
     ("tenants:person_detail", "person", {}),
     ("tenants:person_update", "person", {}),
     ("devices:detail", "device", {}),
@@ -135,13 +124,6 @@ def test_no_page_reaches_another_accounts_objects(client, admin_user, globex, ur
         assert fresh.pairing_code_hash == "" and fresh.token_hash == "globex-token"
 
 
-def test_incident_update_of_another_account(client, admin_user, globex):
-    url = reverse("status:incident_update", args=[globex["page"].pk, globex["incident"].pk])
-    client.force_login(admin_user)
-    assert client.post(url, {"status": "resolved", "message": "hacked"}).status_code == 404
-    assert StatusIncident.objects.get(pk=globex["incident"].pk).resolved_at is None
-
-
 def test_member_pages_only_show_this_account(client, admin_user, globex):
     client.force_login(admin_user)
     assert client.get(reverse("users:detail", args=[globex["boss"].pk])).status_code == 404
@@ -161,8 +143,6 @@ LIST_PAGES = [
     ("operations:schedule_list", "globex-nightly"),
     ("operations:job_create", "globex-db"),
     ("operations:schedule_create", "globex-group"),
-    ("status:list", "globex-status"),
-    ("status:create", "globex-shop"),
     ("monitors:create", "globex-db"),
     ("alerts:maintenance_create", "globex-db"),
     ("tenants:people", "Globex Gary"),
@@ -322,7 +302,7 @@ def family_owner(django_user_model):
 @pytest.mark.parametrize(
     "url_name",
     ["fleet:dashboard", "fleet:server_create", "monitors:list", "operations:job_list",
-     "operations:job_create", "status:list", "alerts:maintenance", "api_tokens"],
+     "operations:job_create", "alerts:maintenance", "api_tokens"],
 )  # fmt: skip
 def test_family_accounts_have_no_infrastructure(client, family_owner, url_name):
     client.force_login(family_owner)

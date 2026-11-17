@@ -13,9 +13,9 @@ names).
 
 ### Added
 - **Accounts** of three kinds. **Parent**: children and the people who look after them.
-  **Solo developer**: servers, uptime monitors, jobs, status pages and the API, just you.
+  **Solo developer**: servers, uptime monitors, jobs and the API, just you.
   **Company**: all of that plus a team. Every server, monitor, alert, channel, job, schedule,
-  status page, API token, invitation and audit entry belongs to one account, and accounts
+  API token, invitation and audit entry belongs to one account, and accounts
   never see each other's data (`tests/test_isolation.py`).
 - One login can belong to several accounts with a different role in each (owner, admin,
   guardian, operator, viewer), with an account switcher in the sidebar. Inviting an
@@ -48,6 +48,10 @@ names).
   The server dashboard moved to `/servers/`.
 
 ### Removed
+- **Status pages** (public pages published to GitHub Pages or Cloudflare Pages). Migration
+  `core.0003_drop_status_pages` drops their tables and permissions: export anything you
+  need from them before upgrading. Pages already published to GitHub stay up until you
+  delete that repository; they just stop updating.
 - Sign-up waiting for administrator approval: a new sign-up gets its own empty account.
 
 ## [2.2.0] - unreleased · agents must be upgraded

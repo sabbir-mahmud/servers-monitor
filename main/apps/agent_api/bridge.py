@@ -32,7 +32,6 @@ from apps.fleet.services import ingest_report, prune_samples
 from apps.monitors.checker import Checker, prune_checks
 from apps.operations import services as ops
 from apps.operations.models import CommandStatus
-from apps.status import publish as status_publish
 
 from . import relay, signing, usage
 from .schema import PayloadError, clean_report, clean_result
@@ -200,7 +199,7 @@ class Bridge:
 
     # ---------------------------------------------------------------- scheduler
     def schedule_forever(self) -> None:
-        last_sweep = last_prune = last_usage = last_status = 0.0
+        last_sweep = last_prune = last_usage = 0.0
         while not self.stop.is_set():
             close_old_connections()
             now = time.monotonic()
@@ -215,9 +214,6 @@ class Bridge:
                         logger.info("Sweep: %s", result)
                 if backup.snapshot_due():
                     backup.take_snapshot()
-                if now - last_status >= 120 or status_publish.requested():
-                    last_status = now
-                    status_publish.publish_due()
                 if now - last_usage >= 60:
                     last_usage = now
                     usage.flush()

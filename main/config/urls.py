@@ -55,7 +55,6 @@ urlpatterns = [
     path("offline/", pwa.offline, name="offline"),
     path("users/", include("apps.users.urls")),
     path("system/", core_views.SystemView.as_view(), name="system"),
-    path("status-pages/", include("apps.status.urls")),
     path("jobs/", include("apps.operations.urls")),
     path("alerts/", include("apps.alerts.urls")),
     path("apps/", include("apps.monitors.urls")),

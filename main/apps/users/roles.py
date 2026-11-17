@@ -23,7 +23,6 @@ VIEW = [
     "alerts.view_alert",
     "monitors.view_monitor",
     "alerts.view_maintenancewindow",
-    "status.view_statuspage",
     "operations.view_schedule",
 ]
 OPERATE = [
@@ -50,9 +49,6 @@ ADMINISTER = [
     "alerts.delete_channel",
     "monitors.add_monitor",
     "monitors.delete_monitor",
-    "status.add_statuspage",
-    "status.change_statuspage",
-    "status.delete_statuspage",
     "operations.run_shell",
     "operations.add_schedule",
     "operations.change_schedule",

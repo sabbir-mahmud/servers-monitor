@@ -5,7 +5,7 @@
 **Monitor, operate and deploy to all your servers from one calm dashboard,
 without opening a single inbound port.**
 
-Live health · containers and processes · uptime from many places · status pages ·
+Live health · containers and processes · uptime from many places ·
 rolling and scheduled deploys · alerts everywhere · SSO, 2FA and an API · full audit trail
 
 [Quick start](#quick-start) · [Features](#features) · [How it works](#how-it-works) ·
@@ -47,7 +47,6 @@ internet, or every server needs SSH keys, VPNs and open ports. NexGuard needs ne
 | **Server pages** | Ring gauges, services with state and version (systemd, Docker, pm2, process, HTTP), containers, top processes, temperatures and GPUs, disks, 1 hour to 90 day charts. |
 | **One-click operations** | Run allowlisted actions on one server or many, **in rolling batches with health gates**, or **on a cron schedule**, and watch the output stream in. Restart services, tail or **follow logs live** (files and systemd journals), optional audited shell. |
 | **Application monitors** | HTTP(S) (POST, headers, keywords, slow thresholds), TCP, ping, DNS and domain-expiry checks, **from the dashboard and from your own servers** with a quorum, plus **Heartbeat** monitors for cron jobs and backups. Uptime bars, response-time charts, incidents, certificate expiry. |
-| **Status pages** | Public pages with uptime history and incident updates, published as static files to GitHub Pages or Cloudflare Pages. |
 | **Alerts** | Offline, CPU, memory, disk, disk forecast, service, container, temperature, app down, certificate and domain expiring. Deduplicated, with hysteresis so nothing flaps. |
 | **Notifications** | Telegram, email, Slack, Discord, ntfy, Gotify, Pushover, PagerDuty, webhooks and **browser push**, with routing rules, reminders until acknowledged, retries and a delivery log. |
 | **Maintenance windows** | Schedule a window or press **Mute** on any server or app: alerts are still recorded, nobody gets paged. |

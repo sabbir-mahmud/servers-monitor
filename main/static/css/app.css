@@ -876,19 +876,6 @@ tr.row-muted > td { opacity: .6; }
 .kind-pill:hover { background: var(--surface-2, rgba(0,0,0,.04)); }
 .kind-pill.active { background: var(--accent, #2563eb); border-color: var(--accent, #2563eb); color: #fff; }
 
-/* ---------- Status pages ---------- */
-.component-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .75rem; align-items: center; padding: .4rem 0; border-top: 1px solid var(--border, rgba(0,0,0,.08)); }
-.component-row:first-of-type { border-top: 0; }
-.sp-row { display: flex; justify-content: space-between; gap: 1rem; padding: .7rem 1rem; border-top: 1px solid var(--border, rgba(0,0,0,.08)); }
-.sp-row:first-child { border-top: 0; }
-.sp-state { font-size: .875rem; font-weight: 600; }
-.sp-operational { color: var(--good); } .sp-degraded { color: var(--warning-ink, var(--warning)); } .sp-outage { color: var(--critical); }
-.sp-unknown { color: var(--muted, #6b7280); } .sp-maintenance { color: var(--accent, #4263eb); }
-.status-pill { font-size: .78rem; font-weight: 650; padding: .2rem .6rem; border-radius: 999px; color: #fff; }
-.pill-operational { background: var(--good); } .pill-degraded { background: var(--warning); } .pill-partial, .pill-major { background: var(--critical); } .pill-maintenance { background: var(--accent, #4263eb); }
-.incident-log { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .4rem; }
-@media (max-width: 36rem) { .component-row { grid-template-columns: 1fr; } }
-
 /* ---------- Rolling jobs ---------- */
 .batch-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .5rem; }
 .batch-list li { display: flex; gap: .9rem; align-items: baseline; padding: .55rem .75rem; border-radius: .5rem; border: 1px solid var(--border, rgba(0,0,0,.08)); }

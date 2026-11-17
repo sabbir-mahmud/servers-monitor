@@ -152,7 +152,6 @@ main/                      the dashboard (Django project)
   apps/alerts/             alert rules, notification channels and delivery, maintenance
   apps/users/              accounts, roles, invitations, password resets, throttling, 2FA, SSO
   apps/api/                REST API tokens and views, Prometheus export
-  apps/status/             public status pages (static HTML published to GitHub)
   apps/audit/              append-only audit log
   apps/core/               shared middleware, template tags, crypto, network guard, system
                            page, watchdog, backups, the web app (manifest, service worker)

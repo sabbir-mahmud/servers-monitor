@@ -51,7 +51,6 @@ INSTALLED_APPS = [
     "apps.operations",
     "apps.alerts",
     "apps.monitors",
-    "apps.status",
     "apps.agent_api",
     "apps.api",
 ]
