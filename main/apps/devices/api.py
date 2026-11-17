@@ -127,7 +127,7 @@ def _disclosure(device) -> str:
     """Shown on the device before monitoring starts (store rules, and plain honesty).
     It names exactly what that kind of device sends: computers send no location."""
     what = (
-        "battery, storage and system version"
+        "CPU, memory, GPU, battery and storage use, and system version"
         if device.platform in COMPUTERS
         else "battery, storage, network and location"
     )

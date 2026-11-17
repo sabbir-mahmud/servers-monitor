@@ -141,6 +141,10 @@ def test_the_installer_pairs_and_checks_in_for_real(live_server, settings, tmp_p
     device.refresh_from_db()
     assert device.is_paired and device.last_seen_at and device.os_version
     assert device.storage_total and device.app_version.startswith("nexguard-device-sh")
+    # Health readings from this very machine (GPU depends on the hardware, so not required).
+    assert device.cpu_percent is not None and 0 <= device.cpu_percent <= 100
+    assert device.memory_total and 0 < device.memory_used <= device.memory_total
+    assert device.samples.count() == 1
     installed = home / ("Library/Application Support/NexGuard" if THIS_OS == "macos"
                         else ".local/share/nexguard")  # fmt: skip
     config = (installed / "config").read_text()

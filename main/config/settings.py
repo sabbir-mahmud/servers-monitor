@@ -309,6 +309,8 @@ MONITOR_METRIC_RETENTION_DAYS = config("MONITOR_METRIC_RETENTION_DAYS", default=
 ROLLUP_RETENTION_DAYS = config("ROLLUP_RETENTION_DAYS", default=400, cast=int)
 # Children's / staff devices: how long location history is kept.
 DEVICE_LOCATION_DAYS = config("DEVICE_LOCATION_DAYS", default=30, cast=int)
+# ...and how long their health history (CPU, memory, GPU, battery, disk) is kept.
+DEVICE_METRICS_DAYS = config("DEVICE_METRICS_DAYS", default=30, cast=int)
 # Map tiles for device locations ({z}/{x}/{y}). Empty: no maps, just coordinates and links.
 MAP_TILE_URL = config("MAP_TILE_URL", default="https://tile.openstreetmap.org/{z}/{x}/{y}.png")
 MAP_ATTRIBUTION = config("MAP_ATTRIBUTION", default="© OpenStreetMap contributors")

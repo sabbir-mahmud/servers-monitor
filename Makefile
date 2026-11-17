@@ -2,7 +2,7 @@
 PY := $(CURDIR)/venv/bin/python
 MANAGE := cd main && $(PY) manage.py
 
-.PHONY: help install run relay dev test lint format check migrate superuser agent-dev
+.PHONY: help install run relay dev test lint format check migrate superuser agent-dev device-agent
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -32,6 +32,9 @@ agent-dev: ## Run the agent locally (needs agent/dev.toml with a redis_url)
 test: ## Run main + agent tests
 	cd main && $(PY) -m pytest
 	$(PY) -m pytest agent/tests -q
+
+device-agent: ## Test the Go device agent and build it for every system into device-agent/dist/
+	cd device-agent && go vet ./... && go test ./... && ./build.sh
 
 lint: ## Lint and check formatting
 	venv/bin/ruff check .

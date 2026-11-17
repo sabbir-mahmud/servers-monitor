@@ -37,8 +37,24 @@ Phones use the NexGuard app instead: the pair page shows a QR code to scan.
 ## What gets installed
 
 A check-in that runs **as the signed-in user** every 5 minutes and reports as often as the
-dashboard asks. It sends battery, free and total storage, system version, model and
-computer name. It doesn't read files, see the screen or record keystrokes.
+dashboard asks. It sends CPU, memory and GPU use, battery, free and total storage, system
+version, model and computer name. It doesn't read files, see the screen or record
+keystrokes.
+
+## Health
+
+The device page's **Health** card shows CPU, memory and GPU use right now, and charts of
+CPU, memory, GPU, battery and storage over 6 hours to 30 days. History is kept for
+`DEVICE_METRICS_DAYS` (30) and deleted with the device.
+
+| Reading | Mac | Linux | Windows |
+|---|---|---|---|
+| CPU | `top` (one-second sample) | `/proc/stat` (one-second sample) | `Win32_Processor` load |
+| Memory used | active + wired + compressed (as Activity Monitor) | `MemTotal - MemAvailable` | total - free physical |
+| GPU | `ioreg` device utilization | AMD `gpu_busy_percent` or `nvidia-smi` | 3D engine counters (English Windows only) |
+
+A reading the system can't give is left out and shows as "Not reported". It isn't
+recorded as zero.
 
 | System | Runs from | Files |
 |---|---|---|
@@ -48,6 +64,16 @@ computer name. It doesn't read files, see the screen or record keystrokes.
 
 The device token is stored in a `config` file readable only by that user. A failed
 check-in is noted in an `error` file next to it.
+
+## The protected agent (in progress)
+
+For computers that need to stay monitored, such as a child's account or a company laptop,
+there is a Go agent in `device-agent/`. An administrator installs it once, and it runs as
+a system service that a standard user can't stop. It reports the same health readings.
+Website rules, browser history and computer location will build on it
+([roadmap](planning/device-monitoring.md)). For now it's installed by hand: see
+[device-agent/README.md](../device-agent/README.md). A one-line install from the pair
+page comes next.
 
 ## Removing a device
 

@@ -11,3 +11,5 @@ main/staticfiles/
 .DS_Store
 # Daily database snapshots written by the relay (BACKUP_DIR default)
 main/backups/
+# Device agent builds (device-agent/build.sh)
+device-agent/dist/

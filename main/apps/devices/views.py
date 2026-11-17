@@ -126,9 +126,21 @@ class DeviceDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
     def get_queryset(self):
         return super().get_queryset().select_related("person")
 
+    def get_template_names(self):
+        if self.request.htmx and self.request.GET.get("part") == "charts":  # range / refresh
+            return [f"{self.template_name}#charts"]
+        return [self.template_name]
+
     def get_context_data(self, **kwargs):
         device = self.object
+        range_key = self.request.GET.get("range", services.DEFAULT_CHART_RANGE)
+        if range_key not in services.CHART_RANGES:
+            range_key = services.DEFAULT_CHART_RANGE
         return super().get_context_data(
+            charts=services.chart_series(device, range_key),
+            range_key=range_key,
+            ranges=list(services.CHART_RANGES),
+            DEVICE_METRICS_DAYS=settings.DEVICE_METRICS_DAYS,
             locations=device.locations.all()[:40],
             map=maps.for_device(device),
             back_url=_back_to(device),

@@ -38,6 +38,16 @@ names).
   runs as the user every 5 minutes (Task Scheduler, a LaunchAgent, or a systemd user
   timer/cron), and uninstalls itself when the device is deleted on the dashboard. See
   [docs/devices.md](docs/devices.md).
+- **Device health**: computers report CPU, memory and GPU use with every check-in, and
+  the device page has a Health card with current use and charts of CPU, memory, GPU,
+  battery and storage (6 h to 30 days, kept for `DEVICE_METRICS_DAYS`, 30). The consent
+  message names this data. Installed check-ins need the new script (1.1.0), which comes with
+  pairing again.
+- **Device agent** (`device-agent/`, Go, version 0.1.0): one static binary for Windows,
+  macOS and Linux (x86-64 and ARM). It runs as a system service that only an administrator
+  can stop or remove. `nexguard pair`, `install`, `status`, `checkin` and `uninstall`.
+  It reports the same health readings as the scripts. `make device-agent` tests it and
+  builds it, and CI tests it on Linux, macOS and Windows.
 - `POST /device/v1/pair` with `"preview": true` shows who will see the device without
   using the code, and `Accept: text/plain` answers as `key=value` lines for shell clients.
 - Sign-up (`ALLOW_SIGNUP`) asks for the account kind and makes the person its owner.

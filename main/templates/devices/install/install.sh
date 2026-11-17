@@ -4,7 +4,7 @@
 # Downloaded from {{ server }} for one pairing code. It:
 #   1. shows who will see this computer, and pairs only if you say yes;
 #   2. installs a small check-in that runs as you every few minutes
-#      (battery, storage, system version; no administrator rights needed);
+#      (CPU, memory, GPU, battery, storage, system version; no admin rights);
 #   3. checks in once so the dashboard shows the computer straight away.
 #
 # To remove it later:  curl -fsSL {{ server }}/d/uninstall.sh | sh
@@ -101,9 +101,9 @@ EOF
 
 cat > "$DIR/checkin.sh" <<'CHECKIN'
 #!/bin/sh
-# NexGuard check-in: sends battery, storage and the system version to the dashboard.
-# Runs every 5 minutes; actually reports as often as the dashboard asks (INTERVAL).
-VERSION='1.0.0'
+# NexGuard check-in: sends CPU, memory, GPU, battery and storage use and the system
+# version to the dashboard. Runs every 5 minutes; reports as often as it asks (INTERVAL).
+VERSION='1.1.0'
 DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$DIR/config"
 
@@ -114,7 +114,8 @@ last="$(cat "$DIR/last" 2>/dev/null || echo 0)"
 json_str() { printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\000-\037')"; }
 first() { head -n 1 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'; }
 
-pct=""; plugged=""
+pct=""; plugged=""; cpu=""; mem_total=""; mem_used=""; gpu=""
+num() { grep -E '^[0-9]+([.][0-9]+)?$' | head -n 1; }  # a plain number, or nothing
 if [ "$(uname -s)" = Darwin ]; then
   platform=macos
   os="macOS $(sw_vers -productVersion 2>/dev/null)"
@@ -125,6 +126,16 @@ if [ "$(uname -s)" = Darwin ]; then
   pct="$(printf '%s\n' "$batt" | sed -n 's/.*[^0-9]\([0-9][0-9]*\)%.*/\1/p' | head -n 1)"
   if printf '%s\n' "$batt" | head -n 1 | grep -q 'AC Power'; then plugged=true; else plugged=false; fi
   disk=/System/Volumes/Data; [ -d "$disk" ] || disk=/
+  # CPU: the second of two one-second samples (the first covers the time since boot).
+  cpu="$(top -l 2 -n 0 -s 1 2>/dev/null | sed -n 's/.*CPU usage:.* \([0-9.]*\)% idle.*/\1/p' | tail -n 1 \
+    | awk 'NF { printf "%.1f", 100 - $1 }' | num)"
+  # Memory "used" as Activity Monitor counts it: active + wired + compressed pages.
+  mem_total="$(sysctl -n hw.memsize 2>/dev/null | num)"
+  mem_used="$(vm_stat 2>/dev/null | awk '
+    /page size of/ { ps = $8 } /Pages active/ { a = $3 } /Pages wired down/ { w = $4 }
+    /Pages occupied by compressor/ { c = $5 }
+    END { gsub(/[.]/, "", a); gsub(/[.]/, "", w); gsub(/[.]/, "", c); if (ps) printf "%.0f", (a + w + c) * ps }' | num)"
+  gpu="$(ioreg -r -d 1 -c IOAccelerator 2>/dev/null | sed -n 's/.*"Device Utilization %"=\([0-9]*\).*/\1/p' | num)"
 else
   platform=linux
   os="$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | tr -d '"' | first)"
@@ -141,12 +152,26 @@ else
     break
   done
   disk=/
+  cpu_now() { awk '/^cpu / { print $2 + $3 + $4 + $5 + $6 + $7 + $8 + $9, $5 + $6 }' /proc/stat 2>/dev/null; }
+  a="$(cpu_now)"; sleep 1; b="$(cpu_now)"
+  cpu="$(printf '%s %s\n' "$a" "$b" | awk 'NF == 4 && $3 > $1 { printf "%.1f", 100 * (1 - ($4 - $2) / ($3 - $1)) }' | num)"
+  mem_total="$(awk '/^MemTotal:/ { printf "%.0f", $2 * 1024 }' /proc/meminfo 2>/dev/null | num)"
+  mem_used="$(awk '/^MemTotal:/ { t = $2 } /^MemAvailable:/ { f = $2 } END { if (t) printf "%.0f", (t - f) * 1024 }' /proc/meminfo 2>/dev/null | num)"
+  for g in /sys/class/drm/card*/device/gpu_busy_percent; do  # AMD (and some Intel)
+    [ -r "$g" ] && gpu="$(first < "$g" | num)" && [ -n "$gpu" ] && break
+  done
+  if [ -z "$gpu" ] && command -v nvidia-smi >/dev/null 2>&1; then
+    gpu="$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | first | num)"
+  fi
 fi
 storage="$(df -kP "$disk" 2>/dev/null | awk 'NR==2 { printf "{\"total\":%.0f,\"free\":%.0f}", $2 * 1024, $4 * 1024 }')"
 
 json="{\"platform\":\"$platform\",\"os_version\":$(json_str "$os"),\"model\":$(json_str "$model"),\"hostname\":$(json_str "$name"),\"app_version\":\"nexguard-device-sh $VERSION\""
 [ -n "$pct" ] && json="$json,\"battery\":{\"percent\":$pct,\"charging\":$plugged}"
 [ -n "$storage" ] && json="$json,\"storage\":$storage"
+[ -n "$cpu" ] && json="$json,\"cpu\":{\"percent\":$cpu}"
+[ -n "$mem_total" ] && [ -n "$mem_used" ] && json="$json,\"memory\":{\"total\":$mem_total,\"used\":$mem_used}"
+[ -n "$gpu" ] && json="$json,\"gpu\":{\"percent\":$gpu}"
 json="$json}"
 
 out="$(mktemp)"

@@ -58,6 +58,32 @@
   </div>
 </section>
 
+{% if device.has_health or charts.cpu or charts.battery or charts.disk %}
+{% partialdef charts inline %}
+<section id="charts" class="card health-card" aria-labelledby="health-title"
+  hx-get="{% url 'devices:detail' device.pk %}?part=charts&range={{ range_key }}" hx-trigger="every 60s [!document.hidden]" hx-swap="outerHTML">
+  <div class="card-header"><span id="health-title">{% icon "chart" 17 %} Health</span>
+    <div class="card-actions">
+      {% if charts.data_from %}<span class="muted small d-none d-md-inline" title="Nothing was recorded before this, so the chart starts empty">Recording since {{ charts.data_from|date:"M j, H:i" }}</span>{% endif %}
+      <div class="segmented" role="group" aria-label="Time range">
+        {% for r in ranges %}<button type="button" class="{% if r == range_key %}active{% endif %}" aria-pressed="{% if r == range_key %}true{% else %}false{% endif %}"
+          hx-get="{% url 'devices:detail' device.pk %}?part=charts&range={{ r }}" hx-target="#charts" hx-swap="outerHTML">{{ r }}</button>{% endfor %}
+      </div>
+    </div>
+  </div>
+  {% if charts.data_from %}<div class="chart-note d-md-none">Recording since {{ charts.data_from|date:"M j, H:i" }}</div>{% endif %}
+  <div class="card-body pt-4"><div class="row g-4 gx-lg-5">
+    {% if charts.cpu or device.has_health %}<div class="col-12 col-lg-4">{% sparkline charts.cpu charts.start charts.end "CPU" %}</div>
+    <div class="col-12 col-lg-4">{% sparkline charts.memory charts.start charts.end "Memory" %}</div>{% endif %}
+    {% if charts.gpu %}<div class="col-12 col-lg-4">{% sparkline charts.gpu charts.start charts.end "GPU" %}</div>{% endif %}
+    {% if charts.battery %}<div class="col-12 col-lg-4">{% sparkline charts.battery charts.start charts.end "Battery" %}</div>{% endif %}
+    {% if charts.disk %}<div class="col-12 col-lg-4">{% sparkline charts.disk charts.start charts.end "Storage used" %}</div>{% endif %}
+  </div>
+  <p class="small text-body-secondary mt-3 mb-0">Kept for {{ DEVICE_METRICS_DAYS }} days. Each point is an average of the check-ins in that stretch.</p></div>
+</section>
+{% endpartialdef %}
+{% endif %}
+
 {% if device.has_location %}
 <section class="card loc-card" aria-labelledby="where-title">
   <div class="map-card-head">
@@ -111,6 +137,7 @@
     <div><dt>Type</dt><dd>{{ device.get_platform_display }}{% if not device.is_phone %} · computer{% endif %}</dd></div>
     <div><dt>Model</dt><dd>{{ device.model|default:"—" }}</dd></div>
     <div><dt>System</dt><dd>{{ device.os_version|default:"—" }}</dd></div>
+    {% if device.memory_total %}<div><dt>Memory</dt><dd>{{ device.memory_total|filesizeformat }}</dd></div>{% endif %}
     <div><dt>Name on device</dt><dd class="text-truncate" title="{{ device.hostname }}">{{ device.hostname|default:"—" }}</dd></div>
     {% if ACCOUNT.kind != "solo" %}<div><dt>Belongs to</dt><dd>{% if device.person %}<a href="{% url 'tenants:person_detail' device.person.pk %}">{{ device.person.name }}</a>{% else %}Shared{% endif %}</dd></div>{% else %}<div><dt>Checks in</dt><dd>Every {{ device.checkin_seconds|every }}</dd></div>{% endif %}
     <div><dt>Paired</dt><dd>{% if device.paired_at %}{{ device.paired_at|date:"j M Y, H:i" }}{% else %}Not yet{% endif %}</dd></div>
@@ -119,7 +146,7 @@
   </dl>
   {% if perms.devices.delete_device %}
   <div class="dlist-foot justify-content-between">
-    <span class="small text-body-secondary">Removing it stops reporting at once and deletes its location history.</span>
+    <span class="small text-body-secondary">Removing it stops reporting at once and deletes its location and health history.</span>
     <a class="btn btn-sm btn-outline-danger" href="{% url 'devices:delete' device.pk %}">{% icon "trash" 14 %} Remove device</a>
   </div>
   {% endif %}

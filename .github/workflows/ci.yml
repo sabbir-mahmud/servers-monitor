@@ -41,6 +41,29 @@ jobs:
       - run: python -m py_compile agent/server_monitor_agent.py agent/smctl.py
       - run: python -m pytest agent/tests -q
 
+  device-agent:
+    name: Device agent on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: device-agent
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: device-agent/go.mod
+          cache-dependency-path: device-agent/go.sum
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test ./...
+      - run: ./build.sh
+        if: matrix.os == 'ubuntu-latest'
+
   installer:
     name: Installer (shellcheck)
     runs-on: ubuntu-latest

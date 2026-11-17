@@ -131,6 +131,11 @@ class Device(Machine):
     charging = models.BooleanField(null=True, blank=True)
     storage_free = models.BigIntegerField(null=True, blank=True)
     storage_total = models.BigIntegerField(null=True, blank=True)
+    # Health, computers only (phones don't report it): the latest reading. History below.
+    cpu_percent = models.FloatField(null=True, blank=True)
+    memory_used = models.BigIntegerField(null=True, blank=True)
+    memory_total = models.BigIntegerField(null=True, blank=True)
+    gpu_percent = models.FloatField(null=True, blank=True)
     network = models.CharField(max_length=20, blank=True)  # wifi, cellular, ethernet, none
     network_name = models.CharField(max_length=100, blank=True)
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
@@ -217,6 +222,16 @@ class Device(Machine):
             return None
         return round(100 * (self.storage_total - self.storage_free) / self.storage_total)
 
+    @property
+    def memory_used_percent(self) -> int | None:
+        if not self.memory_total or self.memory_used is None:
+            return None
+        return round(100 * self.memory_used / self.memory_total)
+
+    @property
+    def has_health(self) -> bool:
+        return self.cpu_percent is not None or self.memory_total is not None
+
 
 class LocationSource(models.TextChoices):
     GPS = "gps", "GPS"
@@ -239,6 +254,30 @@ class DeviceLocation(models.Model):
     class Meta:
         ordering = ["-recorded_at"]
         indexes = [models.Index(fields=["device", "-recorded_at"], name="devloc_device_recent")]
+
+    def __str__(self):
+        return f"{self.device_id} at {self.recorded_at:%Y-%m-%d %H:%M}"
+
+
+class DeviceSample(models.Model):
+    """One check-in's health reading, for the device's History charts. Each value is
+    optional: a phone has no CPU figure, a desktop no battery. Pruned after
+    DEVICE_METRICS_DAYS; deleted with the device."""
+
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name="samples")
+    recorded_at = models.DateTimeField()
+    cpu_percent = models.FloatField(null=True, blank=True)
+    memory_percent = models.FloatField(null=True, blank=True)
+    gpu_percent = models.FloatField(null=True, blank=True)
+    battery_percent = models.FloatField(null=True, blank=True)
+    disk_percent = models.FloatField(null=True, blank=True)
+
+    account_path = "device__account"
+    METRICS = ("cpu_percent", "memory_percent", "gpu_percent", "battery_percent", "disk_percent")
+
+    class Meta:
+        ordering = ["-recorded_at"]
+        indexes = [models.Index(fields=["device", "recorded_at"], name="devsample_device_time")]
 
     def __str__(self):
         return f"{self.device_id} at {self.recorded_at:%Y-%m-%d %H:%M}"

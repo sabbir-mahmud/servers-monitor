@@ -1672,3 +1672,4 @@ kbd { font-family: var(--font-mono); font-size: .85em; padding: .05rem .4rem; bo
 .connect-direct > summary { cursor: pointer; font-weight: 500; font-size: .9rem; color: var(--ink-2); margin-bottom: 1rem; }
 .connect-direct[open] > summary { color: var(--ink); }
 @media (max-width: 575.98px) { .connect-cmd { flex-wrap: wrap; } .connect-card > .card-body { padding: 1.25rem; } }
+.health-card { margin-bottom: 1rem; }

@@ -26,6 +26,7 @@ from apps.alerts import delivery, forecast
 from apps.alerts.services import sweep
 from apps.core import backup
 from apps.devices.services import prune_locations
+from apps.devices.services import prune_samples as prune_device_samples
 from apps.fleet import rollups
 from apps.fleet.models import Server
 from apps.fleet.services import ingest_report, prune_samples
@@ -222,7 +223,12 @@ class Bridge:
                     usage.prune()
                     rollups.build_all()  # before the forecast, which reads them
                     forecast.update_all()
-                    if deleted := prune_samples() + prune_checks() + prune_locations():
+                    if (
+                        deleted := prune_samples()
+                        + prune_checks()
+                        + prune_locations()
+                        + prune_device_samples()
+                    ):
                         logger.info("Pruned %d samples/checks past retention", deleted)
             except Exception:  # keep scheduling even if one round hits a bug
                 logger.exception("Scheduler round failed")

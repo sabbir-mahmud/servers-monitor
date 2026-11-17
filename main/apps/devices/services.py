@@ -10,7 +10,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from . import pairing
-from .models import Device, DeviceLocation, LocationSource, Platform
+from .models import COMPUTERS, Device, DeviceLocation, DeviceSample, LocationSource, Platform
 
 logger = logging.getLogger(__name__)
 
@@ -115,11 +115,14 @@ def checkin(device: Device, report: dict, ip: str | None) -> None:
         kind = str(network.get("type") or "").lower()
         device.network = kind if kind in {"wifi", "cellular", "ethernet", "none"} else ""
         device.network_name = _text(network.get("name"), 100)
+    if device.platform in COMPUTERS:
+        _apply_health(device, report)
     location = _location(report.get("location"), now)
     if location is not None:
         device.latitude, device.longitude = location["latitude"], location["longitude"]
         device.location_accuracy_m, device.location_at = location["accuracy_m"], location["at"]
     device.save()
+    _record_sample(device, now)
     if location is not None:
         DeviceLocation.objects.create(
             device=device,
@@ -129,6 +132,42 @@ def checkin(device: Device, report: dict, ip: str | None) -> None:
             accuracy_m=location["accuracy_m"],
             source=location["source"],
         )
+
+
+def _apply_health(device: Device, report: dict) -> None:
+    """CPU, memory and GPU use. Each is optional, and a check-in without one clears it:
+    showing a stale "CPU 95%" from yesterday would be worse than "not reported"."""
+    cpu = report.get("cpu") if isinstance(report.get("cpu"), dict) else {}
+    gpu = report.get("gpu") if isinstance(report.get("gpu"), dict) else {}
+    memory = report.get("memory") if isinstance(report.get("memory"), dict) else {}
+    device.cpu_percent = _percent(cpu.get("percent"))
+    device.gpu_percent = _percent(gpu.get("percent"))
+    total = _int(memory.get("total"), 1, 10**14)
+    used = _int(memory.get("used"), 0, 10**14)
+    if total is not None and used is not None and used <= total:
+        device.memory_total, device.memory_used = total, used
+    else:
+        device.memory_total = device.memory_used = None
+
+
+def _percent(value) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return round(float(value), 1) if 0 <= value <= 100 else None
+
+
+def _record_sample(device: Device, now: datetime) -> None:
+    sample = DeviceSample(
+        device=device,
+        recorded_at=now,
+        cpu_percent=device.cpu_percent,
+        memory_percent=device.memory_used_percent,
+        gpu_percent=device.gpu_percent,
+        battery_percent=device.battery_percent,
+        disk_percent=device.storage_used_percent,
+    )
+    if any(getattr(sample, field) is not None for field in DeviceSample.METRICS):
+        sample.save()
 
 
 def _apply_info(device: Device, info: dict) -> None:
@@ -174,6 +213,63 @@ def _location(value, now: datetime) -> dict | None:
         "at": at,
         "source": source if source in LocationSource.values else LocationSource.GPS,
     }
+
+
+CHART_RANGES = {"6h": timedelta(hours=6), "24h": timedelta(hours=24),
+                "7d": timedelta(days=7), "30d": timedelta(days=30)}  # fmt: skip
+DEFAULT_CHART_RANGE = "24h"
+CHART_POINTS = 120
+CHART_SERIES = {"cpu": "cpu_percent", "memory": "memory_percent", "gpu": "gpu_percent",
+                "battery": "battery_percent", "disk": "disk_percent"}  # fmt: skip
+
+
+def chart_series(device: Device, range_key: str) -> dict:
+    """Bucket-averaged health history for the range, at most CHART_POINTS per series, in the
+    shape the `sparkline` tag draws: [[epoch, value], ...]. A series nothing reported is
+    empty (the page hides it), and gaps (missing values) are skipped, not drawn as zero."""
+    span = CHART_RANGES.get(range_key, CHART_RANGES[DEFAULT_CHART_RANGE])
+    end = timezone.now()
+    start = end - span
+    bucket = span.total_seconds() / CHART_POINTS
+    rows = (
+        device.samples.filter(recorded_at__gte=start)
+        .order_by("recorded_at")
+        .values_list("recorded_at", *CHART_SERIES.values())
+    )
+    sums: dict[str, dict[int, list]] = {name: {} for name in CHART_SERIES}
+    first = None
+    for ts, *values in rows:
+        first = first or ts
+        idx = min(int((ts - start).total_seconds() // bucket), CHART_POINTS - 1)
+        for name, value in zip(CHART_SERIES, values, strict=True):
+            if value is not None:
+                acc = sums[name].setdefault(idx, [ts, 0.0, 0])
+                acc[0], acc[1], acc[2] = ts, acc[1] + value, acc[2] + 1
+    series = {
+        name: [
+            [int(ts.timestamp()), round(total / n, 1)] for _, (ts, total, n) in sorted(b.items())
+        ]
+        for name, b in sums.items()
+    }
+    return {
+        "start": int(start.timestamp()),
+        "end": int(end.timestamp()),
+        # Recording began partway through: say so, or a mostly empty chart looks broken.
+        "data_from": first if first and first - start > span / 20 else None,
+        **series,
+    }
+
+
+def prune_samples(batch_size: int = 5000) -> int:
+    cutoff = timezone.now() - timedelta(days=settings.DEVICE_METRICS_DAYS)
+    total = 0
+    while ids := list(
+        DeviceSample.objects.filter(recorded_at__lt=cutoff).values_list("pk", flat=True)[
+            :batch_size
+        ]
+    ):
+        total += DeviceSample.objects.filter(pk__in=ids).delete()[0]
+    return total
 
 
 def prune_locations(batch_size: int = 5000) -> int:

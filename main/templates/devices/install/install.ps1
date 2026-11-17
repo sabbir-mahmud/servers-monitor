@@ -3,7 +3,7 @@
 # Downloaded from {{ server }} for one pairing code. It:
 #   1. shows who will see this computer, and pairs only if you say yes;
 #   2. adds a scheduled task that checks in as you every 5 minutes
-#      (battery, storage, Windows version; no administrator rights needed);
+#      (CPU, memory, GPU, battery, storage, Windows version; no administrator rights);
 #   3. checks in once so the dashboard shows the computer straight away.
 #
 # To remove it later:  irm {{ server }}/d/uninstall.ps1 | iex
@@ -69,10 +69,10 @@ $NgCode = '{{ code }}'
     ConvertTo-Json | Set-Content -Path (Join-Path $dir 'config.json') -Encoding ASCII
 
   $checkin = @'
-# NexGuard check-in: sends battery, storage and the Windows version to the dashboard.
-# Runs every 5 minutes; actually reports as often as the dashboard asks (interval).
+# NexGuard check-in: sends CPU, memory, GPU, battery and storage use and the Windows
+# version to the dashboard. Runs every 5 minutes; reports as often as it asks (interval).
 $ErrorActionPreference = 'Stop'
-$version = '1.0.0'
+$version = '1.1.0'
 $dir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $configPath = Join-Path $dir 'config.json'
 $cfg = Get-Content $configPath -Raw | ConvertFrom-Json
@@ -104,6 +104,22 @@ if ($battery) {
 }
 $drive = New-Object System.IO.DriveInfo ($env:SystemDrive)
 $body.storage = @{ total = $drive.TotalSize; free = $drive.AvailableFreeSpace }
+# Health. Each reading is optional: a failure leaves it out, never the whole check-in.
+try {
+  $load = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
+  if ($null -ne $load) { $body.cpu = @{ percent = [math]::Round([double]$load, 1) } }
+} catch { }
+if ($os.TotalVisibleMemorySize) {
+  $total = [int64]$os.TotalVisibleMemorySize * 1024
+  $body.memory = @{ total = $total; used = $total - [int64]$os.FreePhysicalMemory * 1024 }
+}
+try {
+  # 3D engine use summed over processes, as Task Manager shows it. Counter names are
+  # localized, so this is skipped on a Windows that isn't in English.
+  $samples = (Get-Counter '\GPU Engine(*engtype_3D)\Utilization Percentage' -ErrorAction Stop).CounterSamples
+  $gpu = ($samples | Measure-Object -Property CookedValue -Sum).Sum
+  $body.gpu = @{ percent = [math]::Round([math]::Min(100, [double]$gpu), 1) }
+} catch { }
 
 $errorPath = Join-Path $dir 'error'
 try {
@@ -161,7 +177,7 @@ if (-not $Quiet) { Write-Host 'NexGuard is removed from this computer.' }
     -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
   $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
   Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $triggers -Settings $settings `
-    -Principal $principal -Description 'Reports battery, storage and Windows version to NexGuard.' -Force | Out-Null
+    -Principal $principal -Description 'Reports CPU, memory, GPU, battery, storage and Windows version to NexGuard.' -Force | Out-Null
 
   # -------------------------------------------------------------------- first check-in
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script now
