@@ -143,9 +143,15 @@ def _disclosure(device, info: dict) -> str:
     text = f"{device.account.name} will see this device's last online time, {what}."
     agent = str(info.get("app_version", "")).startswith(AGENT_APP)
     if agent and device.platform in COMPUTERS and device.controls_owner_ok:
-        text += (" They can also turn on screen time (which apps are used, and for how "
-                 "long), websites visited (site names and time, not pages or searches) and "
-                 "blocking of adult or chosen websites on this computer.")  # fmt: skip
+        if info.get("agent_mode") == "user":  # runs as this person: can't block sites
+            text += (" They can also turn on screen time (which apps you use, and for how "
+                     "long) and websites visited (site names and time, not pages or "
+                     "searches) for your account on this computer.")  # fmt: skip
+        else:
+            text += (" They can also turn on screen time (which apps are used, and for "
+                     "how long), websites visited (site names and time, not pages or "
+                     "searches) and blocking of adult or chosen websites on this "
+                     "computer.")  # fmt: skip
     return text
 
 
@@ -186,7 +192,8 @@ def _controls_json(device) -> dict | None:
     return {
         "screen_time": bool(controls and controls.screen_time),
         "web_activity": bool(controls and controls.web_activity),
-        "blocking": blocklist.version(controls),  # "" = no blocking
+        # "" = no blocking; never for a user-mode agent, which couldn't apply it
+        "blocking": blocklist.version(controls) if device.can_block else "",
     }
 
 
@@ -201,7 +208,7 @@ def blocklist_view(request):
     if not throttle.allow("device-blocklist", str(device.pk), 20, 3600):
         return HttpResponse("Too many requests.\n", status=429, content_type="text/plain",
                             headers={"Retry-After": "3600"})  # fmt: skip
-    controls = activity.controls_for(device) if device.controls_allowed else None
+    controls = activity.controls_for(device) if device.can_block else None
     version = blocklist.version(controls)
     etag = f'"{version}"'
     if version and request.META.get("HTTP_IF_NONE_MATCH") == etag:

@@ -10,7 +10,15 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from . import pairing
-from .models import COMPUTERS, Device, DeviceLocation, DeviceSample, LocationSource, Platform
+from .models import (
+    AGENT_APP,
+    COMPUTERS,
+    Device,
+    DeviceLocation,
+    DeviceSample,
+    LocationSource,
+    Platform,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +187,11 @@ def _apply_info(device: Device, info: dict) -> None:
                           ("app_version", 30)):  # fmt: skip
         if field in info:
             setattr(device, field, _text(info.get(field), length))
+    if "agent_mode" in info:
+        mode = info.get("agent_mode")
+        device.agent_mode = mode if mode in ("user", "system") else ""
+    elif "app_version" in info and not device.app_version.startswith(AGENT_APP):
+        device.agent_mode = ""  # paired again with the script
 
 
 def _text(value, length: int) -> str:

@@ -120,11 +120,13 @@ def test_text_answers_for_the_shell_installer(client, parent, sara):
 @pytest.mark.django_db(transaction=True)
 def test_the_installer_pairs_and_checks_in_for_real(live_server, settings, tmp_path):
     """Run the real install.sh with sh and curl against a live dashboard, in a throwaway
-    HOME, without scheduling anything on this machine."""
+    HOME, without scheduling anything on this machine. This dashboard has no agent builds,
+    so it installs the health-only check-in script."""
     from apps.devices import services
     from apps.tenants.models import Account
 
     settings.DASHBOARD_URL = live_server.url
+    settings.DEVICE_AGENT_DIR = tmp_path / "no-builds"
     account = Account.objects.create(name="The Rahmans", kind="family")
     device = Device.objects.create(account=account, platform=THIS_OS, name="Test laptop")
     code = services.new_pairing_code(device).replace("-", "")
@@ -161,6 +163,102 @@ def test_uninstall_only_stops_what_this_install_scheduled(client, path):
     """launchd jobs and the crontab belong to the login, not to $HOME: an install made under
     another HOME (as the tests above do) must never stop the computer's real check-in."""
     script = client.get(path).content.decode()
-    assert 'if [ -f "$PLIST" ]; then\n    launchctl bootout' in script
-    assert 'grep -vF "$DIR/checkin.sh" | crontab -' in script
+    assert 'if [ -f "$PLIST" ]; then\n      launchctl bootout' in script
+    assert 'grep -vF "$DIR/" | crontab -' in script
     assert "grep -v nexguard | crontab -" not in script.split("run every 5 minutes")[0]
+
+
+GO = shutil.which("go") or (
+    "/opt/homebrew/bin/go" if os.path.exists("/opt/homebrew/bin/go") else None
+)
+
+
+@pytest.fixture(scope="module")
+def agent_builds(tmp_path_factory):
+    """This computer's agent, built from source the way build.sh names it, with checksums."""
+    import hashlib
+    import platform
+
+    out = tmp_path_factory.mktemp("builds")
+    goos = {"macos": "darwin", "linux": "linux"}[THIS_OS]
+    arch = {"arm64": "arm64", "aarch64": "arm64"}.get(platform.machine(), "amd64")
+    name = f"nexguard-{goos}-{arch}"
+    src = os.path.join(os.path.dirname(__file__), "..", "..", "device-agent")
+    subprocess.run([GO, "build", "-ldflags", "-X main.Version=9.9.9", "-o", str(out / name), "."],
+                   cwd=src, check=True, env={**os.environ, "CGO_ENABLED": "0"},
+                   timeout=300)  # fmt: skip
+    digest = hashlib.sha256((out / name).read_bytes()).hexdigest()
+    (out / "SHA256SUMS").write_text(f"{digest}  {name}\n")
+    return out
+
+
+@pytest.mark.skipif(THIS_OS is None or not shutil.which("curl") or GO is None,
+                    reason="needs sh, curl and Go")  # fmt: skip
+@pytest.mark.django_db(transaction=True)
+def test_the_installer_installs_the_agent_as_the_user(
+    live_server, settings, tmp_path, agent_builds
+):
+    """With agent builds on the dashboard, the one-line command installs the agent running
+    as the person (no sudo): screen time and websites can be turned on, blocking can't."""
+    from apps.devices import services
+    from apps.devices.models import DeviceControls
+    from apps.tenants.models import Account
+
+    settings.DASHBOARD_URL = live_server.url
+    settings.DEVICE_AGENT_DIR = agent_builds
+    settings.ADULT_BLOCKLIST_URL = ""
+    account = Account.objects.create(name="Solo Dev", kind="solo")
+    device = Device.objects.create(account=account, platform=THIS_OS, name="My laptop")
+    code = services.new_pairing_code(device).replace("-", "")
+    home = tmp_path / "home"
+    home.mkdir()
+    hosts = tmp_path / "hosts"
+    hosts.write_text("127.0.0.1 localhost\n")
+    env = {"PATH": os.environ["PATH"], "HOME": str(home), "NEXGUARD_YES": "1",
+           "NEXGUARD_NO_SCHEDULE": "1", "XDG_DATA_HOME": str(home / ".local/share"),
+           "NEXGUARD_HOSTS": str(hosts)}  # fmt: skip
+    script = f"curl -fsSL {live_server.url}/d/{code}/install.sh | sh"
+    result = subprocess.run(["sh", "-c", script], env=env, capture_output=True, text=True,
+                            timeout=120)  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'Paired as "My laptop" in Solo Dev' in result.stdout
+    # The agent asked with the full disclosure: screen time and websites, never blocking.
+    assert "screen time" in result.stdout and "blocking" not in result.stdout
+
+    device.refresh_from_db()
+    assert device.app_version == "nexguard-agent 9.9.9" and device.agent_mode == "user"
+    assert device.controls_allowed and not device.can_block
+    installed = home / ("Library/Application Support/NexGuard" if THIS_OS == "macos"
+                        else ".local/share/nexguard")  # fmt: skip
+    assert (installed / "nexguard").exists() and (installed / "uninstall.sh").exists()
+    assert oct((installed / "config.json").stat().st_mode)[-3:] == "600"
+    assert not (installed / "checkin.sh").exists()
+
+    # Blocking chosen on the dashboard never reaches a user-mode agent.
+    DeviceControls.objects.create(device=device, screen_time=True, block_adult=True,
+                                  blocked_domains="tiktok.com")  # fmt: skip
+    agent = [str(installed / "nexguard"), "--user", "--dir", str(installed)]
+    checkin = subprocess.run([*agent, "checkin"], env=env, capture_output=True, text=True,
+                             timeout=60)  # fmt: skip
+    assert checkin.returncode == 0, checkin.stderr
+    assert hosts.read_text() == "127.0.0.1 localhost\n"
+    status = subprocess.run([*agent, "status"], env=env, capture_output=True, text=True,
+                            timeout=60).stdout  # fmt: skip
+    assert "Screen time: on" in status and "needs the administrator install" in status
+
+    subprocess.run(["sh", str(installed / "uninstall.sh"), "quiet"], env=env, timeout=60)
+    assert not installed.exists()
+
+
+def test_agent_builds_are_served_by_name_only(client, settings, tmp_path):
+    settings.DEVICE_AGENT_DIR = tmp_path
+    (tmp_path / "nexguard-darwin-arm64").write_bytes(b"\x7fELF")
+    (tmp_path / "SHA256SUMS").write_text("abc  nexguard-darwin-arm64\n")
+    (tmp_path / "secret.txt").write_text("no")
+    resp = client.get("/d/agent/nexguard-darwin-arm64")
+    assert resp.status_code == 200 and b"".join(resp.streaming_content) == b"\x7fELF"
+    assert resp["Content-Type"] == "application/octet-stream"
+    assert client.get("/d/agent/SHA256SUMS").status_code == 200
+    assert client.get("/d/agent/secret.txt").status_code == 404
+    assert client.get("/d/agent/..%2Fsecret.txt").status_code == 404
+    assert client.get("/d/agent/nexguard-linux-amd64").status_code == 404  # not built

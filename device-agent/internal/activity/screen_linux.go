@@ -2,8 +2,18 @@ package activity
 
 import (
 	"errors"
+	"os/user"
 	"strings"
+
+	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/config"
 )
+
+func me() string {
+	if u, err := user.Current(); err == nil {
+		return u.Username
+	}
+	return ""
+}
 
 // sample on Linux, as root, through systemd-logind: the active local graphical session,
 // whether it's locked and whether the desktop marked it idle. Which app is in front isn't
@@ -25,7 +35,7 @@ func sample() (Use, error) {
 		if err != nil {
 			continue
 		}
-		if u, ok := sessionUse(props); ok {
+		if u, ok := sessionUse(props); ok && (!config.UserMode() || u.User == me()) {
 			return u, nil
 		}
 	}

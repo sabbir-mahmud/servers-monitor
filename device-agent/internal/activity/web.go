@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/config"
 	"golang.org/x/net/publicsuffix"
 	_ "modernc.org/sqlite" // pure Go: the agent stays one static file, no C library
 )
@@ -246,6 +247,12 @@ func historyFiles() []historyFile {
 }
 
 func homes() []string {
+	if config.UserMode() && os.Getenv("NEXGUARD_HOMES") == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return []string{home} // only this person's own browsers
+		}
+		return nil
+	}
 	var pattern string
 	switch runtime.GOOS {
 	case "windows":

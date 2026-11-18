@@ -21,6 +21,9 @@
     </fieldset>
     <fieldset class="form-step">
       <legend class="form-step-head"><span class="form-step-num">2</span><span><span class="form-step-title">Block</span><span class="form-step-sub">On this computer, in every browser, for everyone who uses it.</span></span></legend>
+      {% if not device.can_block %}
+      <p class="activity-empty">{{ SITE_NAME }} was installed on this computer without administrator rights, so it can't block websites. To block, an administrator installs it with <code>sudo nexguard install</code> (Mac, Linux) or as Administrator on Windows.</p>
+      {% endif %}
       {% for field in form %}{% if field.name == "block_adult" or field.name == "safe_search" %}
       <div class="form-check form-switch switch-row">{{ field }}<label class="form-check-label" for="{{ field.id_for_label }}"><span class="fw-medium">{{ field.label }}</span><span class="d-block small text-body-secondary">{{ field.help_text }}</span></label></div>
       {% endif %}{% endfor %}

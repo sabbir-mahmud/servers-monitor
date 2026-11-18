@@ -314,3 +314,31 @@ def test_another_account_cant_see_or_change_controls(client, mac, django_user_mo
     assert client.get(url).status_code == 404
     assert client.post(url, {"screen_time": "on"}).status_code == 404
     assert not DeviceControls.objects.exists()
+
+
+def test_an_agent_without_admin_rights_gets_no_blocking(client, parent, sara):
+    """Installed by the one-line command as the person: it can't edit the hosts file, so
+    the dashboard never sends blocking, and the page doesn't offer it."""
+    client.force_login(parent)
+    device, code = add_device(client, sara, platform="windows", name="Sara's PC")
+    user_agent = {**AGENT, "agent_mode": "user"}
+    preview = api_pair(client, code, platform="windows", preview=True, **user_agent).json()
+    assert "screen time" in preview["disclosure"] and "blocking" not in preview["disclosure"]
+    token = api_pair(client, code, platform="windows", **user_agent).json()["token"]
+    device.refresh_from_db()
+    assert device.agent_mode == "user" and device.controls_allowed and not device.can_block
+    DeviceControls.objects.create(device=device, screen_time=True, block_adult=True)
+
+    controls = api_checkin(client, token, user_agent).json()["controls"]
+    assert controls["screen_time"] and controls["blocking"] == ""
+    resp = client.get(reverse("device_api_blocklist"), HTTP_AUTHORIZATION=f"Bearer {token}")
+    assert resp.status_code == 200 and resp.content == b""
+
+    page = client.get(reverse("devices:controls", args=[device.pk])).content.decode()
+    assert 'name="block_adult"' not in page and "without administrator rights" in page
+    client.post(reverse("devices:controls", args=[device.pk]), {"screen_time": "on"})
+    assert DeviceControls.objects.get(device=device).block_adult  # left as it was
+
+    # Installed again by an administrator: blocking comes back.
+    system = {**AGENT, "agent_mode": "system"}
+    assert api_checkin(client, token, system).json()["controls"]["blocking"]

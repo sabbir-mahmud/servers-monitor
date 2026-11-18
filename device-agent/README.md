@@ -46,6 +46,12 @@ dashboard; see [docs/devices.md](../docs/devices.md)):
 - Unsent activity waits in `activity.json` (admin only) and goes as a numbered batch, so a
   lost answer doesn't count anything twice.
 
+**Without administrator rights** (`--user`): the dashboard's one-line connect command
+installs this same program in the person's own folder and runs it as them with
+`nexguard --user --dir <folder> run` (login item, systemd user service, or sign-in task).
+It does health, screen time and websites for that person only, and never touches the
+hosts file. Serve the builds from the dashboard by running `./build.sh` (into `dist/`).
+
 **Develop**
 ```sh
 go test ./...            # unit tests, with a real health reading from this machine

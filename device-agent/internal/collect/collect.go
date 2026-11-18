@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/config"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/shirou/gopsutil/v4/host"
@@ -34,7 +35,8 @@ func Platform() string {
 
 // Info: what pairing sends (no health): platform, system version, model, name.
 func Info(appVersion string) map[string]any {
-	info := map[string]any{"platform": Platform(), "app_version": "nexguard-agent " + appVersion}
+	info := map[string]any{"platform": Platform(), "app_version": "nexguard-agent " + appVersion,
+		"agent_mode": config.Mode()}
 	if v := osVersion(); v != "" {
 		info["os_version"] = v
 	}

@@ -2,8 +2,10 @@
 #
 # Downloaded from {{ server }} for one pairing code. It:
 #   1. shows who will see this computer, and pairs only if you say yes;
-#   2. adds a scheduled task that checks in as you every 5 minutes
-#      (CPU, memory, GPU, battery, storage, network, Windows version; no admin rights);
+#   2. installs the NexGuard agent from that dashboard, running as you (no admin rights):
+#      health (CPU, memory, GPU, battery, storage, network, Windows version), and screen
+#      time and websites if the dashboard turns them on for this computer. If the
+#      dashboard has no agent to offer, a small health-only check-in task instead;
 #   3. checks in once so the dashboard shows the computer straight away.
 #
 # To remove it later:  irm {{ server }}/d/uninstall.ps1 | iex
@@ -45,6 +47,112 @@ $NgCode = '{{ code }}'
   Write-Host ''
   Write-Host "Connecting this computer to the dashboard at $NgServer"
 
+  $uninstall = @'
+# Stop NexGuard on this computer (the agent or the check-in task) and remove its files.
+param([switch]$Quiet)
+$dir = Join-Path $env:LOCALAPPDATA 'NexGuard'
+foreach ($task in 'NexGuard device check-in', 'NexGuard agent') {
+  Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
+  Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
+}
+$exe = Join-Path $dir 'nexguard.exe'
+Get-Process -Name nexguard -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe } |
+  Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 500  # let Windows release the program file
+Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
+if (-not $Quiet) { Write-Host 'NexGuard is removed from this computer.' }
+'@
+
+  # ------------------------------------------------------------- the agent, if offered
+  # The same program an administrator can install as a service, here running as you: it
+  # can't block websites (that needs administrator rights), everything else works.
+  $agentTask = 'NexGuard agent'
+  $arch = ''
+  if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') { $arch = 'arm64' }
+  elseif ([Environment]::Is64BitOperatingSystem) { $arch = 'amd64' }
+  $agentTmp = $null
+  if ($arch -and $env:NEXGUARD_NO_AGENT -ne '1') {
+    $bin = "nexguard-windows-$arch.exe"
+    $tmp = Join-Path $env:TEMP ('nexguard-' + [guid]::NewGuid().ToString() + '.exe')
+    try {
+      $ProgressPreference = 'SilentlyContinue'  # the progress bar makes 5.1 downloads crawl
+      Invoke-WebRequest -UseBasicParsing -Uri "$NgServer/d/agent/$bin" -OutFile $tmp -TimeoutSec 300
+      $sums = (Invoke-WebRequest -UseBasicParsing -Uri "$NgServer/d/agent/SHA256SUMS" -TimeoutSec 20).Content
+      if ($sums -is [byte[]]) { $sums = [Text.Encoding]::ASCII.GetString($sums) }
+      $want = $null
+      foreach ($line in ($sums -split "`n")) {
+        $f = $line.Trim() -split '\s+'
+        if ($f.Count -ge 2 -and $f[1].TrimStart('*') -eq $bin) { $want = $f[0].ToLower() }
+      }
+      $got = (Get-FileHash -Algorithm SHA256 -Path $tmp).Hash.ToLower()
+      if ($want -and $want -eq $got) { $agentTmp = $tmp }
+      else { Write-Host "(The agent download didn't match its checksum: installing the check-in task.)" }
+    } catch { $agentTmp = $null }
+    if (-not $agentTmp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
+  }
+
+  if ($agentTmp) {
+    $newDir = -not (Test-Path $dir)
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $exe = Join-Path $dir 'nexguard.exe'
+    # An earlier install: stop it so it neither holds the program file nor checks in
+    # with the old script while the agent pairs (both keep config.json here).
+    $oldTask = Get-ScheduledTask -TaskName 'NexGuard device check-in' -ErrorAction SilentlyContinue
+    if ($oldTask) { Disable-ScheduledTask -TaskName 'NexGuard device check-in' | Out-Null }
+    Stop-ScheduledTask -TaskName $agentTask -ErrorAction SilentlyContinue
+    Get-Process -Name nexguard -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe } |
+      Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
+    Move-Item -Force $agentTmp $exe
+
+    # The agent shows what the dashboard will see (screen time and websites included, if
+    # they can be turned on for this computer) and asks.
+    $pairArgs = @('--user', '--dir', $dir, 'pair')
+    if ($env:NEXGUARD_YES -eq '1') { $pairArgs += '--yes' }
+    $pairArgs += @($NgServer, $NgCode)
+    & $exe @pairArgs
+    if ($LASTEXITCODE -ne 0) {
+      if ($oldTask) { Enable-ScheduledTask -TaskName 'NexGuard device check-in' | Out-Null }
+      Remove-Item $exe -Force -ErrorAction SilentlyContinue
+      if ($newDir) { Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue }
+      Write-Host ''
+      Write-Host 'Nothing was installed. If you said no, the code still works.'
+      return
+    }
+
+    # Replace the earlier check-in task, if this computer had one.
+    Unregister-ScheduledTask -TaskName 'NexGuard device check-in' -Confirm:$false -ErrorAction SilentlyContinue
+    foreach ($old in 'checkin.ps1', 'last', 'error') {
+      Remove-Item (Join-Path $dir $old) -Force -ErrorAction SilentlyContinue
+    }
+    Set-Content -Path (Join-Path $dir 'uninstall.ps1') -Value $uninstall -Encoding ASCII
+
+    # Runs at sign-in for as long as you're signed in, with no window; restarts if it stops.
+    $agentArgs = "--user --dir `"$dir`" run"
+    $conhost = Join-Path $env:windir 'System32\conhost.exe'
+    if ([Environment]::OSVersion.Version.Build -ge 17763 -and (Test-Path $conhost)) {
+      $action = New-ScheduledTaskAction -Execute $conhost -Argument "--headless `"$exe`" $agentArgs"
+    } else {
+      $action = New-ScheduledTaskAction -Execute $exe -Argument $agentArgs
+    }
+    $user = "$env:USERDOMAIN\$env:USERNAME"
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+      -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) `
+      -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
+    $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+    Register-ScheduledTask -TaskName $agentTask -Action $action -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $user) `
+      -Settings $settings -Principal $principal `
+      -Description 'NexGuard agent: health, and screen time and websites if turned on. Runs as you.' -Force | Out-Null
+    if ($env:NEXGUARD_NO_SCHEDULE -ne '1') { Start-ScheduledTask -TaskName $agentTask }
+
+    Write-Host ''
+    Write-Host 'Done. The agent runs while you are signed in. You can close this window.' -ForegroundColor Green
+    Write-Host "To remove it later, paste:  irm $NgServer/d/uninstall.ps1 | iex"
+    Write-Host ''
+    return
+  }
+
+  # ------------------------------------------ no agent: the health-only check-in task
   # ---------------------------------------------------------------------- ask first
   $preview = Invoke-Pair @{ code = $NgCode; platform = 'windows'; preview = $true }
   Write-Host ''
@@ -175,14 +283,6 @@ try {
 '@
   Set-Content -Path (Join-Path $dir 'checkin.ps1') -Value $checkin -Encoding ASCII
 
-  $uninstall = @'
-# Stop NexGuard check-ins on this computer and remove everything it installed.
-param([switch]$Quiet)
-Unregister-ScheduledTask -TaskName 'NexGuard device check-in' -Confirm:$false -ErrorAction SilentlyContinue
-$dir = Join-Path $env:LOCALAPPDATA 'NexGuard'
-Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
-if (-not $Quiet) { Write-Host 'NexGuard is removed from this computer.' }
-'@
   Set-Content -Path (Join-Path $dir 'uninstall.ps1') -Value $uninstall -Encoding ASCII
 
   # ------------------------------------------------------------- run every 5 minutes

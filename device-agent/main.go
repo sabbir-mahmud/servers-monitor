@@ -19,8 +19,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/activity"
@@ -46,7 +48,28 @@ Usage (as an administrator):
   nexguard version
 `
 
+// globalFlags: --user (run as the signed-in person, see config.UserMode) and --dir PATH
+// (where the config lives) may appear anywhere; they're taken out before the command.
+func globalFlags() {
+	out := os.Args[:1]
+	for i := 1; i < len(os.Args); i++ {
+		switch a := os.Args[i]; {
+		case a == "--user":
+			_ = os.Setenv("NEXGUARD_USER", "1")
+		case a == "--dir" && i+1 < len(os.Args):
+			_ = os.Setenv("NEXGUARD_CONFIG_DIR", os.Args[i+1])
+			i++
+		case strings.HasPrefix(a, "--dir="):
+			_ = os.Setenv("NEXGUARD_CONFIG_DIR", strings.TrimPrefix(a, "--dir="))
+		default:
+			out = append(out, a)
+		}
+	}
+	os.Args = out
+}
+
 func main() {
+	globalFlags()
 	if len(os.Args) < 2 {
 		if svc.Interactive() {
 			fmt.Fprintf(os.Stderr, usage, Version)
@@ -67,7 +90,11 @@ func main() {
 	case "checkin":
 		err = checkin()
 	case "run":
-		err = svc.Run(Version, agent.Run)
+		if config.UserMode() {
+			err = runInForeground() // started by launchd/systemd/Task Scheduler as the user
+		} else {
+			err = svc.Run(Version, agent.Run)
+		}
 	case "sample": // Windows: started by the service as the signed-in person
 		err = activity.PrintSample()
 	case "version", "--version", "-v":
@@ -134,11 +161,17 @@ func status() error {
 		fmt.Printf("Paired as %q in %s, with %s (every %s).\n", cfg.Name, cfg.Account, cfg.Server,
 			time.Duration(cfg.Interval)*time.Second)
 	}
-	fmt.Println("Service:", svc.State())
+	if config.UserMode() {
+		fmt.Println("Runs as:", "you (no administrator rights)")
+	} else {
+		fmt.Println("Service:", svc.State())
+	}
 	c := activity.CurrentControls()
 	fmt.Println("Screen time:", onOff(c.ScreenTime))
 	fmt.Println("Websites visited:", onOff(c.WebActivity))
-	if n := block.Count(); n > 0 {
+	if config.UserMode() {
+		fmt.Println("Blocking: needs the administrator install (sudo nexguard install)")
+	} else if n := block.Count(); n > 0 {
 		fmt.Printf("Blocking: %d sites in %s\n", n, block.Path())
 	} else {
 		fmt.Println("Blocking: off")
@@ -162,6 +195,16 @@ func checkin() error {
 		return err
 	}
 	fmt.Println("Checked in.")
+	return nil
+}
+
+// runInForeground runs the loop until the process is told to stop.
+func runInForeground() error {
+	stop := make(chan struct{})
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	go func() { <-sigs; close(stop) }()
+	agent.Run(Version, stop)
 	return nil
 }
 

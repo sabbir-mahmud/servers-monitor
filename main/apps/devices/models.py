@@ -132,6 +132,9 @@ class Device(Machine):
     os_version = models.CharField(max_length=100, blank=True)
     model = models.CharField(max_length=100, blank=True)
     app_version = models.CharField(max_length=30, blank=True)
+    # The Go agent: "system" (a service an administrator installed: can block sites) or
+    # "user" (installed by the one-line connect command as the person: can't). "" = not it.
+    agent_mode = models.CharField(max_length=10, blank=True)
     battery_percent = models.PositiveSmallIntegerField(null=True, blank=True)
     charging = models.BooleanField(null=True, blank=True)
     storage_free = models.BigIntegerField(null=True, blank=True)
@@ -249,7 +252,7 @@ class Device(Machine):
         if not self.controls_owner_ok:
             return "Only for a child's or a staff member's computer."
         if not self.app_version.startswith(AGENT_APP):
-            return "Needs the NexGuard agent installed by an administrator."
+            return "Needs the NexGuard agent: pair this computer again with the one-line command."
         return ""
 
     @property
@@ -259,6 +262,11 @@ class Device(Machine):
         if self.account.kind == "solo":
             return True
         return self.person is not None and self.person.kind in CONTROLLED_PEOPLE
+
+    @property
+    def can_block(self) -> bool:
+        """Blocking edits the hosts file, which only an administrator-installed agent can."""
+        return self.controls_allowed and self.agent_mode != "user"
 
     @property
     def controls_allowed(self) -> bool:

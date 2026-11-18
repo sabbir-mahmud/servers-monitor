@@ -171,6 +171,9 @@ class DeviceDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
         return summary
 
 
+BLOCK_FIELDS = ("block_adult", "safe_search", "blocked_domains", "allowed_domains")
+
+
 class DeviceControlsView(StaffViewMixin, AccountScopedMixin, UpdateView):
     """Screen time, websites and blocking for a child's or staff member's computer."""
 
@@ -193,6 +196,15 @@ class DeviceControlsView(StaffViewMixin, AccountScopedMixin, UpdateView):
         device = self.object
         kwargs["instance"] = activity.controls_for(device) or DeviceControls(device=device)
         return kwargs
+
+    def get_form(self, form_class=None):
+        form = super().get_form(form_class)
+        if not self.object.can_block:
+            # Installed without administrator rights: it can't edit the hosts file. Leave
+            # the saved blocking choices alone rather than letting unchecked boxes clear them.
+            for name in BLOCK_FIELDS:
+                del form.fields[name]
+        return form
 
     def form_valid(self, form):
         if not self.object.controls_allowed:  # the page hides the form; a crafted POST

@@ -90,6 +90,9 @@ func Forget() {
 	_ = config.Remove()
 	_ = activity.Reset()
 	_ = os.Remove(blocklistPath())
+	if config.UserMode() {
+		return // never had the rights to block
+	}
 	if err := block.Remove(); err != nil {
 		log.Printf("couldn't remove blocking from %s: %v", block.Path(), err)
 	}
@@ -105,6 +108,9 @@ func applyControls(client *api.Client, token string, c *api.Controls) error {
 	}
 	if err := activity.SetControls(activity.Controls(*c)); err != nil {
 		return err
+	}
+	if config.UserMode() {
+		return nil // the dashboard sends no blocking to a user-mode agent; it couldn't apply it
 	}
 	if c.Blocking == "" {
 		_ = os.Remove(blocklistPath())

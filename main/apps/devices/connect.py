@@ -13,10 +13,11 @@ check, so they can't be used to test whether a code is valid. Pairing itself (PO
 """
 
 import re
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from django.conf import settings
-from django.http import Http404, HttpResponse
+from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import render
 from django.template.loader import render_to_string
 
@@ -119,6 +120,29 @@ def install_script(request, code, kind):
         body = body.replace("\r\n", "\n").replace("\n", "\r\n")
     response = HttpResponse(body, content_type="text/plain; charset=utf-8")
     return _private(response)
+
+
+# The agent programs build.sh writes, and their checksums. Nothing else in that folder.
+AGENT_FILE_RE = re.compile(
+    r"^(nexguard-(darwin|linux)-(arm64|amd64)|nexguard-windows-(arm64|amd64)\.exe|SHA256SUMS)$"
+)
+
+
+def agent_file(request, name):
+    """The agent for the connect command to install. Public like the scripts: it holds no
+    secret, and the pairing code is what lets it in."""
+    if not AGENT_FILE_RE.match(name):
+        raise Http404("Not an agent file.")
+    path = Path(settings.DEVICE_AGENT_DIR) / name
+    if not path.is_file():
+        raise Http404("This dashboard has no agent build for that system.")
+    text = name == "SHA256SUMS"
+    response = FileResponse(
+        path.open("rb"),
+        content_type="text/plain; charset=utf-8" if text else "application/octet-stream",
+    )
+    response["Cache-Control"] = "no-cache"  # a new build replaces it under the same name
+    return response
 
 
 def uninstall_script(request, kind):

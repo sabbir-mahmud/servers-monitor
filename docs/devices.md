@@ -65,22 +65,28 @@ recorded as zero.
 The device token is stored in a `config` file readable only by that user. A failed
 check-in is noted in an `error` file next to it.
 
-## The protected agent (in progress)
+## The agent
 
-For computers that need to stay monitored, such as a child's account or a company laptop,
-there is a Go agent in `device-agent/`. An administrator installs it once, and it runs as
-a system service that a standard user can't stop. It reports the same health readings,
-and on a **child's** or **staff member's** computer, or your own in a solo account, it can
-also do the things below. For
-now it's installed by hand: see
-[device-agent/README.md](../device-agent/README.md). A one-line install from the pair
-page comes next.
+The one-line command installs the NexGuard agent (`device-agent/`) when the dashboard has
+builds of it (`device-agent/build.sh` writes them to `device-agent/dist/`, or set
+`DEVICE_AGENT_DIR`). It downloads the one for that computer, checks it against
+`SHA256SUMS`, and runs it **as the person, with no administrator rights**: a login item
+on a Mac, a systemd user service on Linux, a scheduled task at sign-in on Windows. It
+reports health, and screen time and websites when they're turned on (below). Without
+builds on the dashboard, the command installs the health-only check-in script instead.
+
+Running as the person, it sees only their own screen and browsers and **can't block
+websites** (that needs the hosts file). The person can also remove it. For blocking, and
+for a computer the person mustn't be able to stop, an administrator installs the same
+program as a system service instead: see
+[device-agent/README.md](../device-agent/README.md).
 
 ## Screen time, websites and blocking (agent only)
 
 On the device page, **Controls → Change** turns each of these on or off. Only for a
 computer assigned to a child (family account) or a staff member (company account), or
-your own computer in a solo account, and running the agent: on another adult's computer, this is how monitoring gets abused, and
+your own computer in a solo account, and running the agent (blocking only when an
+administrator installed it): on another adult's computer, this is how monitoring gets abused, and
 the scripts run as the user, who could simply delete them. Pairing tells the person what
 can be turned on. Changes reach the computer at its next check-in.
 

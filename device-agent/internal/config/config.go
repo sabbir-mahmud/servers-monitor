@@ -24,7 +24,20 @@ type Config struct {
 	Account  string `json:"account,omitempty"`
 }
 
-// Dir is where the agent keeps its files. NEXGUARD_CONFIG_DIR overrides it (tests).
+// UserMode: running as the signed-in person, not as a system service (installed by the
+// dashboard's one-line connect command, no administrator rights). It sees only that
+// person's own screen and browsers, and can't block sites: that needs the hosts file.
+func UserMode() bool { return os.Getenv("NEXGUARD_USER") == "1" }
+
+// Mode as the dashboard is told it: "user" or "system".
+func Mode() string {
+	if UserMode() {
+		return "user"
+	}
+	return "system"
+}
+
+// Dir is where the agent keeps its files. NEXGUARD_CONFIG_DIR (or --dir) overrides it.
 func Dir() string {
 	if d := os.Getenv("NEXGUARD_CONFIG_DIR"); d != "" {
 		return d
@@ -102,7 +115,7 @@ func Remove() error {
 // restrict: Unix mode 0600 already means root only. On Windows, files under ProgramData
 // inherit "Users can read", so replace the inherited rules with SYSTEM + Administrators.
 func restrict(path string) error {
-	if runtime.GOOS != "windows" || os.Getenv("NEXGUARD_CONFIG_DIR") != "" {
+	if runtime.GOOS != "windows" || os.Getenv("NEXGUARD_CONFIG_DIR") != "" || UserMode() {
 		return nil
 	}
 	out, err := exec.Command("icacls", path, "/inheritance:r",

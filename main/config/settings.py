@@ -319,6 +319,11 @@ ADULT_BLOCKLIST_URL = config(
     "ADULT_BLOCKLIST_URL",
     default="https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts",
 )
+# The device agent builds (device-agent/build.sh) the connect command installs: without
+# them it falls back to the health-only check-in script.
+DEVICE_AGENT_DIR = Path(
+    config("DEVICE_AGENT_DIR", default=str(BASE_DIR.parent / "device-agent" / "dist"))
+)
 # Map tiles for device locations ({z}/{x}/{y}). Empty: no maps, just coordinates and links.
 MAP_TILE_URL = config("MAP_TILE_URL", default="https://tile.openstreetmap.org/{z}/{x}/{y}.png")
 MAP_ATTRIBUTION = config("MAP_ATTRIBUTION", default="© OpenStreetMap contributors")

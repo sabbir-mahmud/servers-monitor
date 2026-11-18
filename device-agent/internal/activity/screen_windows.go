@@ -13,6 +13,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/config"
 )
 
 // The service runs in session 0, which can't see the signed-in person's screen. Each
@@ -38,6 +40,17 @@ type helperOutput struct {
 }
 
 func sample() (Use, error) {
+	if config.UserMode() {
+		// Already running in the person's session: look directly. Only while it's the
+		// session at the screen (not one switched away from).
+		var mine uint32
+		if err := windows.ProcessIdToSessionId(windows.GetCurrentProcessId(), &mine); err == nil &&
+			mine != windows.WTSGetActiveConsoleSessionId() {
+			return Use{}, errors.New("this session isn't at the screen")
+		}
+		h := look()
+		return Use{User: h.User, App: h.App, Idle: time.Duration(h.IdleMS) * time.Millisecond, Locked: h.Locked}, nil
+	}
 	session := windows.WTSGetActiveConsoleSessionId()
 	if session == noSession {
 		return Use{}, errors.New("no console session")
@@ -113,6 +126,11 @@ func runAsUser(token windows.Token, exe string, arg string) ([]byte, error) {
 
 // PrintSample is `nexguard sample`, run as the signed-in person by the service.
 func PrintSample() error {
+	return json.NewEncoder(os.Stdout).Encode(look())
+}
+
+// look at this session's screen: who, what's in front, how long since input.
+func look() helperOutput {
 	h := helperOutput{IdleMS: idleMS()}
 	if u, err := user.Current(); err == nil {
 		h.User = u.Username
@@ -123,7 +141,7 @@ func PrintSample() error {
 	h.App = foregroundExe()
 	base := strings.ToLower(h.App[strings.LastIndexAny(h.App, `\/`)+1:])
 	h.Locked = h.App == "" || base == "lockapp.exe" || base == "logonui.exe"
-	return json.NewEncoder(os.Stdout).Encode(h)
+	return h
 }
 
 func idleMS() uint32 {

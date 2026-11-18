@@ -8,6 +8,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/config"
 )
 
 // sample on a Mac, as root: the console's owner is who's signed in at the screen; idle
@@ -20,6 +22,9 @@ func sample() (Use, error) {
 	st, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || st.Uid == 0 {
 		return Use{}, errors.New("nobody signed in") // root owns it at the login window
+	}
+	if config.UserMode() && int(st.Uid) != os.Getuid() {
+		return Use{}, errors.New("someone else is at the screen") // fast user switching
 	}
 	u, err := user.LookupId(strconv.Itoa(int(st.Uid)))
 	if err != nil {
@@ -51,11 +56,17 @@ func hidIdle(out string) time.Duration {
 
 // frontApp: the name lsappinfo reports, run in the user's GUI session.
 func frontApp(uid string) string {
-	asn, err := run("launchctl", "asuser", uid, "/usr/bin/lsappinfo", "front")
+	ask := func(args ...string) (string, error) {
+		if config.UserMode() { // already in the person's session (asuser needs root)
+			return run("/usr/bin/lsappinfo", args...)
+		}
+		return run("launchctl", append([]string{"asuser", uid, "/usr/bin/lsappinfo"}, args...)...)
+	}
+	asn, err := ask("front")
 	if err != nil || asn == "" {
 		return ""
 	}
-	out, err := run("launchctl", "asuser", uid, "/usr/bin/lsappinfo", "info", "-only", "name", asn)
+	out, err := ask("info", "-only", "name", asn)
 	if err != nil {
 		return ""
 	}
