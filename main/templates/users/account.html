@@ -2,44 +2,159 @@
 {% load monitor %}
 {% block title %}My account{% endblock %}
 {% block content %}
-<div class="page-head"><div class="d-flex align-items-center gap-3">
-  <span class="avatar avatar-lg" aria-hidden="true">{{ user.initials }}</span>
-  <div><h1 class="page-title">{{ user.display_name }}</h1>
-    <p class="page-sub mt-1"><span class="mono">{{ user.get_username }}</span> · {% if role %}<span class="role-pill role-{{ role|lower }}">{{ role }}</span> in {{ ACCOUNT.name }}. {{ role_help }}{% else %}Not a member of any account yet{% endif %}</p></div>
-</div></div>
-<div class="row g-3 align-items-start">
-  <div class="col-12 col-xl-6">
-    <form method="post" novalidate>{% csrf_token %}
-      <div class="card"><div class="card-header">{% icon "user" 17 %} Profile</div><div class="card-body form-section">
-        <div class="row g-3">
-          <div class="col-sm-6">{% include "alerts/_field.html" with field=profile_form.first_name %}</div>
-          <div class="col-sm-6">{% include "alerts/_field.html" with field=profile_form.last_name %}</div>
+<div class="acct">
+
+  {# ------------------------------------------------------------ who you are #}
+  <header class="card acct-hero">
+    <div class="acct-hero-main">
+      <span class="acct-avatar" aria-hidden="true">{{ user.initials }}</span>
+      <div class="acct-id">
+        <h1 class="acct-name">{{ user.display_name }}</h1>
+        <p class="acct-email">{{ user.email|default:user.get_username }}</p>
+        <div class="meta-row">
+          {% if role %}<span><span class="role-pill role-{{ role|lower }}">{{ role }}</span> in {{ ACCOUNT.name }}</span>{% else %}<span>Not a member of any account yet</span>{% endif %}
+          <span class="sep" aria-hidden="true"></span>
+          <span>Joined {{ user.date_joined|date:"F Y" }}</span>
+          {% if user.last_login %}<span class="sep" aria-hidden="true"></span><span>Signed in {{ user.last_login|timesince }} ago</span>{% endif %}
         </div>
-        {% include "alerts/_field.html" with field=profile_form.email %}
-        {% include "alerts/_field.html" with field=profile_form.current_password %}
-        <div><button class="btn btn-primary">Save profile</button></div>
-      </div></div>
-    </form>
+      </div>
+    </div>
+    <ul class="acct-glance" role="list" aria-label="At a glance">
+      <li><a class="acct-glance-item" href="#security">
+        <span class="acct-glance-icon {% if has_2fa %}is-good{% else %}is-warn{% endif %}">{% icon "shield" 17 %}</span>
+        <span><span class="acct-glance-label">Two-factor</span><span class="acct-glance-value">{% if has_2fa %}On{% else %}Off{% endif %}</span></span>
+      </a></li>
+      <li><a class="acct-glance-item" href="#password">
+        <span class="acct-glance-icon">{% icon "lock" 17 %}</span>
+        <span><span class="acct-glance-label">Password</span><span class="acct-glance-value">Change</span></span>
+      </a></li>
+      <li><a class="acct-glance-item" href="#security">
+        <span class="acct-glance-icon">{% icon "key" 17 %}</span>
+        <span><span class="acct-glance-label">API tokens</span><span class="acct-glance-value">{{ api_tokens }} active</span></span>
+      </a></li>
+      <li><a class="acct-glance-item" href="#accounts">
+        <span class="acct-glance-icon">{% icon "users" 17 %}</span>
+        <span><span class="acct-glance-label">Accounts</span><span class="acct-glance-value">{{ memberships|length }}</span></span>
+      </a></li>
+    </ul>
+  </header>
+
+  {% if not has_2fa %}
+  <div class="acct-nudge" role="note">
+    <span class="acct-nudge-icon">{% icon "shield" 18 %}</span>
+    <div><strong>Protect your account with two-factor sign-in.</strong> If your password ever leaks, a code from your phone still keeps others out.</div>
+    <a class="btn btn-sm btn-primary" href="{% url 'account_2fa' %}">Set up</a>
   </div>
-  <div class="col-12 col-xl-6">
-    <form method="post" novalidate>{% csrf_token %}<input type="hidden" name="change_password" value="1">
-      <div class="card"><div class="card-header">{% icon "lock" 17 %} Change password</div><div class="card-body form-section">
-        {% if password_form.non_field_errors %}<div class="alert alert-danger mb-0" role="alert">{% icon "alert" %}<div>{{ password_form.non_field_errors|join:" " }}</div></div>{% endif %}
-        {% include "alerts/_field.html" with field=password_form.old_password %}
-        {% include "alerts/_field.html" with field=password_form.new_password1 %}
-        {% include "alerts/_field.html" with field=password_form.new_password2 %}
-        <div class="form-text mt-0">Changing it signs you out on every other device.</div>
-        <div><button class="btn btn-primary">Change password</button></div>
-      </div></div>
-    </form>
-    <div class="card mt-3"><div class="card-header">{% icon "shield" 17 %} Two-factor sign-in</div><div class="card-body d-flex justify-content-between align-items-center gap-3">
-      <span>{% if has_2fa %}<span class="text-good fw-semibold">On</span> · authenticator app{% else %}<span class="muted">Off</span>, a code from your phone protects you if your password leaks{% endif %}</span>
-      <a class="btn btn-sm {% if has_2fa %}btn-outline-secondary{% else %}btn-primary{% endif %}" href="{% url 'account_2fa' %}">{% if has_2fa %}Manage{% else %}Set up{% endif %}</a>
-    </div></div>
-    <div class="card mt-3"><div class="card-header">{% icon "key" 17 %} API tokens</div><div class="card-body d-flex justify-content-between align-items-center gap-3">
-      <span>{% if api_tokens %}{{ api_tokens }} active token{{ api_tokens|pluralize }}{% else %}<span class="muted">None</span>, for scripts, the REST API and Prometheus{% endif %}</span>
-      <a class="btn btn-sm btn-outline-secondary" href="{% url 'api_tokens' %}">Manage</a>
-    </div></div>
+  {% endif %}
+
+  <div class="acct-layout">
+    <nav class="acct-nav" aria-label="Account sections">
+      <a href="#profile">{% icon "user" 16 %}<span>Personal info</span></a>
+      <a href="#password">{% icon "lock" 16 %}<span>Password</span></a>
+      <a href="#security">{% icon "shield" 16 %}<span>Security</span></a>
+      <a href="#accounts">{% icon "users" 16 %}<span>Accounts</span></a>
+    </nav>
+
+    <div class="acct-sections">
+
+      {# -------------------------------------------------------- personal info #}
+      <section class="acct-section" id="profile" aria-labelledby="profile-title">
+        <div class="acct-section-head">
+          <h2 class="acct-section-title" id="profile-title">Personal info</h2>
+          <p class="acct-section-sub">How you appear to others, and where password-reset emails go.</p>
+        </div>
+        <form class="card" method="post" action="{% url 'account' %}#profile" novalidate>{% csrf_token %}
+          <div class="card-body form-section">
+            {% if profile_form.non_field_errors %}<div class="alert alert-danger mb-0" role="alert">{% icon "alert" %}<div>{{ profile_form.non_field_errors|join:" " }}</div></div>{% endif %}
+            <div class="row g-3">
+              <div class="col-sm-6">{% include "alerts/_field.html" with field=profile_form.first_name %}</div>
+              <div class="col-sm-6">{% include "alerts/_field.html" with field=profile_form.last_name %}</div>
+            </div>
+            {% include "alerts/_field.html" with field=profile_form.email %}
+            <div class="acct-subtle-field">{% include "alerts/_field.html" with field=profile_form.current_password %}</div>
+          </div>
+          <div class="acct-card-foot">
+            <span class="acct-foot-note">{% icon "info" 14 %} We email your old address if this one changes.</span>
+            <button class="btn btn-primary">Save changes</button>
+          </div>
+        </form>
+      </section>
+
+      {# ------------------------------------------------------------- password #}
+      <section class="acct-section" id="password" aria-labelledby="password-title">
+        <div class="acct-section-head">
+          <h2 class="acct-section-title" id="password-title">Password</h2>
+          <p class="acct-section-sub">Use a long password you don't use anywhere else.</p>
+        </div>
+        <form class="card" method="post" action="{% url 'account' %}#password" novalidate>{% csrf_token %}<input type="hidden" name="change_password" value="1">
+          <div class="card-body form-section">
+            {% if password_form.non_field_errors %}<div class="alert alert-danger mb-0" role="alert">{% icon "alert" %}<div>{{ password_form.non_field_errors|join:" " }}</div></div>{% endif %}
+            {% include "alerts/_field.html" with field=password_form.old_password %}
+            <div class="row g-3">
+              <div class="col-sm-6">{% include "alerts/_field.html" with field=password_form.new_password1 %}</div>
+              <div class="col-sm-6">{% include "alerts/_field.html" with field=password_form.new_password2 %}</div>
+            </div>
+          </div>
+          <div class="acct-card-foot">
+            <span class="acct-foot-note">{% icon "logout" 14 %} Signs you out on every other device.</span>
+            <button class="btn btn-primary">Change password</button>
+          </div>
+        </form>
+      </section>
+
+      {# ------------------------------------------------------------- security #}
+      <section class="acct-section" id="security" aria-labelledby="security-title">
+        <div class="acct-section-head">
+          <h2 class="acct-section-title" id="security-title">Security</h2>
+          <p class="acct-section-sub">Extra protection for signing in, and keys for scripts.</p>
+        </div>
+        <div class="card acct-list">
+          <div class="acct-row">
+            <span class="acct-row-icon {% if has_2fa %}is-good{% else %}is-warn{% endif %}">{% icon "shield" 18 %}</span>
+            <div class="acct-row-text">
+              <div class="acct-row-title">Two-factor sign-in <span class="acct-status {% if has_2fa %}is-on{% else %}is-off{% endif %}">{% if has_2fa %}On{% else %}Off{% endif %}</span></div>
+              <div class="acct-row-sub">{% if has_2fa %}A code from your authenticator app is asked for at each sign-in.{% else %}Ask for a code from your phone at sign-in, so a leaked password isn't enough.{% endif %}</div>
+            </div>
+            <a class="btn btn-sm {% if has_2fa %}btn-outline-secondary{% else %}btn-primary{% endif %}" href="{% url 'account_2fa' %}">{% if has_2fa %}Manage{% else %}Set up{% endif %}</a>
+          </div>
+          <div class="acct-row">
+            <span class="acct-row-icon">{% icon "key" 18 %}</span>
+            <div class="acct-row-text">
+              <div class="acct-row-title">API tokens {% if api_tokens %}<span class="acct-count">{{ api_tokens }}</span>{% endif %}</div>
+              <div class="acct-row-sub">{% if api_tokens %}{{ api_tokens }} active token{{ api_tokens|pluralize }} for scripts, the REST API and Prometheus.{% else %}None yet. For scripts, the REST API and Prometheus.{% endif %}</div>
+            </div>
+            <a class="btn btn-sm btn-outline-secondary" href="{% url 'api_tokens' %}">Manage</a>
+          </div>
+        </div>
+      </section>
+
+      {# ------------------------------------------------------------- accounts #}
+      <section class="acct-section" id="accounts" aria-labelledby="accounts-title">
+        <div class="acct-section-head">
+          <h2 class="acct-section-title" id="accounts-title">Accounts</h2>
+          <p class="acct-section-sub">Every family, company or solo account you belong to.</p>
+        </div>
+        <div class="card acct-list">
+          {% for m in memberships %}
+          <div class="acct-row">
+            <span class="acct-row-icon acct-org" aria-hidden="true">{{ m.account.name|slice:":1"|upper }}</span>
+            <div class="acct-row-text">
+              <div class="acct-row-title">{{ m.account.name }}{% if ACCOUNT and m.account_id == ACCOUNT.id %} <span class="acct-status is-current">Current</span>{% endif %}</div>
+              <div class="acct-row-sub">{% if m.account.kind == "solo" %}Solo{% else %}{{ m.account.get_kind_display }}{% endif %} · <span class="role-pill role-{{ m.role }}">{{ m.role_label }}</span></div>
+            </div>
+            {% if ACCOUNT and m.account_id == ACCOUNT.id %}
+            <a class="btn btn-sm btn-outline-secondary" href="{% url 'tenants:settings' %}">Settings</a>
+            {% else %}
+            <form method="post" action="{% url 'tenants:switch' %}">{% csrf_token %}<input type="hidden" name="account" value="{{ m.account_id }}"><button class="btn btn-sm btn-outline-secondary">Switch</button></form>
+            {% endif %}
+          </div>
+          {% empty %}
+          <div class="acct-row"><div class="acct-row-text"><div class="acct-row-sub">You're not in any account yet. Ask an owner to invite you.</div></div></div>
+          {% endfor %}
+        </div>
+      </section>
+
+    </div>
   </div>
 </div>
 {% endblock %}

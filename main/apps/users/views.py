@@ -371,6 +371,8 @@ class AccountView(LoginRequiredMixin, TemplateView):
         ctx = super().get_context_data(**kwargs)
         ctx.setdefault("profile_form", ProfileForm(instance=self.request.user))
         ctx.setdefault("password_form", styled(PasswordChangeForm(self.request.user)))
+        # Django focuses "old password" on load, which scrolls the page past everything above.
+        ctx["password_form"].fields["old_password"].widget.attrs.pop("autofocus", None)
         role = accounts.role_of(self.request.user)
         ctx["role"] = Role(role).label if role else None
         ctx["role_help"] = ROLE_HELP.get(role, "")
