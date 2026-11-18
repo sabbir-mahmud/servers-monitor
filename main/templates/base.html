@@ -33,7 +33,7 @@
         </span>
         <span class="brand-text">
           <span class="brand-name">{% if SITE_NAME == "NexGuard" %}Nex<span class="brand-accent">Guard</span>{% else %}{{ SITE_NAME }}{% endif %}</span>
-          {% if ACCOUNT %}<span class="brand-sub"><span class="text-truncate">{{ ACCOUNT.name }}</span><span class="brand-kind">{% if ACCOUNT.kind == "solo" %}Solo{% else %}{{ ACCOUNT.get_kind_display }}{% endif %}</span></span>{% endif %}
+          <span class="brand-sub"><span class="text-truncate">{{ user.display_name }}</span></span>
         </span>
       </a>
       <button class="icon-btn sidebar-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#sidenav" aria-controls="sidenav" aria-expanded="false" aria-label="Menu">{% icon "menu" 20 %}</button>
