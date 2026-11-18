@@ -8,6 +8,8 @@ main/staticfiles/
 .pytest_cache/
 .ruff_cache/
 .relay-alive
+adult-blocklist.txt
+safe-search.json
 .DS_Store
 # Daily database snapshots written by the relay (BACKUP_DIR default)
 main/backups/

@@ -55,6 +55,14 @@ names); upgrading gets the relay backlog fixes below.
   can stop or remove. `nexguard pair`, `install`, `status`, `checkin` and `uninstall`.
   It reports the same health readings as the scripts. `make device-agent` tests it and
   builds it, and CI tests it on Linux, macOS and Windows.
+- **Screen time, websites and blocking** on a child's or staff member's computer running the
+  device agent, switched on per device under **Controls**. Screen time by app (Mac, Windows;
+  total only on Linux), websites as site + visits + time from Chrome, Edge, Brave, Vivaldi,
+  Opera, Firefox and Safari (pages and searches never leave the computer), and hosts-file
+  blocking: adult sites (`ADULT_BLOCKLIST_URL`, refreshed daily), SafeSearch, and the
+  parent's own block/allow lists. Never available for partners, relatives or shared
+  devices. Pairing names it. Kept `DEVICE_ACTIVITY_DAYS` (30). New
+  `GET /device/v1/blocklist`; check-ins carry `activity` and get `controls` back.
 - `POST /device/v1/pair` with `"preview": true` shows who will see the device without
   using the code, and `Accept: text/plain` answers as `key=value` lines for shell clients.
 - Sign-up (`ALLOW_SIGNUP`) asks for the account kind and makes the person its owner.

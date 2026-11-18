@@ -9,7 +9,13 @@
                               "location": {"lat": 23.81, "lon": 90.41, "accuracy": 12,
                                            "at": "2026-11-17T08:00:00Z", "source": "gps"},
                               "os_version": "Android 16", "app_version": "1.0.0"}
-                             -> 200 {"checkin_seconds": 900, "server_time": "…"}
+                             -> 200 {"checkin_seconds": 900, "server_time": "…",
+                                     "controls": {…} | null}
+                             The agent on a child's or staff computer also sends
+                             "activity": {"batch": uuid, "screen": […], "web": […]}
+                             (see activity.py) and gets "controls" back.
+    GET  /device/v1/blocklist  Authorization: Bearer ngd_…  (If-None-Match: version)
+                             -> 200 text/plain "ip domain" lines for the hosts file, or 304
 
     POST /device/v1/pair     {"code": "K7PQ-3MXA", "preview": true, "platform": …}
                              -> 200 {"disclosure": "…", "device": {…}}  (the code stays valid)
@@ -27,15 +33,16 @@ import json
 from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from apps.core.utils import client_ip
 from apps.users import throttle
 
-from . import services
-from .models import COMPUTERS
+from . import activity, blocklist, services
+from .models import AGENT_APP, COMPUTERS, CONTROLLED_PEOPLE
 
 MAX_BODY = 16 * 1024
+MAX_CHECKIN_BODY = 128 * 1024  # an agent's activity batch: at most 500 rows of ~150 bytes
 
 
 def _wants_text(request) -> bool:
@@ -70,8 +77,8 @@ def _error(request, status: int, message: str, **headers) -> HttpResponse:
     return _respond(request, {"error": message}, status, **headers)
 
 
-def _body(request) -> dict | None:
-    if len(request.body) > MAX_BODY:
+def _body(request, limit: int = MAX_BODY) -> dict | None:
+    if len(request.body) > limit:
         return None
     try:
         data = json.loads(request.body or b"{}")
@@ -106,7 +113,8 @@ def pair(request):
         if data.get("preview") is True:
             device = services.preview(code, data)
             return _respond(
-                request, {"disclosure": _disclosure(device), "device": _device_json(device)}
+                request,
+                {"disclosure": _disclosure(device, data), "device": _device_json(device)},
             )
         device, token = services.pair(code, data, client_ip(request))
     except services.PairingError as exc:
@@ -117,21 +125,29 @@ def pair(request):
             "token": token,
             "device": _device_json(device),
             "checkin_seconds": device.checkin_seconds,
-            "disclosure": _disclosure(device),
+            "disclosure": _disclosure(device, data),
         },
         status=201,
     )
 
 
-def _disclosure(device) -> str:
+def _disclosure(device, info: dict) -> str:
     """Shown on the device before monitoring starts (store rules, and plain honesty).
-    It names exactly what that kind of device sends: computers send no location."""
+    It names exactly what that kind of device sends: computers send no location, and only
+    the agent on a child's or staff computer can be asked for activity and blocking."""
     what = (
         "CPU, memory, GPU, battery and storage use, network (Wi-Fi name), and system version"
         if device.platform in COMPUTERS
         else "battery, storage, network and location"
     )
-    return f"{device.account.name} will see this device's last online time, {what}."
+    text = f"{device.account.name} will see this device's last online time, {what}."
+    agent = str(info.get("app_version", "")).startswith(AGENT_APP)
+    person = device.person
+    if agent and device.platform in COMPUTERS and person and person.kind in CONTROLLED_PEOPLE:
+        text += (" They can also turn on screen time (which apps are used, and for how "
+                 "long), websites visited (site names and time, not pages or searches) and "
+                 "blocking of adult or chosen websites on this computer.")  # fmt: skip
+    return text
 
 
 @csrf_exempt
@@ -147,7 +163,7 @@ def checkin(request):
                       WWW_Authenticate='Bearer error="invalid_token"')  # fmt: skip
     if not throttle.allow("device-checkin", str(device.pk), 30, 300):
         return _error(request, 429, "Checking in too often.", Retry_After="300")
-    data = _body(request)
+    data = _body(request, MAX_CHECKIN_BODY)
     if data is None:
         return _error(request, 400, "Send a JSON object.")
     services.checkin(device, data, client_ip(request))
@@ -157,5 +173,40 @@ def checkin(request):
             "checkin_seconds": device.checkin_seconds,
             "server_time": timezone.now().isoformat(),
             "device": _device_json(device),
+            "controls": _controls_json(device),
         },
     )
+
+
+def _controls_json(device) -> dict | None:
+    """What the agent should do beyond health. None for a device that may not have
+    controls: the agent then stops collecting and removes its hosts block."""
+    if not device.controls_allowed:
+        return None
+    controls = activity.controls_for(device)
+    return {
+        "screen_time": bool(controls and controls.screen_time),
+        "web_activity": bool(controls and controls.web_activity),
+        "blocking": blocklist.version(controls),  # "" = no blocking
+    }
+
+
+@require_GET
+def blocklist_view(request):
+    """The hosts lines for this device. The agent asks only when `blocking` in its
+    check-in answer changed, and sends that version back as If-None-Match."""
+    header = request.META.get("HTTP_AUTHORIZATION", "")
+    device = services.authenticate(header[7:].strip()) if header.startswith("Bearer ") else None
+    if device is None:
+        return HttpResponse("Not paired.\n", status=401, content_type="text/plain")
+    if not throttle.allow("device-blocklist", str(device.pk), 20, 3600):
+        return HttpResponse("Too many requests.\n", status=429, content_type="text/plain",
+                            headers={"Retry-After": "3600"})  # fmt: skip
+    controls = activity.controls_for(device) if device.controls_allowed else None
+    version = blocklist.version(controls)
+    etag = f'"{version}"'
+    if version and request.META.get("HTTP_IF_NONE_MATCH") == etag:
+        return HttpResponse(status=304, headers={"ETag": etag})
+    body = "\n".join(blocklist.for_device(controls))
+    return HttpResponse(body + "\n" if body else "", content_type="text/plain; charset=utf-8",
+                        headers={"ETag": etag})  # fmt: skip

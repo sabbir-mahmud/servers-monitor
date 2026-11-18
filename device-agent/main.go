@@ -23,8 +23,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/activity"
 	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/agent"
 	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/api"
+	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/block"
 	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/collect"
 	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/config"
 	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/svc"
@@ -59,13 +61,15 @@ func main() {
 	case "install":
 		err = svc.Install(Version)
 	case "uninstall":
-		err = svc.Uninstall()
+		err = svc.Uninstall(agent.Forget)
 	case "status":
 		err = status()
 	case "checkin":
 		err = checkin()
 	case "run":
 		err = svc.Run(Version, agent.Run)
+	case "sample": // Windows: started by the service as the signed-in person
+		err = activity.PrintSample()
 	case "version", "--version", "-v":
 		fmt.Println(Version)
 	case "help", "--help", "-h":
@@ -131,6 +135,14 @@ func status() error {
 			time.Duration(cfg.Interval)*time.Second)
 	}
 	fmt.Println("Service:", svc.State())
+	c := activity.CurrentControls()
+	fmt.Println("Screen time:", onOff(c.ScreenTime))
+	fmt.Println("Websites visited:", onOff(c.WebActivity))
+	if n := block.Count(); n > 0 {
+		fmt.Printf("Blocking: %d sites in %s\n", n, block.Path())
+	} else {
+		fmt.Println("Blocking: off")
+	}
 	if s, err := agent.ReadStatus(); err == nil {
 		if s.OK {
 			fmt.Printf("Last check-in: %s, OK\n", s.At.Local().Format("Mon 2 Jan 15:04"))
@@ -151,6 +163,13 @@ func checkin() error {
 	}
 	fmt.Println("Checked in.")
 	return nil
+}
+
+func onOff(on bool) string {
+	if on {
+		return "on"
+	}
+	return "off"
 }
 
 // ask reads the answer from the terminal, even when the installer was piped into a shell.

@@ -3,7 +3,8 @@ from django import forms
 from apps.tenants.forms import _style
 from apps.tenants.scoping import AccountFormMixin
 
-from .models import Device, Platform
+from . import domains
+from .models import Device, DeviceControls, Platform
 
 
 class DeviceForm(AccountFormMixin, forms.ModelForm):
@@ -34,3 +35,37 @@ class DeviceForm(AccountFormMixin, forms.ModelForm):
             # The app on the device is for one platform; a different one needs a new entry.
             self.fields["platform"].disabled = True
         _style(self)
+
+
+class DeviceControlsForm(forms.ModelForm):
+    class Meta:
+        model = DeviceControls
+        fields = ["screen_time", "web_activity", "block_adult", "safe_search",
+                  "blocked_domains", "allowed_domains"]  # fmt: skip
+        labels = {
+            "screen_time": "Screen time",
+            "web_activity": "Websites visited",
+            "block_adult": "Block adult websites",
+            "safe_search": "SafeSearch",
+            "blocked_domains": "Also block",
+            "allowed_domains": "Always allow",
+        }
+        widgets = {
+            "blocked_domains": forms.Textarea(attrs={"rows": 4, "placeholder": "tiktok.com"}),
+            "allowed_domains": forms.Textarea(attrs={"rows": 3, "placeholder": "school.edu"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name in ("screen_time", "web_activity", "block_adult", "safe_search"):
+            self.fields[name].widget.attrs["role"] = "switch"
+        _style(self)
+
+    def _domains(self, field):
+        return "\n".join(domains.parse_list(self.cleaned_data.get(field, "")))
+
+    def clean_blocked_domains(self):
+        return self._domains("blocked_domains")
+
+    def clean_allowed_domains(self):
+        return self._domains("allowed_domains")

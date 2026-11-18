@@ -123,6 +123,10 @@ def checkin(device: Device, report: dict, ip: str | None) -> None:
         device.location_accuracy_m, device.location_at = location["accuracy_m"], location["at"]
     device.save()
     _record_sample(device, now)
+    if "activity" in report:
+        from . import activity
+
+        activity.apply(device, report["activity"])
     if location is not None:
         DeviceLocation.objects.create(
             device=device,

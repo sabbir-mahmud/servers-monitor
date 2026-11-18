@@ -115,6 +115,72 @@
 {% endpartialdef %}
 {% endif %}
 
+{% if activity %}
+<section class="card activity-card" id="activity" aria-labelledby="activity-title">
+  <div class="dlist-head">
+    <h2 class="card-title-lg" id="activity-title">{% icon "clock" 17 %} Activity</h2>
+    <nav class="day-nav" aria-label="Day">
+      {% if activity.prev %}<a class="btn btn-sm btn-outline-secondary btn-icon" href="?day={{ activity.prev|date:'Y-m-d' }}#activity" aria-label="Previous day">{% icon "arrow-left" 14 %}</a>{% endif %}
+      <span class="day-nav-label">{% if activity.is_today %}Today{% else %}{{ activity.day|date:"D j M" }}{% endif %}</span>
+      {% if activity.next %}<a class="btn btn-sm btn-outline-secondary btn-icon" href="?day={{ activity.next|date:'Y-m-d' }}#activity" aria-label="Next day">{% icon "chevron" 14 %}</a>{% endif %}
+    </nav>
+  </div>
+  {% if not controls.screen_time and not controls.web_activity %}
+  <p class="activity-empty">Screen time and websites are off for this computer.{% if perms.devices.change_device %} <a href="{% url 'devices:controls' device.pk %}">Turn them on</a>.{% endif %}</p>
+  {% else %}
+  <div class="activity-grid">
+    <div>
+      <h3 class="side-title">Screen time</h3>
+      {% if controls.screen_time %}
+      <div class="activity-total">{{ activity.total|duration }}</div>
+      <div class="week-bars" role="img" aria-label="Screen time over the last 7 days">
+        {% for d in activity.week %}<div class="week-bar{% if d.day == activity.day %} is-current{% endif %}" title="{{ d.day|date:'D j M' }}: {{ d.seconds|duration }}"><span style="height: {{ d.share }}%"></span><small>{{ d.day|date:"D"|slice:":2" }}</small></div>{% endfor %}
+      </div>
+      <ol class="bar-list" role="list">
+        {% for a in activity.apps %}<li><span class="bar-list-name text-truncate">{{ a.app }}</span><span class="bar-list-value">{{ a.seconds|duration }}</span><div class="vbar"><span style="width: {{ a.share }}%"></span></div></li>
+        {% empty %}<li class="small text-body-secondary">Nothing recorded this day.</li>{% endfor %}
+      </ol>
+      {% if activity.users|length > 1 %}<p class="small text-body-secondary mt-2 mb-0">Signed in as {{ activity.users|join:", " }}.</p>{% endif %}
+      {% else %}<p class="small text-body-secondary">Off.</p>{% endif %}
+    </div>
+    <div>
+      <h3 class="side-title">Websites</h3>
+      {% if controls.web_activity %}
+      <table class="table table-sm site-table mb-0">
+        <thead><tr><th scope="col">Site</th><th scope="col" class="text-end">Visits</th><th scope="col" class="text-end">Time</th></tr></thead>
+        <tbody>
+          {% for s in activity.sites %}<tr><td class="text-truncate">{{ s.domain }}</td><td class="text-end num">{{ s.visits }}</td><td class="text-end num">{% if s.seconds %}{{ s.seconds|duration }}{% else %}—{% endif %}</td></tr>
+          {% empty %}<tr><td colspan="3" class="small text-body-secondary">No websites recorded this day.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      {% else %}<p class="small text-body-secondary">Off.</p>{% endif %}
+    </div>
+  </div>
+  <p class="small text-body-secondary activity-note">Kept for {{ DEVICE_ACTIVITY_DAYS }} days. Websites show the site only, never pages or searches. Private and incognito windows aren't recorded by browsers, so they don't appear here.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if device.platform in "windows macos linux" and device.person %}
+<section class="card controls-card" aria-labelledby="controls-title">
+  <div class="dlist-head">
+    <h2 class="card-title-lg" id="controls-title">{% icon "shield" 17 %} Controls</h2>
+    {% if device.controls_allowed and perms.devices.change_device %}<a class="btn btn-sm btn-outline-secondary" href="{% url 'devices:controls' device.pk %}">{% icon "edit" 14 %} Change</a>{% endif %}
+  </div>
+  {% if device.controls_allowed %}
+  <ul class="controls-list" role="list">
+    <li><span>Screen time</span><span class="{% if controls.screen_time %}text-good{% else %}text-body-secondary{% endif %}">{% if controls.screen_time %}On{% else %}Off{% endif %}</span></li>
+    <li><span>Websites visited</span><span class="{% if controls.web_activity %}text-good{% else %}text-body-secondary{% endif %}">{% if controls.web_activity %}On{% else %}Off{% endif %}</span></li>
+    <li><span>Adult websites</span><span class="{% if controls.block_adult %}text-good{% else %}text-body-secondary{% endif %}">{% if controls.block_adult %}Blocked{% else %}Not blocked{% endif %}</span></li>
+    <li><span>SafeSearch</span><span class="{% if controls.safe_search %}text-good{% else %}text-body-secondary{% endif %}">{% if controls.safe_search %}On{% else %}Off{% endif %}</span></li>
+    {% if controls.blocked_domains %}<li><span>Also blocked</span><span>{{ controls.blocked_domains.split|length }} site{{ controls.blocked_domains.split|length|pluralize }}</span></li>{% endif %}
+  </ul>
+  {% else %}
+  <p class="activity-empty">{{ device.controls_block_reason }}</p>
+  {% endif %}
+</section>
+{% endif %}
+
 {% if device.has_location %}
 <section class="card loc-card" aria-labelledby="where-title">
   <div class="map-card-head">

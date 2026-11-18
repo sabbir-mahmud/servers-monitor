@@ -33,6 +33,19 @@ On Windows, run the same commands from an administrator PowerShell (`nexguard.ex
 - **Plain `http://`:** allowed only for this machine or the local network, unless
   `NEXGUARD_ALLOW_HTTP=1` is set.
 
+**Screen time, websites and blocking** (a child's or staff computer, switched on in the
+dashboard; see [docs/devices.md](../docs/devices.md)):
+- Screen time: one look a minute (Windows: a hidden `nexguard sample` helper in the
+  signed-in person's session, because the service can't see their screen).
+- Websites: browser history read every 10 minutes from a copy of each history database
+  (pure-Go SQLite), reduced to the site on this computer. Cursors in `activity.json` mean
+  each visit counts once; nothing from before it was switched on is sent.
+- Blocking: a managed section in the hosts file between `# >>> NexGuard` markers. Lines
+  outside it are never touched. It's re-checked at every check-in and removed when blocking
+  is switched off, the device is removed on the dashboard, or on `uninstall`.
+- Unsent activity waits in `activity.json` (admin only) and goes as a numbered batch, so a
+  lost answer doesn't count anything twice.
+
 **Develop**
 ```sh
 go test ./...            # unit tests, with a real health reading from this machine

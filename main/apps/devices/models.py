@@ -28,6 +28,11 @@ PHONES = (Platform.ANDROID, Platform.IOS)
 
 LOW_BATTERY = 15  # percent, not charging
 
+# app_version prefix the Go device agent reports (device-agent/internal/collect).
+AGENT_APP = "nexguard-agent "
+# Whose computers can have screen time, web activity and blocking (Person.kind values).
+CONTROLLED_PEOPLE = ("child", "staff")
+
 # How often each kind of device is asked to check in (the phone OS may stretch it).
 CHECKIN_SECONDS = {"computer": 300, "phone": 900}
 
@@ -232,6 +237,24 @@ class Device(Machine):
     def has_health(self) -> bool:
         return self.cpu_percent is not None or self.memory_total is not None
 
+    @property
+    def controls_block_reason(self) -> str:
+        """Why screen time, web activity and blocking can't be turned on ("" if they can).
+        Only children and company staff: on another adult's computer this is how
+        stalkerware is abused. Only the agent: it runs as a service the user can't remove,
+        and only it can read other users' browsers or edit the hosts file."""
+        if self.platform not in COMPUTERS:
+            return "Only for Windows, Mac and Linux computers."
+        if self.person is None or self.person.kind not in CONTROLLED_PEOPLE:
+            return "Only for a child's or a staff member's computer."
+        if not self.app_version.startswith(AGENT_APP):
+            return "Needs the NexGuard agent installed by an administrator."
+        return ""
+
+    @property
+    def controls_allowed(self) -> bool:
+        return not self.controls_block_reason
+
 
 class LocationSource(models.TextChoices):
     GPS = "gps", "GPS"
@@ -327,3 +350,108 @@ def summarize(devices) -> dict:
             default=None,
         ),
     }
+
+
+# ---------------------------------------------------------------- controls and activity
+
+
+class DeviceControls(models.Model):
+    """What the agent on a child's or staff member's computer does beyond health. Created
+    the first time someone saves them; no row means everything off."""
+
+    device = models.OneToOneField(Device, on_delete=models.CASCADE, related_name="controls")
+    screen_time = models.BooleanField(default=False, help_text="Time in use, by app.")
+    web_activity = models.BooleanField(
+        default=False, help_text="Websites visited, as domains with visits and time."
+    )
+    block_adult = models.BooleanField(default=False, help_text="Block adult websites.")
+    safe_search = models.BooleanField(
+        default=False, help_text="Force SafeSearch on Google, Bing, DuckDuckGo and YouTube."
+    )
+    blocked_domains = models.TextField(blank=True, help_text="One site per line.")
+    allowed_domains = models.TextField(
+        blank=True, help_text="Never blocked, even if on the adult list. One per line."
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    account_path = "device__account"
+
+    def __str__(self):
+        return f"Controls for {self.device_id}"
+
+    @property
+    def blocking(self) -> bool:
+        return self.block_adult or self.safe_search or bool(self.blocked_domains.strip())
+
+
+class ScreenTime(models.Model):
+    """Seconds a computer was in use (signed in, unlocked, not idle) per day, OS user and
+    app in front. Check-ins add to the row; pruned after DEVICE_ACTIVITY_DAYS."""
+
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name="screen_time")
+    day = models.DateField()
+    os_user = models.CharField(max_length=100)
+    app = models.CharField(max_length=100)
+    seconds = models.PositiveIntegerField(default=0)
+
+    account_path = "device__account"
+
+    class Meta:
+        ordering = ["-day", "-seconds"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["device", "day", "os_user", "app"], name="screentime_unique"
+            ),
+            models.CheckConstraint(condition=Q(seconds__lte=86400), name="screentime_max_day"),
+        ]
+        indexes = [models.Index(fields=["day"], name="screentime_day")]  # pruning
+
+    def __str__(self):
+        return f"{self.app} {self.seconds}s on {self.day}"
+
+
+class WebActivity(models.Model):
+    """Visits and time per website (domain only, never the page) per day, OS user and
+    browser. Check-ins add to the row; pruned after DEVICE_ACTIVITY_DAYS."""
+
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name="web_activity")
+    day = models.DateField()
+    os_user = models.CharField(max_length=100)
+    browser = models.CharField(max_length=50)
+    domain = models.CharField(max_length=253)
+    visits = models.PositiveIntegerField(default=0)
+    seconds = models.PositiveIntegerField(default=0)
+
+    account_path = "device__account"
+
+    class Meta:
+        ordering = ["-day", "-seconds", "-visits"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["device", "day", "os_user", "browser", "domain"], name="webactivity_unique"
+            ),
+        ]
+        indexes = [models.Index(fields=["day"], name="webactivity_day")]  # pruning
+
+    def __str__(self):
+        return f"{self.domain} on {self.day}"
+
+
+class ActivityBatch(models.Model):
+    """Batch ids already counted: an agent resends a batch whose answer it never got, and
+    the counters above only add, so each batch must count once."""
+
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name="+")
+    batch_id = models.UUIDField()
+    received_at = models.DateTimeField(default=timezone.now)
+
+    account_path = "device__account"
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["device", "batch_id"], name="activitybatch_unique")
+        ]
+        indexes = [models.Index(fields=["received_at"], name="activitybatch_received")]
+
+    def __str__(self):
+        return str(self.batch_id)

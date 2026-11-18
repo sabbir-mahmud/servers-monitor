@@ -1,0 +1,292 @@
+"""Screen time, websites and blocking on children's and staff computers (Go agent only)."""
+
+import uuid
+from datetime import timedelta
+
+import pytest
+from django.urls import reverse
+from django.utils import timezone
+
+from apps.audit.models import AuditLog
+from apps.devices import activity, blocklist
+from apps.devices.models import ActivityBatch, DeviceControls, ScreenTime, WebActivity
+from apps.tenants.models import Person
+
+from .conftest import add_member, make_account
+from .test_devices import add_device, api_checkin, api_pair
+
+pytestmark = pytest.mark.django_db
+
+AGENT = {"app_version": "nexguard-agent 0.1.0"}
+
+
+@pytest.fixture(autouse=True)
+def _blocklist_dir(settings, tmp_path):
+    """Blocklist files next to a throwaway database, and never fetched over the network."""
+    settings.SQLITE_PATH = tmp_path / "db.sqlite3"
+    settings.ADULT_BLOCKLIST_URL = ""
+
+
+@pytest.fixture
+def family():
+    return make_account("The Rahmans", kind="family")
+
+
+@pytest.fixture
+def parent(django_user_model, family):
+    user = django_user_model.objects.create_user("mum", "mum@example.com", "pw-x-1234567")
+    add_member(user, "owner", family)
+    return user
+
+
+@pytest.fixture
+def sara(family):
+    return Person.objects.create(account=family, kind="child", name="Sara")
+
+
+def pair_computer(client, person, name="Sara's Mac", info=AGENT):
+    device, code = add_device(client, person, platform="macos", name=name)
+    token = api_pair(client, code, platform="macos", **info).json()["token"]
+    device.refresh_from_db()
+    return device, token
+
+
+@pytest.fixture
+def mac(client, parent, sara):
+    client.force_login(parent)
+    return pair_computer(client, sara)
+
+
+def turn_on(device, **fields):
+    defaults = {"screen_time": True, "web_activity": True}
+    return DeviceControls.objects.update_or_create(device=device, defaults={**defaults, **fields})[
+        0
+    ]
+
+
+def batch(screen=(), web=(), batch_id=None):
+    return {"batch": str(batch_id or uuid.uuid4()), "screen": list(screen), "web": list(web)}
+
+
+def today():
+    return timezone.localdate().isoformat()
+
+
+# ---------------------------------------------------------------- who can have controls
+
+
+def test_only_children_and_staff_on_the_agent_get_controls(client, parent, family, sara):
+    client.force_login(parent)
+    child_mac, token = pair_computer(client, sara)
+    assert child_mac.controls_allowed
+    assert api_checkin(client, token, AGENT).json()["controls"] == {
+        "screen_time": False, "web_activity": False, "blocking": ""}  # fmt: skip
+
+    partner = Person.objects.create(account=family, kind="partner", name="Rahim")
+    their_mac, token = pair_computer(client, partner, name="Rahim's Mac")
+    assert "child's or a staff member's" in their_mac.controls_block_reason
+    assert api_checkin(client, token, AGENT).json()["controls"] is None
+
+    script_mac, token = pair_computer(client, sara, name="Sara's old Mac",
+                                      info={"app_version": "nexguard-device-sh 1.2.0"})  # fmt: skip
+    assert "agent" in script_mac.controls_block_reason
+    assert api_checkin(client, token, {"app_version": "nexguard-device-sh 1.2.0"}).json()[
+        "controls"] is None  # fmt: skip
+
+
+def test_staff_computers_in_a_company_can_have_controls(client, django_user_model):
+    company = make_account("Acme", kind="company")
+    boss = django_user_model.objects.create_user("boss", "boss@example.com", "pw-x-1234567")
+    add_member(boss, "owner", company)
+    staff = Person.objects.create(account=company, kind="staff", name="Karim")
+    client.force_login(boss)
+    device, _ = pair_computer(client, staff, name="Karim's Mac")
+    assert device.controls_allowed
+
+
+def test_consent_names_activity_only_for_the_agent_on_a_controllable_computer(
+    client, parent, family, sara
+):
+    client.force_login(parent)
+    _, code = add_device(client, sara, platform="macos", name="Sara's Mac")
+    agent = api_pair(client, code, platform="macos", preview=True, **AGENT).json()["disclosure"]
+    assert "screen time" in agent and "not pages or searches" in agent
+    script = api_pair(client, code, platform="macos", preview=True).json()["disclosure"]
+    assert "screen time" not in script
+    partner = Person.objects.create(account=family, kind="partner", name="Rahim")
+    _, code = add_device(client, partner, platform="macos", name="Rahim's Mac")
+    theirs = api_pair(client, code, platform="macos", preview=True, **AGENT).json()["disclosure"]
+    assert "screen time" not in theirs
+
+
+# ---------------------------------------------------------------- activity from the agent
+
+
+def test_activity_adds_up_and_a_resent_batch_counts_once(client, mac):
+    device, token = mac
+    turn_on(device)
+    first = batch(
+        screen=[{"day": today(), "user": "sara", "app": "Safari", "seconds": 600},
+                {"day": today(), "user": "sara", "app": "Safari", "seconds": 60}],
+        web=[{"day": today(), "user": "sara", "browser": "Chrome", "domain": "YouTube.com",
+              "visits": 3, "seconds": 300}],
+    )  # fmt: skip
+    for _ in range(2):  # the answer was lost: the agent sends the same batch again
+        assert api_checkin(client, token, {**AGENT, "activity": first}).status_code == 200
+    assert ScreenTime.objects.get().seconds == 660
+    site = WebActivity.objects.get()
+    assert (site.domain, site.visits, site.seconds) == ("youtube.com", 3, 300)
+    api_checkin(client, token, {**AGENT, "activity": batch(
+        screen=[{"day": today(), "user": "sara", "app": "Safari", "seconds": 120}],
+        web=[{"day": today(), "user": "sara", "browser": "Chrome", "domain": "youtube.com",
+              "visits": 1, "seconds": 30}])})  # fmt: skip
+    assert ScreenTime.objects.get().seconds == 780
+    site.refresh_from_db()
+    assert (site.visits, site.seconds) == (4, 330)
+
+
+def test_activity_is_dropped_when_switched_off_or_not_allowed(client, parent, family, mac):
+    device, token = mac
+    row = [{"day": today(), "user": "sara", "app": "Safari", "seconds": 60}]
+    api_checkin(client, token, {**AGENT, "activity": batch(screen=row)})  # no controls yet
+    turn_on(device, screen_time=False)
+    api_checkin(client, token, {**AGENT, "activity": batch(screen=row)})
+    assert not ScreenTime.objects.exists()
+
+    partner = Person.objects.create(account=family, kind="partner", name="Rahim")
+    their_mac, token = pair_computer(client, partner, name="Rahim's Mac")
+    turn_on(their_mac)  # e.g. set before the device was reassigned
+    api_checkin(client, token, {**AGENT, "activity": batch(screen=row)})
+    assert not ScreenTime.objects.exists()
+    assert not ActivityBatch.objects.filter(device=their_mac).exists()
+
+
+def test_bad_activity_rows_are_dropped_not_the_check_in(client, mac):
+    device, token = mac
+    turn_on(device)
+    old = (timezone.localdate() - timedelta(days=400)).isoformat()
+    resp = api_checkin(client, token, {**AGENT, "activity": batch(
+        screen=[{"day": old, "user": "sara", "app": "X", "seconds": 60},
+                {"day": today(), "user": "", "app": "X", "seconds": 60},
+                {"day": today(), "user": "sara", "app": "X", "seconds": 10**9},
+                "nonsense"],
+        web=[{"day": today(), "user": "sara", "domain": "https://evil.example/path?q=secret",
+              "visits": 1},
+             {"day": today(), "user": "sara", "domain": "not a domain", "visits": 1}])})  # fmt: skip
+    assert resp.status_code == 200
+    assert list(ScreenTime.objects.values_list("seconds", flat=True)) == [86400]  # clamped
+    assert list(WebActivity.objects.values_list("domain", flat=True)) == ["evil.example"]
+    assert api_checkin(client, token, {**AGENT, "activity": "nope"}).status_code == 200
+
+
+def test_activity_is_pruned_after_retention(mac, settings):
+    device, _ = mac
+    settings.DEVICE_ACTIVITY_DAYS = 30
+    old = timezone.localdate() - timedelta(days=31)
+    ScreenTime.objects.create(device=device, day=old, os_user="sara", app="X", seconds=5)
+    ScreenTime.objects.create(device=device, day=timezone.localdate(), os_user="sara", app="X",
+                              seconds=5)  # fmt: skip
+    assert activity.prune() == 1 and ScreenTime.objects.count() == 1
+
+
+# ---------------------------------------------------------------- blocking
+
+
+def test_blocklist_merges_adult_safe_search_and_the_parents_lists(client, mac):
+    device, token = mac
+    blocklist.adult_path().write_text("pornsite.example\nallowed.example\n")
+    blocklist.safe_search_path().write_text('{"forcesafesearch.google.com": "216.239.38.120"}')
+    turn_on(device, block_adult=True, safe_search=True,
+            blocked_domains="tiktok.com", allowed_domains="allowed.example")  # fmt: skip
+    version = api_checkin(client, token, AGENT).json()["controls"]["blocking"]
+    assert version
+    url = reverse("device_api_blocklist")
+    resp = client.get(url, HTTP_AUTHORIZATION=f"Bearer {token}")
+    lines = resp.content.decode().splitlines()
+    assert resp["ETag"] == f'"{version}"'
+    assert "0.0.0.0 pornsite.example" in lines and "0.0.0.0 tiktok.com" in lines
+    assert "0.0.0.0 www.tiktok.com" in lines  # a hosts file has no wildcards
+    assert "216.239.38.120 www.google.com" in lines
+    assert "0.0.0.0 use-application-dns.net" in lines  # keeps Firefox off DNS over HTTPS
+    assert not any("allowed.example" in line for line in lines)
+    again = client.get(url, HTTP_AUTHORIZATION=f"Bearer {token}", HTTP_IF_NONE_MATCH=f'"{version}"')
+    assert again.status_code == 304
+    assert client.get(url).status_code == 401
+
+
+def test_blocking_off_returns_an_empty_list(client, mac):
+    device, token = mac
+    turn_on(device)
+    assert api_checkin(client, token, AGENT).json()["controls"]["blocking"] == ""
+    resp = client.get(reverse("device_api_blocklist"), HTTP_AUTHORIZATION=f"Bearer {token}")
+    assert resp.status_code == 200 and resp.content == b""
+
+
+def test_a_failed_list_download_keeps_the_last_good_copy(settings, monkeypatch):
+    settings.ADULT_BLOCKLIST_URL = "https://lists.example/hosts"
+    blocklist.adult_path().write_text("kept.example\n")
+    monkeypatch.setattr(blocklist, "_refresh_safe_search", lambda: False)
+
+    def offline(*args, **kwargs):
+        raise OSError("no network")
+
+    monkeypatch.setattr(blocklist.urllib.request, "urlopen", offline)
+    assert blocklist.refresh(force=True) is False
+    assert blocklist.adult()[0] == ("kept.example",)
+
+
+def test_parse_hosts_reads_hosts_format():
+    text = "# comment\n127.0.0.1 localhost\n0.0.0.0 a.example # x\n0.0.0.0 b.example c.example\n"
+    assert blocklist.parse_hosts(text) == ["a.example", "b.example", "c.example"]
+
+
+# ---------------------------------------------------------------- the pages
+
+
+def test_parent_turns_controls_on_and_sees_activity(client, mac):
+    device, token = mac
+    url = reverse("devices:controls", args=[device.pk])
+    resp = client.post(url, {"screen_time": "on", "web_activity": "on", "block_adult": "on",
+                             "blocked_domains": "https://www.TikTok.com/foo\nroblox.com"})  # fmt: skip
+    assert resp.status_code == 302
+    controls = DeviceControls.objects.get(device=device)
+    assert controls.blocked_domains == "www.tiktok.com\nroblox.com" and controls.block_adult
+    assert AuditLog.objects.filter(action="device.controls").exists()
+
+    api_checkin(client, token, {**AGENT, "activity": batch(
+        screen=[{"day": today(), "user": "sara", "app": "Minecraft", "seconds": 5400}],
+        web=[{"day": today(), "user": "sara", "browser": "Chrome", "domain": "wikipedia.org",
+              "visits": 7, "seconds": 900}])})  # fmt: skip
+    page = client.get(reverse("devices:detail", args=[device.pk])).content.decode()
+    assert "Minecraft" in page and "1h 30m" in page and "wikipedia.org" in page
+    assert "Blocked" in page and "2 sites" in page
+
+
+def test_bad_domains_are_refused_on_the_form(client, mac):
+    device, _ = mac
+    resp = client.post(reverse("devices:controls", args=[device.pk]),
+                       {"blocked_domains": "not a site\nok.example"})  # fmt: skip
+    assert resp.status_code == 200 and "Not a website address: not" in resp.content.decode()
+    assert not DeviceControls.objects.exists()
+
+
+def test_controls_cant_be_set_for_a_partners_computer(client, parent, family):
+    client.force_login(parent)
+    partner = Person.objects.create(account=family, kind="partner", name="Rahim")
+    device, _ = pair_computer(client, partner, name="Rahim's Mac")
+    page = client.get(reverse("devices:detail", args=[device.pk])).content.decode()
+    assert 'id="activity"' not in page and "staff member" in page
+    client.post(reverse("devices:controls", args=[device.pk]), {"screen_time": "on"})
+    assert not DeviceControls.objects.exists()
+
+
+def test_another_account_cant_see_or_change_controls(client, mac, django_user_model):
+    device, _ = mac
+    other = make_account("Other family", kind="family")
+    stranger = django_user_model.objects.create_user("x", "x@example.com", "pw-x-1234567")
+    add_member(stranger, "owner", other)
+    client.force_login(stranger)
+    url = reverse("devices:controls", args=[device.pk])
+    assert client.get(url).status_code == 404
+    assert client.post(url, {"screen_time": "on"}).status_code == 404
+    assert not DeviceControls.objects.exists()

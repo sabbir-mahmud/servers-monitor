@@ -1674,3 +1674,31 @@ kbd { font-family: var(--font-mono); font-size: .85em; padding: .05rem .4rem; bo
 .connect-direct[open] > summary { color: var(--ink); }
 @media (max-width: 575.98px) { .connect-cmd { flex-wrap: wrap; } .connect-card > .card-body { padding: 1.25rem; } }
 .health-card { margin-bottom: 1rem; }
+
+/* ---- device activity and controls --------------------------------------------------- */
+.activity-card, .controls-card { margin-bottom: 1rem; }
+.day-nav { display: flex; align-items: center; gap: .4rem; }
+.day-nav-label { font-size: .85rem; font-weight: 600; min-width: 6.5rem; text-align: center; }
+.activity-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 1.5rem 2rem; padding: 1rem; }
+.activity-total { font-family: var(--font-display); font-size: 1.6rem; font-weight: 650; letter-spacing: -.02em; color: var(--ink); }
+.week-bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: .35rem; height: 4.5rem; align-items: end; margin: .5rem 0 1rem; }
+.week-bar { display: flex; flex-direction: column; justify-content: flex-end; height: 100%; text-align: center; }
+.week-bar span { display: block; min-height: 2px; border-radius: 4px 4px 0 0; background: var(--surface-3); }
+.week-bar.is-current span { background: var(--accent); }
+.week-bar small { font-size: .68rem; color: var(--muted); margin-top: .2rem; }
+.bar-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .55rem; }
+.bar-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: .75rem; font-size: .85rem; }
+.bar-list .vbar { grid-column: 1 / -1; margin-top: .25rem; height: 4px; }
+.bar-list-value { color: var(--muted); font-variant-numeric: tabular-nums; }
+.site-table { table-layout: fixed; font-size: .85rem; }
+.site-table th:first-child { width: 60%; }
+.activity-note { padding: 0 1rem 1rem; margin: 0; }
+.activity-empty { padding: 1rem; margin: 0; color: var(--muted); font-size: .9rem; }
+.controls-list { list-style: none; margin: 0; padding: .25rem 1rem .75rem; }
+.controls-list li { display: flex; justify-content: space-between; gap: 1rem; padding: .45rem 0; border-bottom: 1px solid var(--line); font-size: .88rem; }
+.controls-list li:last-child { border-bottom: 0; }
+.switch-row { display: flex; gap: .6rem; align-items: flex-start; padding: .35rem 0; }
+.switch-row .form-check-input { margin-top: .2rem; flex: none; }
+@media (max-width: 767.98px) {
+  .activity-grid { grid-template-columns: 1fr; }
+}

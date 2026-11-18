@@ -51,8 +51,8 @@ func TestPreviewThenPairThenCheckin(t *testing.T) {
 	if seen[0]["preview"] != true || seen[1]["preview"] != nil || seen[1]["platform"] != "macos" {
 		t.Fatalf("bodies: %v", seen)
 	}
-	if every, err := c.Checkin("ngd_abc", map[string]any{"cpu": map[string]any{"percent": 5}}); err != nil || every != 600 {
-		t.Fatalf("checkin: %d %v", every, err)
+	if res, err := c.Checkin("ngd_abc", map[string]any{"cpu": map[string]any{"percent": 5}}); err != nil || res.CheckinSeconds != 600 {
+		t.Fatalf("checkin: %+v %v", res, err)
 	}
 }
 
@@ -92,5 +92,30 @@ func TestPlainHTTPOnlyOnThisMachineOrTheLAN(t *testing.T) {
 	t.Setenv("NEXGUARD_ALLOW_HTTP", "1")
 	if _, err := CheckServer("http://monitor.example.com"); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestBlocklistUsesTheVersionItHas(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Header.Get("Authorization") != "Bearer ngd_abc":
+			w.WriteHeader(401)
+		case r.Header.Get("If-None-Match") == `"v1"`:
+			w.WriteHeader(304)
+		default:
+			w.Header().Set("ETag", `"v1"`)
+			_, _ = w.Write([]byte("0.0.0.0 a.example\n0.0.0.0 b.example\n"))
+		}
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "test")
+	if lines, err := c.Blocklist("ngd_abc", ""); err != nil || len(lines) != 2 {
+		t.Fatalf("fresh: %v %v", lines, err)
+	}
+	if lines, err := c.Blocklist("ngd_abc", "v1"); err != nil || lines != nil {
+		t.Fatalf("unchanged must be nil, nil: %v %v", lines, err)
+	}
+	if _, err := c.Blocklist("ngd_old", ""); !errors.Is(err, ErrUnpaired) {
+		t.Fatalf("got %v", err)
 	}
 }

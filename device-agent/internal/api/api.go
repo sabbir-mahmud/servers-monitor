@@ -69,15 +69,64 @@ func (c *Client) Pair(code string, info map[string]any, preview bool) (*PairResu
 	return &out, nil
 }
 
-// Checkin sends one report and returns how often the dashboard wants them (seconds).
-func (c *Client) Checkin(token string, report map[string]any) (int, error) {
-	var out struct {
-		CheckinSeconds int `json:"checkin_seconds"`
-	}
+// Controls: what the dashboard wants beyond health. Nil means none for this computer
+// (not a child's or staff computer): stop collecting and remove any blocking.
+type Controls struct {
+	ScreenTime  bool   `json:"screen_time"`
+	WebActivity bool   `json:"web_activity"`
+	Blocking    string `json:"blocking"` // blocklist version; "" = nothing blocked
+}
+
+type CheckinResult struct {
+	CheckinSeconds int       `json:"checkin_seconds"`
+	Controls       *Controls `json:"controls"`
+}
+
+// Checkin sends one report; the answer says how often to report and what to collect.
+func (c *Client) Checkin(token string, report map[string]any) (*CheckinResult, error) {
+	var out CheckinResult
 	if err := c.post("/device/v1/checkin", token, report, &out); err != nil {
-		return 0, err
+		return nil, err
 	}
-	return out.CheckinSeconds, nil
+	return &out, nil
+}
+
+// Blocklist fetches the hosts lines ("address name") for this computer. With the version
+// it already has, the dashboard answers 304 and this returns nil, nil.
+func (c *Client) Blocklist(token, have string) ([]string, error) {
+	req, err := http.NewRequest(http.MethodGet, c.Server+"/device/v1/blocklist", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("User-Agent", c.UserAgent)
+	if have != "" {
+		req.Header.Set("If-None-Match", `"`+have+`"`)
+	}
+	client := *c.HTTP
+	client.Timeout = 2 * time.Minute // a few MB on a slow connection
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("can't reach %s: %w", c.Server, err)
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusNotModified:
+		return nil, nil
+	case resp.StatusCode == http.StatusUnauthorized:
+		return nil, ErrUnpaired
+	case resp.StatusCode != http.StatusOK:
+		return nil, &Error{Status: resp.StatusCode, Message: fmt.Sprintf("blocklist: HTTP %d", resp.StatusCode)}
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return []string{}, nil
+	}
+	return lines, nil
 }
 
 func (c *Client) post(path, token string, body any, out any) error {

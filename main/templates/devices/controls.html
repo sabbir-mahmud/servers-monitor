@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Controls · {{ device.name }}{% endblock %}
+{% block content %}
+{% url 'devices:detail' device.pk as back %}
+<a class="back-link" href="{{ back }}">{% icon "arrow-left" 15 %} {{ device.name }}</a>
+<div class="page-head"><div>
+  <h1 class="page-title">Controls</h1>
+  <p class="page-sub">What the {{ SITE_NAME }} agent on {{ device.name }}{% if device.person %} ({{ device.person.name }}){% endif %} records and blocks. Changes reach it at its next check-in.</p>
+</div></div>
+
+<div class="form-layout">
+  {% if device.controls_allowed %}
+  <form method="post" novalidate class="card form-card">{% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger m-3 mb-0" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+    <fieldset class="form-step">
+      <legend class="form-step-head"><span class="form-step-num">1</span><span><span class="form-step-title">Record</span><span class="form-step-sub">Shown on the device page, kept {{ DEVICE_ACTIVITY_DAYS|default:30 }} days.</span></span></legend>
+      {% for field in form %}{% if field.name == "screen_time" or field.name == "web_activity" %}
+      <div class="form-check form-switch switch-row">{{ field }}<label class="form-check-label" for="{{ field.id_for_label }}"><span class="fw-medium">{{ field.label }}</span><span class="d-block small text-body-secondary">{{ field.help_text }}</span></label></div>
+      {% endif %}{% endfor %}
+    </fieldset>
+    <fieldset class="form-step">
+      <legend class="form-step-head"><span class="form-step-num">2</span><span><span class="form-step-title">Block</span><span class="form-step-sub">On this computer, in every browser, for everyone who uses it.</span></span></legend>
+      {% for field in form %}{% if field.name == "block_adult" or field.name == "safe_search" %}
+      <div class="form-check form-switch switch-row">{{ field }}<label class="form-check-label" for="{{ field.id_for_label }}"><span class="fw-medium">{{ field.label }}</span><span class="d-block small text-body-secondary">{{ field.help_text }}</span></label></div>
+      {% endif %}{% endfor %}
+      {% for field in form %}{% if field.name == "blocked_domains" or field.name == "allowed_domains" %}
+      <div class="mt-3">
+        <label class="form-label fw-medium" for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        <div class="form-text">{{ field.help_text }}{% if field.name == "blocked_domains" %} A site covers its www. address too.{% endif %}</div>
+        {% for e in field.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+      </div>
+      {% endif %}{% endfor %}
+    </fieldset>
+    <div class="form-actions">
+      <a class="btn btn-outline-secondary" href="{{ back }}">Cancel</a>
+      <button class="btn btn-primary">Save</button>
+    </div>
+  </form>
+  {% else %}
+  <section class="card form-card"><p class="activity-empty">{{ device.controls_block_reason }}</p></section>
+  {% endif %}
+
+  <aside class="form-aside">
+    <section class="card side-card">
+      <h2 class="side-title">Good to know</h2>
+      <ul class="next-steps">
+        <li><strong>The person was told</strong><span>Pairing showed what can be turned on, and the agent stays visible on the computer.</span></li>
+        <li><strong>Sites, not pages</strong><span>Only the site name is sent (youtube.com), never what was watched or searched.</span></li>
+        <li><strong>Limits</strong><span>Private windows aren't recorded. A VPN or a browser's own secure DNS can get around blocking, and someone with administrator rights on the computer can undo it.</span></li>
+      </ul>
+    </section>
+  </aside>
+</div>
+{% endblock %}

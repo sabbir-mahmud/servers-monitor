@@ -25,6 +25,8 @@ from django.utils import timezone
 from apps.alerts import delivery, forecast
 from apps.alerts.services import sweep
 from apps.core import backup
+from apps.devices import activity as device_activity
+from apps.devices import blocklist as device_blocklist
 from apps.devices.services import prune_locations
 from apps.devices.services import prune_samples as prune_device_samples
 from apps.fleet import rollups
@@ -261,11 +263,13 @@ class Bridge:
                     usage.prune()
                     rollups.build_all()  # before the forecast, which reads them
                     forecast.update_all()
+                    device_blocklist.refresh()  # at most daily; ~2 MB from ADULT_BLOCKLIST_URL
                     if (
                         deleted := prune_samples()
                         + prune_checks()
                         + prune_locations()
                         + prune_device_samples()
+                        + device_activity.prune()
                     ):
                         logger.info("Pruned %d samples/checks past retention", deleted)
             except Exception:  # keep scheduling even if one round hits a bug

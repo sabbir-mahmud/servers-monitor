@@ -69,11 +69,41 @@ check-in is noted in an `error` file next to it.
 
 For computers that need to stay monitored, such as a child's account or a company laptop,
 there is a Go agent in `device-agent/`. An administrator installs it once, and it runs as
-a system service that a standard user can't stop. It reports the same health readings.
-Website rules, browser history and computer location will build on it
-([roadmap](planning/device-monitoring.md)). For now it's installed by hand: see
+a system service that a standard user can't stop. It reports the same health readings,
+and on a **child's** or **staff member's** computer it can also do the things below. For
+now it's installed by hand: see
 [device-agent/README.md](../device-agent/README.md). A one-line install from the pair
 page comes next.
+
+## Screen time, websites and blocking (agent only)
+
+On the device page, **Controls → Change** turns each of these on or off. Only for a
+computer assigned to a child (family account) or a staff member (company account) and
+running the agent: on another adult's computer, this is how monitoring gets abused, and
+the scripts run as the user, who could simply delete them. Pairing tells the person what
+can be turned on. Changes reach the computer at its next check-in.
+
+| | What it records | How |
+|---|---|---|
+| **Screen time** | Minutes in use per day, by app in front | Every minute, while someone is signed in, the screen is unlocked and the keyboard or mouse was used in the last 2 minutes. Mac: `ioreg` idle time and `lsappinfo`. Windows: a hidden helper in the person's session (`nexguard sample`). Linux: `loginctl` sessions; no per-app split (shows as "Desktop"). |
+| **Websites visited** | Site (e.g. `youtube.com`), visits and time per day | Every 10 minutes, from Chrome, Edge, Brave, Vivaldi, Opera, Chromium, Firefox and Safari history, for every user on the computer. The address is cut down to the site **on the computer**: pages and searches are never sent. Only visits after it was switched on. |
+| **Block adult websites** | — | About 77,000 sites (`ADULT_BLOCKLIST_URL`) written into the system hosts file. |
+| **SafeSearch** | — | Google, Bing, DuckDuckGo and YouTube pointed at their SafeSearch-only addresses. |
+| **Also block / Always allow** | — | Your own lists; a site covers its `www.` address too. |
+
+Activity is kept `DEVICE_ACTIVITY_DAYS` (30) days and deleted with the device.
+
+Limits worth knowing:
+- Private and incognito windows aren't in the browser's history, so they don't show.
+- Safari history needs **Full Disk Access** for `/Library/Application Support/NexGuard/nexguard`
+  (System Settings → Privacy & Security). Without it Safari is skipped.
+- Blocking is a hosts file: a VPN, a proxy or a browser's own secure DNS can get around
+  it, and someone with administrator rights can undo it (the agent puts it back at the
+  next check-in). Firefox's automatic DNS-over-HTTPS is switched off through its
+  `use-application-dns.net` signal.
+- Windows Defender may flag hosts entries that redirect Google or Bing (SafeSearch) as a
+  "hosts file hijack" and remove them. If SafeSearch doesn't hold on a Windows computer,
+  that's why; adult-site blocking isn't affected.
 
 ## Removing a device
 

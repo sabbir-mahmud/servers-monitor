@@ -1,3 +1,5 @@
+from datetime import date, timedelta
+
 from django.conf import settings
 from django.contrib import messages
 from django.shortcuts import redirect
@@ -11,9 +13,9 @@ from apps.core.mixins import StaffViewMixin
 from apps.tenants.models import Person
 from apps.tenants.scoping import AccountScopedMixin, scoped
 
-from . import connect, maps, services
-from .forms import DeviceForm
-from .models import COMPUTERS, Device
+from . import activity, connect, maps, services
+from .forms import DeviceControlsForm, DeviceForm
+from .models import COMPUTERS, Device, DeviceControls
 
 CODE_SESSION_KEY = "device-code:{}"
 
@@ -146,8 +148,66 @@ class DeviceDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
             back_url=_back_to(device),
             now_ymd=timezone.localdate().strftime("%Y%m%d"),
             DEVICE_LOCATION_DAYS=settings.DEVICE_LOCATION_DAYS,
+            controls=activity.controls_for(device),
+            activity=self._activity(device),
+            DEVICE_ACTIVITY_DAYS=settings.DEVICE_ACTIVITY_DAYS,
             **kwargs,
         )
+
+    def _activity(self, device):
+        if not device.controls_allowed:
+            return None
+        today = timezone.localdate()
+        try:
+            day = date.fromisoformat(self.request.GET.get("day", ""))
+        except ValueError:
+            day = today
+        oldest = today - timedelta(days=settings.DEVICE_ACTIVITY_DAYS)
+        day = min(max(day, oldest), today)
+        summary = activity.summary(device, day)
+        summary["prev"] = day - timedelta(days=1) if day > oldest else None
+        summary["next"] = day + timedelta(days=1) if day < today else None
+        summary["is_today"] = day == today
+        return summary
+
+
+class DeviceControlsView(StaffViewMixin, AccountScopedMixin, UpdateView):
+    """Screen time, websites and blocking for a child's or staff member's computer."""
+
+    permission_required = "devices.change_device"
+    model = Device
+    form_class = DeviceControlsForm
+    template_name = "devices/controls.html"
+    context_object_name = "device"
+
+    def get_queryset(self):
+        return super().get_queryset().select_related("person")
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(
+            DEVICE_ACTIVITY_DAYS=settings.DEVICE_ACTIVITY_DAYS, **kwargs
+        )
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        device = self.object
+        kwargs["instance"] = activity.controls_for(device) or DeviceControls(device=device)
+        return kwargs
+
+    def form_valid(self, form):
+        if not self.object.controls_allowed:  # the page hides the form; a crafted POST
+            messages.error(self.request, self.object.controls_block_reason)
+            return redirect("devices:detail", pk=self.object.pk)
+        controls = form.save()
+        record(self.request, "device.controls", target=self.object.name,
+               fields=form.changed_data, screen_time=controls.screen_time,
+               web_activity=controls.web_activity, blocking=controls.blocking)  # fmt: skip
+        messages.success(
+            self.request,
+            f"Saved. {self.object.name} picks this up at its next check-in "
+            f"(within {self.object.checkin_seconds // 60} minutes).",
+        )
+        return redirect("devices:detail", pk=self.object.pk)
 
 
 class DeviceUpdateView(StaffViewMixin, AccountScopedMixin, UpdateView):

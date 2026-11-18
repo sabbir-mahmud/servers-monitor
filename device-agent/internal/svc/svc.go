@@ -153,8 +153,9 @@ func Install(version string) error {
 	return nil
 }
 
-// Uninstall stops and removes the service, the pairing and the installed binary.
-func Uninstall() error {
+// Uninstall stops and removes the service, the installed binary and, through forget, the
+// pairing and everything that came with it (blocking in the hosts file, counted activity).
+func Uninstall(forget func()) error {
 	if !isAdmin() {
 		return errors.New("removing needs administrator rights: run it with sudo, or from an administrator PowerShell")
 	}
@@ -167,7 +168,7 @@ func Uninstall() error {
 		return fmt.Errorf("couldn't remove the service: %w", err)
 	}
 	_ = os.Remove(filepath.Join(config.Dir(), "status.json"))
-	_ = config.Remove()
+	forget()
 	removeBinary(InstalledPath())
 	_ = os.Remove(config.Dir()) // only if empty
 	fmt.Println("NexGuard is removed from this computer. The dashboard lists it until someone deletes it there.")

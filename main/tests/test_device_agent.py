@@ -14,8 +14,8 @@ from pathlib import Path
 import pytest
 
 from apps.devices import services
-from apps.devices.models import Device
-from apps.tenants.models import Account
+from apps.devices.models import Device, DeviceControls
+from apps.tenants.models import Account, Person
 
 AGENT_SRC = Path(__file__).resolve().parents[2] / "device-agent"
 GO = shutil.which("go") or (
@@ -37,18 +37,26 @@ def agent_binary(tmp_path_factory):
     return out
 
 
-def run(binary, *args, config_dir, stdin=""):
+def run(binary, *args, config_dir, stdin="", hosts=None):
     env = {**os.environ, "NEXGUARD_CONFIG_DIR": str(config_dir)}
+    if hosts is not None:
+        env["NEXGUARD_HOSTS"] = str(hosts)  # never the real hosts file
     # Its own session: no controlling terminal, so it can't open /dev/tty to ask, even when
     # the tests run in one, and reads the answer from stdin instead.
     return subprocess.run([str(binary), *args], input=stdin, env=env, capture_output=True,
                           text=True, timeout=60, start_new_session=True)  # fmt: skip
 
 
-def new_device():
+def new_device(person_kind=None):
     platform = {"darwin": "macos", "win32": "windows"}.get(sys.platform, "linux")
     account = Account.objects.create(name="The Rahmans", kind="family")
-    device = Device.objects.create(account=account, platform=platform, name="Sara's laptop")
+    person = (
+        Person.objects.create(account=account, kind=person_kind, name="Sara")
+        if person_kind
+        else None
+    )
+    device = Device.objects.create(account=account, platform=platform, name="Sara's laptop",
+                                   person=person)  # fmt: skip
     return device, services.new_pairing_code(device)
 
 
@@ -104,3 +112,29 @@ def test_removed_on_the_dashboard_the_agent_forgets_the_pairing(
 def test_a_wrong_code_shows_the_dashboards_words(live_server, agent_binary, tmp_path):
     result = run(agent_binary, "pair", "--yes", live_server.url, "K7PQ-3MXA", config_dir=tmp_path)
     assert result.returncode == 1 and "isn't valid" in result.stderr
+
+
+def test_a_childs_computer_gets_blocking_in_its_hosts_file(
+    live_server, agent_binary, tmp_path, settings
+):
+    settings.ADULT_BLOCKLIST_URL = ""
+    device, code = new_device(person_kind="child")
+    hosts = tmp_path / "hosts"
+    hosts.write_text("127.0.0.1 localhost\n")
+    config = tmp_path / "config"
+    result = run(agent_binary, "pair", "--yes", live_server.url, code, config_dir=config,
+                 hosts=hosts)  # fmt: skip
+    assert result.returncode == 0, result.stderr
+    assert "screen time" in result.stdout  # the consent names it for a child's computer
+    DeviceControls.objects.create(device=device, screen_time=True, blocked_domains="tiktok.com")
+
+    assert run(agent_binary, "checkin", config_dir=config, hosts=hosts).returncode == 0
+    text = hosts.read_text()
+    assert text.startswith("127.0.0.1 localhost\n") and "0.0.0.0 tiktok.com" in text
+    assert "0.0.0.0 www.tiktok.com" in text
+    status = run(agent_binary, "status", config_dir=config, hosts=hosts).stdout
+    assert "Screen time: on" in status and "Blocking: " in status and "sites" in status
+
+    device.delete()  # removed on the dashboard: blocking goes with the pairing
+    run(agent_binary, "checkin", config_dir=config, hosts=hosts)
+    assert hosts.read_text() == "127.0.0.1 localhost\n"

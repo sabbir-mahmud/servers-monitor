@@ -311,6 +311,14 @@ ROLLUP_RETENTION_DAYS = config("ROLLUP_RETENTION_DAYS", default=400, cast=int)
 DEVICE_LOCATION_DAYS = config("DEVICE_LOCATION_DAYS", default=30, cast=int)
 # ...and how long their health history (CPU, memory, GPU, battery, disk) is kept.
 DEVICE_METRICS_DAYS = config("DEVICE_METRICS_DAYS", default=30, cast=int)
+# Screen time and websites (children's and staff computers with the agent): days kept.
+DEVICE_ACTIVITY_DAYS = config("DEVICE_ACTIVITY_DAYS", default=30, cast=int)
+# Adult-site list the agents' hosts-file blocking uses (hosts format; "" turns it off).
+# Fetched at most daily by the relay process; the last good copy is kept if a fetch fails.
+ADULT_BLOCKLIST_URL = config(
+    "ADULT_BLOCKLIST_URL",
+    default="https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts",
+)
 # Map tiles for device locations ({z}/{x}/{y}). Empty: no maps, just coordinates and links.
 MAP_TILE_URL = config("MAP_TILE_URL", default="https://tile.openstreetmap.org/{z}/{x}/{y}.png")
 MAP_ATTRIBUTION = config("MAP_ATTRIBUTION", default="© OpenStreetMap contributors")
