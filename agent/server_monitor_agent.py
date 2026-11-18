@@ -57,7 +57,9 @@ NET_TIMEOUT = 20  # seconds for a single non-blocking Redis round trip
 MAX_BLOCK = 120  # longest BLPOP wait (Upstash holds 110 s+); heartbeats go between waits
 MAX_CHUNK = 60 * 1024  # main accepts 64 KiB per progress message
 FLUSH_EVERY = 3.0  # seconds between streamed output messages
-INBOX_KEEP = 5000  # newest messages kept if the dashboard is offline for a long time
+# Newest messages kept if the dashboard is offline for a long time. A heartbeat is ~6 KB,
+# so 500 is ~3 MB of Redis per server (~4 h at 30 s): only the newest one matters anyway.
+INBOX_KEEP = 500
 MAX_TAIL_LINES = 2000
 VERSION_CACHE_SECONDS = 300
 PSEUDO_FS = {"tmpfs", "devtmpfs", "squashfs", "overlay", "proc", "sysfs", "devfs", "autofs"}
@@ -1364,7 +1366,16 @@ class Agent:
                 results = self.prober.take()
                 report["probe_results"], report["probes_rev"] = results, self.prober.rev
             try:
-                self.relay.send({"t": "hb", "interval": self.report_interval, "report": report})
+                # `at` (signed with the rest) lets the dashboard skip heartbeats that sat in
+                # the relay while it was down instead of taking them as fresh.
+                self.relay.send(
+                    {
+                        "t": "hb",
+                        "at": int(time.time()),
+                        "interval": self.report_interval,
+                        "report": report,
+                    }
+                )
             except BaseException:
                 if self.prober is not None:
                     self.prober.put_back(results)

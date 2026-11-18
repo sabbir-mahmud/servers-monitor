@@ -229,3 +229,13 @@ def test_temperatures_and_processes(cfg, monkeypatch):
 def test_inventory_can_be_turned_off(tmp_path):
     cfg = sma.load_config(write_config(tmp_path, "[agent]\ninventory = false\n"))
     assert sma.Collector(cfg).report()["inventory"] == {}
+
+
+def test_heartbeat_carries_its_send_time(cfg, monkeypatch):
+    # The dashboard skips heartbeats that waited in the relay while it was down.
+    agent = sma.Agent(cfg)
+    agent.relay = relay = FakeRelay()
+    monkeypatch.setattr(agent.collector, "report", lambda: {"agent_version": sma.VERSION})
+    before = int(sma.time.time())
+    assert agent.heartbeat()
+    assert before <= relay.sent[-1]["at"] <= int(sma.time.time())

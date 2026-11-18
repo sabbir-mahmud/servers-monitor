@@ -82,6 +82,40 @@ def _heartbeat_too_soon(server: Server) -> bool:
     return gap < max(5, server.report_interval / 2)
 
 
+# How far an agent's clock may lag ours before its heartbeats look stale.
+CLOCK_SKEW_SECONDS = 60
+# Log a stale-heartbeat warning at most this often per server.
+STALE_WARN_EVERY = 600
+_stale_warned: dict[str, float] = {}
+
+
+def _heartbeat_stale(server: Server, message: dict) -> bool:
+    """True for a heartbeat that sat in the relay too long to count, e.g. a backlog left
+    while this process was down. Taking it as fresh would mark a dead server online and
+    show old numbers as current. Agents before `at` existed send none: always accepted."""
+    sent_at = message.get("at")
+    if isinstance(sent_at, bool) or not isinstance(sent_at, int | float):
+        return False
+    age = time.time() - sent_at
+    limit = (
+        server.report_interval * settings.MONITOR_LATE_AFTER_INTERVALS
+        + settings.MONITOR_GRACE_SECONDS
+        + CLOCK_SKEW_SECONDS
+    )
+    if age <= limit:
+        return False
+    now, key = time.monotonic(), str(server.pk)
+    if now - _stale_warned.get(key, -1e9) > STALE_WARN_EVERY:
+        _stale_warned[key] = now
+        logger.warning(
+            "Skipping heartbeats from %s sent %ds ago (backlog from relay downtime, or the "
+            "server's clock is behind: check NTP)",
+            server.name,
+            int(age),
+        )
+    return True
+
+
 def handle(server: Server, message: dict) -> None:
     """Apply one message from `server`'s agent. Never raises on bad input: one confused
     agent must not stop the receiver for the whole fleet."""
@@ -94,7 +128,11 @@ def handle(server: Server, message: dict) -> None:
         return
     try:
         if kind == "hb":
-            if not server.is_enabled or _heartbeat_too_soon(server):
+            if (
+                not server.is_enabled
+                or _heartbeat_stale(server, message)
+                or _heartbeat_too_soon(server)
+            ):
                 return
             raw = message.get("report")
             ingest_report(server, clean_report(raw), _address(raw))

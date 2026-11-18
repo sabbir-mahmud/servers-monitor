@@ -7,9 +7,9 @@ change files under `agent/`: run the upgrade command from each server's page.
 
 ## [3.0.0] - unreleased
 
-The project is now **NexGuard**: one install serves many separate accounts. Agents are
-unchanged and need no upgrade (`server-monitor-agent`, `smctl` and the relay keys keep their
-names).
+The project is now **NexGuard**: one install serves many separate accounts. Agents keep
+working without an upgrade (`server-monitor-agent`, `smctl` and the relay keys keep their
+names); upgrading gets the relay backlog fixes below.
 
 ### Added
 - **Accounts** of three kinds. **Parent**: children and the people who look after them.
@@ -90,6 +90,13 @@ names).
   with an error instead of reporting success.
 - The consent message on computers no longer claims they share location or network; it
   names what they actually send (battery, storage and system version).
+- After the relay process was down, the heartbeats queued in Redis were taken as fresh
+  when it came back: a server that died meanwhile showed online with old numbers for a
+  few minutes. Agents now stamp each heartbeat with its (signed) send time and the
+  dashboard skips any older than the "late" window plus a minute of clock drift. Agents
+  that don't send it are handled as before; upgrade them to get the fix.
+- The agent keeps at most 500 messages queued in Redis while the dashboard is down
+  (was 5000, about 32 MB per server with heartbeats around 6 KB).
 
 ### Removed
 - **Docker**: `docker-compose.yml`, `main/Dockerfile`, `make docker-up`, the CI image build

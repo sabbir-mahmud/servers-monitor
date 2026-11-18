@@ -77,6 +77,26 @@ def test_disabled_server_heartbeats_are_ignored(agent, server_and_token):
     assert MetricSample.objects.count() == 0
 
 
+def test_backlogged_heartbeats_are_not_taken_as_fresh(agent, server_and_token):
+    """After relay downtime the queue holds old heartbeats: they must not mark the server
+    online or show old numbers as current. The fresh one at the tail still counts."""
+    import time
+
+    server = server_and_token[0]
+    agent._send({"t": "hb", "at": int(time.time()) - 3600, "interval": 120, "report": report()})
+    server.refresh_from_db()
+    assert server.last_seen_at is None and MetricSample.objects.count() == 0
+    agent._send({"t": "hb", "at": int(time.time()), "interval": 120, "report": report()})
+    server.refresh_from_db()
+    assert server.health == Health.ONLINE and MetricSample.objects.count() == 1
+
+
+def test_heartbeats_without_send_time_are_accepted(agent, server_and_token):
+    agent.heartbeat()  # older agents send no `at`
+    server_and_token[0].refresh_from_db()
+    assert server_and_token[0].health == Health.ONLINE
+
+
 def test_heartbeat_query_budget(agent, django_assert_max_num_queries):
     agent.heartbeat()
     with django_assert_max_num_queries(12):
