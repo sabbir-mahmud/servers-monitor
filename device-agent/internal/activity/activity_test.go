@@ -16,6 +16,7 @@ func setup(t *testing.T) string {
 	mu.Lock()
 	cur = nil
 	mu.Unlock()
+	setFix(nil)
 	return dir
 }
 

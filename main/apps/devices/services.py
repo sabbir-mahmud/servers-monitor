@@ -130,6 +130,9 @@ def checkin(device: Device, report: dict, ip: str | None) -> None:
     if device.platform in COMPUTERS:
         _apply_health(device, report)
     location = _location(report.get("location"), now)
+    record_location = location is not None
+    if device.platform in COMPUTERS:
+        location, record_location = _computer_location(device, location, ip, now)
     if location is not None:
         device.latitude, device.longitude = location["latitude"], location["longitude"]
         device.location_accuracy_m, device.location_at = location["accuracy_m"], location["at"]
@@ -139,7 +142,7 @@ def checkin(device: Device, report: dict, ip: str | None) -> None:
         from . import activity
 
         activity.apply(device, report["activity"])
-    if location is not None:
+    if location is not None and record_location:
         DeviceLocation.objects.create(
             device=device,
             recorded_at=location["at"],
@@ -148,6 +151,36 @@ def checkin(device: Device, report: dict, ip: str | None) -> None:
             accuracy_m=location["accuracy_m"],
             source=location["source"],
         )
+
+
+# A town-level fix from the internet address is the same all day: keep one history point
+# an hour while it doesn't change, not one per check-in.
+IP_HISTORY_EVERY = timedelta(hours=1)
+
+
+def _computer_location(device: Device, location, ip, now):
+    """(location, record it in history) for a computer. Only with Location switched on
+    under Controls: the agent's own fix if it sent one, else the town of its address."""
+    from . import activity, geoip
+
+    controls = activity.controls_for(device) if device.controls_allowed else None
+    if controls is None or not controls.location:
+        return None, False  # never stored unless switched on, whatever was sent
+    if location is not None:
+        return location, True
+    fix = geoip.locate(ip)
+    if fix is None:
+        return None, False
+    location = _location({**fix, "at": now.isoformat(), "source": "ip"}, now)
+    same_place = (
+        location is not None
+        and device.latitude == location["latitude"]
+        and device.longitude == location["longitude"]
+    )
+    recent = device.location_at is not None and now - device.location_at < IP_HISTORY_EVERY
+    if same_place and recent:
+        return None, False  # nothing new: keep the time of the last real point
+    return location, True
 
 
 def _apply_health(device: Device, report: dict) -> None:

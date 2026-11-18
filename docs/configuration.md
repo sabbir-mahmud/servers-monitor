@@ -74,6 +74,7 @@ the defaults when a variable is unset.
 | `MONITOR_METRIC_RETENTION_DAYS` | `14` | Raw metric samples and application check history kept this long. |
 | `ROLLUP_RETENTION_DAYS` | `400` | Hourly server rollups and daily application uptime kept this long: charts up to 90 days, per-mount disk forecasts and status-page history. About 24 rows per server per day. |
 | `DEVICE_ACTIVITY_DAYS` | `30` | Screen time and websites of children's and staff computers kept this long. Deleted with the device. |
+| `DEVICE_GEOIP_URL` | DB-IP City Lite, `{month}` filled in | Free city-level IP database for computers with Location on that can't report a precise position. The relay fetches it about monthly (~60 MB download) and looks addresses up locally; no address is sent anywhere. Empty turns it off. |
 | `DEVICE_AGENT_DIR` | `device-agent/dist` | Agent builds (`device-agent/build.sh`) the one-line connect command installs. Without them it installs the health-only check-in script. |
 | `ADULT_BLOCKLIST_URL` | StevenBlack `porn-only` hosts list | Adult-site list for blocking (hosts format, about 2 MB). The relay process fetches it at most daily and keeps the last good copy next to the database. Empty turns adult-site blocking off. |
 | `DEVICE_LOCATION_DAYS` | `30` | Location history of family and staff devices is kept this long (the last location is always kept). Deleted with the device. |

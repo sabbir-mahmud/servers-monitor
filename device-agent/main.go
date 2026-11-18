@@ -97,6 +97,8 @@ func main() {
 		}
 	case "sample": // Windows: started by the service as the signed-in person
 		err = activity.PrintSample()
+	case "locate": // Windows: likewise, to ask the location service
+		err = activity.PrintLocation()
 	case "version", "--version", "-v":
 		fmt.Println(Version)
 	case "help", "--help", "-h":
@@ -169,6 +171,7 @@ func status() error {
 	c := activity.CurrentControls()
 	fmt.Println("Screen time:", onOff(c.ScreenTime))
 	fmt.Println("Websites visited:", onOff(c.WebActivity))
+	fmt.Println("Location:", onOff(c.Location))
 	if a, err := activity.ReadAccess(); err == nil && len(a.NoAccess) > 0 {
 		fmt.Printf("Can't read: %s (give %s Full Disk Access)\n", strings.Join(a.NoAccess, ", "), exePath())
 	}

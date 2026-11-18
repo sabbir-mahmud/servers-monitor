@@ -86,7 +86,7 @@ def test_only_children_and_staff_on_the_agent_get_controls(client, parent, famil
     child_mac, token = pair_computer(client, sara)
     assert child_mac.controls_allowed
     assert api_checkin(client, token, AGENT).json()["controls"] == {
-        "screen_time": False, "web_activity": False, "blocking": ""}  # fmt: skip
+        "screen_time": False, "web_activity": False, "location": False, "blocking": ""}  # fmt: skip
 
     partner = Person.objects.create(account=family, kind="partner", name="Rahim")
     their_mac, token = pair_computer(client, partner, name="Rahim's Mac")
@@ -361,3 +361,79 @@ def test_browsers_the_mac_wont_let_the_agent_read_are_explained(client, parent, 
         "Full Disk Access"
         not in client.get(reverse("devices:detail", args=[device.pk])).content.decode()
     )
+
+
+# ------------------------------------------------------------------------- location
+
+
+def _mac_with_location(client, parent, sara, on=True):
+    client.force_login(parent)
+    device, code = add_device(client, sara, platform="macos", name="Sara's Mac")
+    token = api_pair(client, code, platform="macos", **AGENT).json()["token"]
+    DeviceControls.objects.create(device=device, location=on)
+    return device, token
+
+
+def test_a_computers_location_is_kept_only_when_switched_on(client, parent, sara):
+    device, token = _mac_with_location(client, parent, sara, on=False)
+    fix = {"lat": 23.81, "lon": 90.41, "accuracy": 30, "source": "network"}
+    resp = api_checkin(client, token, {**AGENT, "location": fix})
+    assert resp.json()["controls"]["location"] is False
+    device.refresh_from_db()
+    assert device.latitude is None and not device.locations.exists()
+
+    DeviceControls.objects.filter(device=device).update(location=True)
+    assert api_checkin(client, token, {**AGENT, "location": fix}).json()["controls"]["location"]
+    device.refresh_from_db()
+    assert float(device.latitude) == 23.81 and device.location_accuracy_m == 30
+    assert device.locations.get().source == "network"
+
+
+def test_without_its_own_fix_a_computer_is_placed_by_its_address(client, parent, sara, monkeypatch):
+    from apps.devices import geoip
+
+    device, token = _mac_with_location(client, parent, sara)
+    seen = []
+    monkeypatch.setattr(geoip, "locate", lambda ip: seen.append(ip) or
+                        {"lat": 23.7, "lon": 90.4, "accuracy": 25000, "city": "Dhaka"})  # fmt: skip
+    api_checkin(client, token, AGENT)
+    api_checkin(client, token, AGENT)  # same town minutes later: no second history point
+    device.refresh_from_db()
+    assert seen == ["127.0.0.1", "127.0.0.1"]
+    assert float(device.latitude) == 23.7 and device.location_accuracy_m == 25000
+    assert list(device.locations.values_list("source", flat=True)) == ["ip"]
+    page = client.get(reverse("devices:detail", args=[device.pk])).content.decode()
+    assert "town only, from its internet address" in page and "DB-IP" in page
+
+
+def test_ip_location_never_for_a_computer_that_cant_have_controls(
+    client, parent, sara, monkeypatch
+):
+    from apps.devices import geoip
+
+    monkeypatch.setattr(geoip, "locate", lambda ip: {"lat": 1, "lon": 2, "accuracy": 25000})
+    client.force_login(parent)
+    device, code = add_device(client, sara, platform="macos", name="Shared Mac")
+    token = api_pair(client, code, platform="macos").json()["token"]  # the script, no agent
+    DeviceControls.objects.create(device=device, location=True)
+    api_checkin(client, token, {"app_version": "nexguard-device-sh 1.2.0"})
+    device.refresh_from_db()
+    assert device.latitude is None
+
+
+def test_geoip_lookups_are_local_and_safe(settings, tmp_path):
+    from datetime import date
+
+    from apps.devices import geoip
+
+    assert geoip.locate("192.168.1.10") is None and geoip.locate("127.0.0.1") is None
+    assert geoip.locate("not an ip") is None and geoip.locate(None) is None
+    assert geoip.locate("8.8.8.8") is None  # no database downloaded yet
+    settings.DEVICE_GEOIP_URL = "https://example.invalid/city-{month}.mmdb.gz"
+    assert geoip._urls(date(2027, 1, 3)) == [
+        "https://example.invalid/city-2027-01.mmdb.gz",
+        "https://example.invalid/city-2026-12.mmdb.gz",
+    ]
+    assert geoip.refresh(force=True) is False and not geoip.path().exists()  # fetch failed
+    settings.DEVICE_GEOIP_URL = ""
+    assert geoip.refresh(force=True) is False

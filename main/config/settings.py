@@ -321,6 +321,12 @@ ADULT_BLOCKLIST_URL = config(
 )
 # The device agent builds (device-agent/build.sh) the connect command installs: without
 # them it falls back to the health-only check-in script.
+# Free city-level IP database ({month} = 2026-11) for computers that can't report a precise
+# location. Fetched about monthly by the relay, looked up locally. "" turns it off.
+DEVICE_GEOIP_URL = config(
+    "DEVICE_GEOIP_URL",
+    default="https://download.db-ip.com/free/dbip-city-lite-{month}.mmdb.gz",
+)
 DEVICE_AGENT_DIR = Path(
     config("DEVICE_AGENT_DIR", default=str(BASE_DIR.parent / "device-agent" / "dist"))
 )

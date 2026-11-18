@@ -101,6 +101,19 @@ can be turned on. Changes reach the computer at its next check-in.
 
 Activity is kept `DEVICE_ACTIVITY_DAYS` (30) days and deleted with the device.
 
+**Location** (Controls → Location): the agent sends a position every few minutes.
+- **Windows:** from the Windows location service (Wi-Fi, tens of metres) when *Location
+  services* and *Let desktop apps access your location* are on (Settings → Privacy &
+  security → Location). No prompt.
+- **Linux:** from GeoClue; the administrator install allows itself in GeoClue's
+  configuration.
+- **Mac, or when the above is off:** the town its internet connection is in, from the free
+  [DB-IP](https://db-ip.com) city database the dashboard downloads monthly
+  (`DEVICE_GEOIP_URL`). Looked up on the dashboard; no address is sent anywhere. A VPN
+  shows the VPN's town, and a dashboard reached over a home network or `localhost` sees
+  no public address, so nothing is shown. Behind a reverse proxy, set
+  `TRUST_PROXY_HEADERS`.
+
 Limits worth knowing:
 - Private and incognito windows aren't in the browser's history, so they don't show.
 - On a Mac, websites need **Full Disk Access** for `/Library/Application Support/NexGuard/nexguard`

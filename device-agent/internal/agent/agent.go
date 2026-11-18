@@ -59,6 +59,10 @@ func CheckinOnce(cfg *config.Config, version string) error {
 	if batch != nil {
 		report["activity"] = batch
 	}
+	if f := activity.LastFix(); f != nil {
+		report["location"] = map[string]any{"lat": f.Lat, "lon": f.Lon,
+			"accuracy": int(f.Accuracy), "at": f.At.UTC().Format(time.RFC3339), "source": "network"}
+	}
 	if activity.CurrentControls().WebActivity {
 		report["web_no_access"] = activity.NoAccess() // [] clears the dashboard's warning
 	}
@@ -164,6 +168,28 @@ func writeLines(path string, lines []string) error {
 
 // sampleLoop counts screen time every minute and reads browser histories every 10, while
 // the dashboard has them switched on.
+// locateLoop asks the computer where it is while Location is on. Each error is logged once,
+// not every few minutes; a Mac has no service the agent may use, so it stays quiet.
+func locateLoop(stop <-chan struct{}) {
+	lastErr := ""
+	for {
+		err := activity.LocateOnce()
+		switch {
+		case err == nil:
+			lastErr = ""
+		case errors.Is(err, activity.ErrNoLocationService):
+		case err.Error() != lastErr:
+			log.Printf("location: %v", err)
+			lastErr = err.Error()
+		}
+		select {
+		case <-stop:
+			return
+		case <-time.After(activity.LocateEvery):
+		}
+	}
+}
+
 // accessLoop: which browsers the system won't let the agent read. Often while some are
 // refused, so the installer (waiting for Full Disk Access) sees the change in seconds.
 func accessLoop(stop <-chan struct{}) {
@@ -210,6 +236,7 @@ func sampleLoop(stop <-chan struct{}) {
 func Run(version string, stop <-chan struct{}) {
 	go sampleLoop(stop)
 	go accessLoop(stop)
+	go locateLoop(stop)
 	backoff := time.Duration(0)
 	for {
 		wait := notPairedWait

@@ -145,13 +145,13 @@ def _disclosure(device, info: dict) -> str:
     if agent and device.platform in COMPUTERS and device.controls_owner_ok:
         if info.get("agent_mode") == "user":  # runs as this person: can't block sites
             text += (" They can also turn on screen time (which apps you use, and for how "
-                     "long) and websites visited (site names and time, not pages or "
-                     "searches) for your account on this computer.")  # fmt: skip
+                     "long), websites visited (site names and time, not pages or "
+                     "searches) for your account, and this computer's location.")  # fmt: skip
         else:
             text += (" They can also turn on screen time (which apps are used, and for "
                      "how long), websites visited (site names and time, not pages or "
-                     "searches) and blocking of adult or chosen websites on this "
-                     "computer.")  # fmt: skip
+                     "searches), this computer's location, and blocking of adult or "
+                     "chosen websites on it.")  # fmt: skip
     return text
 
 
@@ -192,6 +192,7 @@ def _controls_json(device) -> dict | None:
     return {
         "screen_time": bool(controls and controls.screen_time),
         "web_activity": bool(controls and controls.web_activity),
+        "location": bool(controls and controls.location),
         # "" = no blocking; never for a user-mode agent, which couldn't apply it
         "blocking": blocklist.version(controls) if device.can_block else "",
     }

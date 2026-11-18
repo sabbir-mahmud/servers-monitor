@@ -64,7 +64,7 @@ func sample() (Use, error) {
 	if err != nil {
 		return Use{}, err
 	}
-	out, err := runAsUser(token, exe, "sample")
+	out, err := runAsUser(token, exe, "sample", 10*time.Second)
 	if err != nil {
 		return Use{}, err
 	}
@@ -76,7 +76,7 @@ func sample() (Use, error) {
 }
 
 // runAsUser starts exe on the user's interactive desktop, hidden, and returns its output.
-func runAsUser(token windows.Token, exe string, arg string) ([]byte, error) {
+func runAsUser(token windows.Token, exe string, arg string, limit time.Duration) ([]byte, error) {
 	sa := &windows.SecurityAttributes{InheritHandle: 1}
 	sa.Length = uint32(unsafe.Sizeof(*sa))
 	var r, w windows.Handle
@@ -112,7 +112,7 @@ func runAsUser(token windows.Token, exe string, arg string) ([]byte, error) {
 		data, _ := io.ReadAll(io.LimitReader(reader, 64*1024))
 		done <- data
 	}()
-	if ev, _ := windows.WaitForSingleObject(pi.Process, 10_000); ev != windows.WAIT_OBJECT_0 {
+	if ev, _ := windows.WaitForSingleObject(pi.Process, uint32(limit/time.Millisecond)); ev != windows.WAIT_OBJECT_0 {
 		_ = windows.TerminateProcess(pi.Process, 1)
 		return nil, errors.New("sample helper timed out")
 	}

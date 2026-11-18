@@ -27,6 +27,7 @@ from apps.alerts.services import sweep
 from apps.core import backup
 from apps.devices import activity as device_activity
 from apps.devices import blocklist as device_blocklist
+from apps.devices import geoip as device_geoip
 from apps.devices.services import prune_locations
 from apps.devices.services import prune_samples as prune_device_samples
 from apps.fleet import rollups
@@ -264,6 +265,7 @@ class Bridge:
                     rollups.build_all()  # before the forecast, which reads them
                     forecast.update_all()
                     device_blocklist.refresh()  # at most daily; ~2 MB from ADULT_BLOCKLIST_URL
+                    device_geoip.refresh_in_background()  # at most weekly; ~60 MB, own thread
                     if (
                         deleted := prune_samples()
                         + prune_checks()

@@ -25,6 +25,7 @@ const MaxRows = 500
 type Controls struct {
 	ScreenTime  bool   `json:"screen_time"`
 	WebActivity bool   `json:"web_activity"`
+	Location    bool   `json:"location"`
 	Blocking    string `json:"blocking"` // blocklist version; "" = no blocking
 }
 

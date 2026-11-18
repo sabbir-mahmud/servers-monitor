@@ -3,7 +3,7 @@
   <div class="map-card-head">
     <div class="min-w-0">
       <h2 class="card-title-lg" id="where-title">{% icon "map-pin" 17 %} Where {{ person.name }} was last</h2>
-      <p class="map-card-sub">{{ map_device.location_at|ago }} · {{ map_device.location_at|date:"D j M, H:i" }} · {{ map_device.name }}{% if map_device.location_accuracy_m %} · within {{ map_device.location_accuracy_m }} m{% endif %}</p>
+      <p class="map-card-sub">{{ map_device.location_at|ago }} · {{ map_device.location_at|date:"D j M, H:i" }} · {{ map_device.name }}{% if map_device.location_accuracy_m %}{% if map_device.location_accuracy_m >= 25000 %} · town only, from its internet address (<a href="https://db-ip.com" target="_blank" rel="noopener noreferrer">IP location by DB-IP</a>){% else %} · within {{ map_device.location_accuracy_m }} m{% endif %}{% endif %}</p>
     </div>
     <a class="btn btn-sm btn-outline-secondary flex-none" href="{% url 'devices:detail' map_device.pk %}">Full history</a>
   </div>

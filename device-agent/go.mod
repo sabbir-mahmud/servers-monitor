@@ -4,6 +4,7 @@ go 1.27.4
 
 require (
 	github.com/distatus/battery v0.11.0
+	github.com/godbus/dbus/v5 v5.2.2
 	github.com/kardianos/service v1.3.0
 	github.com/shirou/gopsutil/v4 v4.26.10
 	golang.org/x/net v0.47.0

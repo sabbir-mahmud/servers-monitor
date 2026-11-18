@@ -177,6 +177,7 @@
   <ul class="controls-list" role="list">
     <li><span>Screen time</span><span class="{% if controls.screen_time %}text-good{% else %}text-body-secondary{% endif %}">{% if controls.screen_time %}On{% else %}Off{% endif %}</span></li>
     <li><span>Websites visited</span><span class="{% if controls.web_activity %}text-good{% else %}text-body-secondary{% endif %}">{% if controls.web_activity %}On{% else %}Off{% endif %}</span></li>
+    <li><span>Location</span><span class="{% if controls.location %}text-good{% else %}text-body-secondary{% endif %}">{% if controls.location %}On{% else %}Off{% endif %}</span></li>
     {% if not device.can_block %}<li><span>Blocking</span><span class="text-body-secondary">Needs the administrator install</span></li>{% else %}
     <li><span>Adult websites</span><span class="{% if controls.block_adult %}text-good{% else %}text-body-secondary{% endif %}">{% if controls.block_adult %}Blocked{% else %}Not blocked{% endif %}</span></li>
     <li><span>SafeSearch</span><span class="{% if controls.safe_search %}text-good{% else %}text-body-secondary{% endif %}">{% if controls.safe_search %}On{% else %}Off{% endif %}</span></li>
@@ -193,7 +194,7 @@
   <div class="map-card-head">
     <div class="min-w-0">
       <h2 class="card-title-lg" id="where-title">{% icon "map-pin" 17 %} Last location</h2>
-      <p class="map-card-sub">{{ device.location_at|ago }} · {{ device.location_at|date:"D j M, H:i" }}{% if device.location_accuracy_m is not None %} · within {{ device.location_accuracy_m }} m{% endif %}</p>
+      <p class="map-card-sub">{{ device.location_at|ago }} · {{ device.location_at|date:"D j M, H:i" }}{% if device.location_accuracy_m is not None %}{% if device.location_accuracy_m >= 25000 %} · town only, from its internet address (<a href="https://db-ip.com" target="_blank" rel="noopener noreferrer">IP location by DB-IP</a>){% else %} · within {{ device.location_accuracy_m }} m{% endif %}{% endif %}</p>
     </div>
     <a class="btn btn-sm btn-outline-secondary flex-none" href="https://www.google.com/maps/search/?api=1&amp;query={{ device.latitude }},{{ device.longitude }}" target="_blank" rel="noopener noreferrer">Google Maps ↗</a>
   </div>

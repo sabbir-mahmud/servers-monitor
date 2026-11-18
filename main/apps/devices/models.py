@@ -383,6 +383,11 @@ class DeviceControls(models.Model):
     web_activity = models.BooleanField(
         default=False, help_text="Websites visited, as domains with visits and time."
     )
+    location = models.BooleanField(
+        default=False,
+        help_text="Where the computer is, every few minutes: from Wi-Fi where the system "
+        "allows it, otherwise the town its internet connection is in.",
+    )
     block_adult = models.BooleanField(default=False, help_text="Block adult websites.")
     safe_search = models.BooleanField(
         default=False, help_text="Force SafeSearch on Google, Bing, DuckDuckGo and YouTube."

@@ -10,6 +10,7 @@ main/staticfiles/
 .relay-alive
 adult-blocklist.txt
 safe-search.json
+geoip-city.mmdb*
 .DS_Store
 # Daily database snapshots written by the relay (BACKUP_DIR default)
 main/backups/

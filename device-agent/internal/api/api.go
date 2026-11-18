@@ -74,6 +74,7 @@ func (c *Client) Pair(code string, info map[string]any, preview bool) (*PairResu
 type Controls struct {
 	ScreenTime  bool   `json:"screen_time"`
 	WebActivity bool   `json:"web_activity"`
+	Location    bool   `json:"location"`
 	Blocking    string `json:"blocking"` // blocklist version; "" = nothing blocked
 }
 

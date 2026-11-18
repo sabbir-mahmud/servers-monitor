@@ -67,6 +67,10 @@ names); upgrading gets the relay backlog fixes below.
   on the device page with the steps to allow it, instead of being skipped silently, and
   the connect command asks for Full Disk Access on a Mac (opens the settings page, waits
   until it's on). Arc history on a Mac.
+- **Computer location**, a Location switch under Controls: every few minutes from the
+  agent, Wi-Fi accurate through the Windows location service or GeoClue on Linux, and
+  town-level from the internet address otherwise (every Mac, or location services off),
+  using the free DB-IP city database the relay downloads (`DEVICE_GEOIP_URL`).
 - **Screen time, websites and blocking** on a child's or staff member's computer (or your
   own, in a solo account) running the device agent, switched on per device under **Controls**. Screen time by app (Mac, Windows;
   total only on Linux), websites as site + visits + time from Chrome, Edge, Brave, Vivaldi,

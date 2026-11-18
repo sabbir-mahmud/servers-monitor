@@ -40,11 +40,12 @@ class DeviceForm(AccountFormMixin, forms.ModelForm):
 class DeviceControlsForm(forms.ModelForm):
     class Meta:
         model = DeviceControls
-        fields = ["screen_time", "web_activity", "block_adult", "safe_search",
+        fields = ["screen_time", "web_activity", "location", "block_adult", "safe_search",
                   "blocked_domains", "allowed_domains"]  # fmt: skip
         labels = {
             "screen_time": "Screen time",
             "web_activity": "Websites visited",
+            "location": "Location",
             "block_adult": "Block adult websites",
             "safe_search": "SafeSearch",
             "blocked_domains": "Also block",
@@ -57,7 +58,7 @@ class DeviceControlsForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        for name in ("screen_time", "web_activity", "block_adult", "safe_search"):
+        for name in ("screen_time", "web_activity", "location", "block_adult", "safe_search"):
             self.fields[name].widget.attrs["role"] = "switch"
         _style(self)
 
