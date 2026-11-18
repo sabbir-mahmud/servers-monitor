@@ -1,51 +1,171 @@
 {% extends "base.html" %}
 {% load monitor %}
-{% block title %}Account{% endblock %}
+{% block title %}Account settings{% endblock %}
 {% block content %}
-<div class="page-head"><div>
-  <h1 class="page-title">{{ account.name }}</h1>
-  <p class="page-sub"><span class="chip">{{ account.get_kind_display }}</span> {{ kind_help }}</p>
-</div></div>
-<div class="row g-3 align-items-start">
-  <div class="col-12 col-xl-7">
-    {% if can_edit %}
-    <form method="post" novalidate>{% csrf_token %}<input type="hidden" name="action" value="save">
-      <div class="card mb-3"><div class="card-header">{% icon "edit" 17 %} Details</div><div class="card-body form-section">
-        {% include "alerts/_field.html" with field=form.name %}
-        <div class="form-text">The account type can't be changed. Create a new account for a different one.</div>
-      </div></div>
-      <button class="btn btn-primary">Save</button>
-    </form>
-    {% else %}
-    <div class="card"><div class="card-body text-body-secondary">Only an owner can change the account's details.</div></div>
-    {% endif %}
-  </div>
-  <div class="col-12 col-xl-5">
-    <div class="card mb-3"><div class="card-header">{% icon "user" 17 %} Owners</div><ul class="list-unstyled mb-0 p-3 d-flex flex-column gap-2">
-      {% for m in owners %}<li>{% include "users/_person.html" with u=m.user %}</li>{% endfor %}
-    </ul><div class="card-footer small text-body-secondary">{{ member_count }} member{{ member_count|pluralize }} in all.</div></div>
-    {% if MEMBERSHIPS|length > 1 or ALLOW_ACCOUNT_CREATE %}
-    <div class="card mb-3"><div class="card-header">{% icon "users" 17 %} Your accounts</div>
-      <div class="p-2 d-flex flex-column gap-1">
-        {% for m in MEMBERSHIPS %}
-        <form method="post" action="{% url 'tenants:switch' %}">{% csrf_token %}<input type="hidden" name="account" value="{{ m.account_id }}">
-          <button class="account-option {% if m.account_id == ACCOUNT.pk %}is-current{% endif %}" {% if m.account_id == ACCOUNT.pk %}aria-current="true" disabled{% endif %}>
-            <span class="account-mark">{{ m.account.name|slice:":1"|upper }}</span>
-            <span class="account-text"><span class="account-name">{{ m.account.name }}</span><span class="account-kind">{{ m.account.get_kind_display }} · {{ m.role_label }}</span></span>
-            {% if m.account_id == ACCOUNT.pk %}<span class="small text-body-secondary">Current</span>{% else %}<span class="small fw-semibold">Switch</span>{% endif %}
-          </button></form>
-        {% endfor %}
-        {% if ALLOW_ACCOUNT_CREATE %}<a class="account-option" href="{% url 'tenants:create' %}">{% icon "plus" 15 %}<span class="account-text"><span class="account-name">New account</span></span></a>{% endif %}
-      </div></div>
-    {% endif %}
-    <div class="card danger-zone"><div class="card-header">{% icon "logout" 17 %} Leave this account</div><div class="card-body">
-      {% if is_last_owner %}
-        <p class="text-body-secondary small mb-0">You're its only owner. Make someone else owner before you leave.</p>
-      {% else %}
-        <p class="text-body-secondary small">You lose access to everything in {{ account.name }}. Someone has to invite you again to come back.</p>
-        <form method="post" data-confirm="Leave {{ account.name }}?">{% csrf_token %}<input type="hidden" name="action" value="leave"><button class="btn btn-sm btn-outline-danger">Leave account</button></form>
-      {% endif %}
-    </div></div>
+<div class="acct">
+
+  {# ------------------------------------------------------------ the account #}
+  <header class="card acct-hero">
+    <div class="acct-hero-main">
+      <span class="acct-avatar acct-avatar-org" aria-hidden="true">{{ account.name|slice:":1"|upper }}</span>
+      <div class="acct-id">
+        <h1 class="acct-name">{{ account.name }}</h1>
+        <p class="acct-email">{{ kind_help }}</p>
+        <div class="meta-row">
+          <span class="chip">{% if account.kind == "solo" %}Solo{% else %}{{ account.get_kind_display }}{% endif %}</span>
+          {% if MEMBERSHIP %}<span class="sep" aria-hidden="true"></span><span>You're <span class="role-pill role-{{ MEMBERSHIP.role }}">{{ MEMBERSHIP.role_label }}</span></span>{% endif %}
+          <span class="sep" aria-hidden="true"></span>
+          <span>Created {{ account.created_at|date:"F Y" }}</span>
+        </div>
+      </div>
+    </div>
+    <ul class="acct-glance" role="list" aria-label="At a glance">
+      <li><a class="acct-glance-item" href="{% if perms.users.view_user %}{% url 'users:list' %}{% else %}#owners{% endif %}">
+        <span class="acct-glance-icon">{% icon "users" 17 %}</span>
+        <span><span class="acct-glance-label">Members</span><span class="acct-glance-value">{{ member_count }}</span></span>
+      </a></li>
+      <li><a class="acct-glance-item" href="#owners">
+        <span class="acct-glance-icon">{% icon "user" 17 %}</span>
+        <span><span class="acct-glance-label">Owners</span><span class="acct-glance-value">{{ owners|length }}</span></span>
+      </a></li>
+      <li><a class="acct-glance-item" href="#details">
+        <span class="acct-glance-icon">{% icon "layers" 17 %}</span>
+        <span><span class="acct-glance-label">Type</span><span class="acct-glance-value">{% if account.kind == "solo" %}Solo{% else %}{{ account.get_kind_display }}{% endif %}</span></span>
+      </a></li>
+      <li><a class="acct-glance-item" href="#accounts">
+        <span class="acct-glance-icon">{% icon "switch" 17 %}</span>
+        <span><span class="acct-glance-label">Your accounts</span><span class="acct-glance-value">{{ MEMBERSHIPS|length }}</span></span>
+      </a></li>
+    </ul>
+  </header>
+
+  <div class="acct-layout">
+    <nav class="acct-nav" aria-label="Settings sections">
+      <a href="#details">{% icon "edit" 16 %}<span>Details</span></a>
+      <a href="#owners">{% icon "user" 16 %}<span>Owners</span></a>
+      <a href="#accounts">{% icon "switch" 16 %}<span>Your accounts</span></a>
+      <a href="#leave">{% icon "logout" 16 %}<span>Leave</span></a>
+    </nav>
+
+    <div class="acct-sections">
+
+      {# -------------------------------------------------------------- details #}
+      <section class="acct-section" id="details" aria-labelledby="details-title">
+        <div class="acct-section-head">
+          <h2 class="acct-section-title" id="details-title">Details</h2>
+          <p class="acct-section-sub">The name everyone in this account sees.</p>
+        </div>
+        {% if can_edit %}
+        <form class="card" method="post" action="{% url 'tenants:settings' %}#details" novalidate>{% csrf_token %}<input type="hidden" name="action" value="save">
+          <div class="card-body form-section">
+            {% if form.non_field_errors %}<div class="alert alert-danger mb-0" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+            {% include "alerts/_field.html" with field=form.name %}
+          </div>
+          <div class="acct-card-foot">
+            <span class="acct-foot-note">{% icon "info" 14 %} The type can't change. Create a new account for a different one.</span>
+            <button class="btn btn-primary">Save changes</button>
+          </div>
+        </form>
+        {% else %}
+        <div class="card acct-list">
+          <div class="acct-row">
+            <span class="acct-row-icon">{% icon "lock" 18 %}</span>
+            <div class="acct-row-text">
+              <div class="acct-row-title">{{ account.name }}</div>
+              <div class="acct-row-sub">Only an owner can change the account's details.</div>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+      </section>
+
+      {# --------------------------------------------------------------- owners #}
+      <section class="acct-section" id="owners" aria-labelledby="owners-title">
+        <div class="acct-section-head">
+          <h2 class="acct-section-title" id="owners-title">Owners</h2>
+          <p class="acct-section-sub">They can change everything here, including who's in it. {{ member_count }} member{{ member_count|pluralize }} in all.</p>
+        </div>
+        <div class="card acct-list">
+          {% for m in owners %}
+          <div class="acct-row">
+            <span class="acct-row-icon acct-org" aria-hidden="true">{{ m.user.initials }}</span>
+            <div class="acct-row-text">
+              <div class="acct-row-title">{{ m.user.display_name }}{% if m.user_id == user.pk %} <span class="acct-status is-current">You</span>{% endif %}</div>
+              <div class="acct-row-sub text-truncate">{{ m.user.get_username }}{% if m.user.email %} · {{ m.user.email }}{% endif %}</div>
+            </div>
+          </div>
+          {% endfor %}
+          {% if perms.users.view_user %}
+          <a class="acct-row acct-row-link" href="{% url 'users:list' %}">
+            <span class="acct-row-icon">{% icon "users" 18 %}</span>
+            <div class="acct-row-text">
+              <div class="acct-row-title">All members</div>
+              <div class="acct-row-sub">Invite people, change roles, remove access.</div>
+            </div>
+            <span class="acct-row-chevron">{% icon "chevron" 16 %}</span>
+          </a>
+          {% endif %}
+        </div>
+      </section>
+
+      {# ------------------------------------------------------- your accounts #}
+      <section class="acct-section" id="accounts" aria-labelledby="accounts-title">
+        <div class="acct-section-head">
+          <h2 class="acct-section-title" id="accounts-title">Your accounts</h2>
+          <p class="acct-section-sub">Switch to another family, company or solo account you belong to.</p>
+        </div>
+        <div class="card acct-list">
+          {% for m in MEMBERSHIPS %}
+          <div class="acct-row">
+            <span class="acct-row-icon acct-org" aria-hidden="true">{{ m.account.name|slice:":1"|upper }}</span>
+            <div class="acct-row-text">
+              <div class="acct-row-title">{{ m.account.name }}{% if m.account_id == ACCOUNT.pk %} <span class="acct-status is-current">Current</span>{% endif %}</div>
+              <div class="acct-row-sub">{% if m.account.kind == "solo" %}Solo{% else %}{{ m.account.get_kind_display }}{% endif %} · <span class="role-pill role-{{ m.role }}">{{ m.role_label }}</span></div>
+            </div>
+            {% if m.account_id != ACCOUNT.pk %}
+            <form method="post" action="{% url 'tenants:switch' %}">{% csrf_token %}<input type="hidden" name="account" value="{{ m.account_id }}"><button class="btn btn-sm btn-outline-secondary">Switch</button></form>
+            {% endif %}
+          </div>
+          {% endfor %}
+          {% if ALLOW_ACCOUNT_CREATE %}
+          <a class="acct-row acct-row-link" href="{% url 'tenants:create' %}">
+            <span class="acct-row-icon">{% icon "plus" 18 %}</span>
+            <div class="acct-row-text">
+              <div class="acct-row-title">New account</div>
+              <div class="acct-row-sub">A separate family, company or solo account, with its own devices and people.</div>
+            </div>
+            <span class="acct-row-chevron">{% icon "chevron" 16 %}</span>
+          </a>
+          {% endif %}
+        </div>
+      </section>
+
+      {# ---------------------------------------------------------------- leave #}
+      <section class="acct-section" id="leave" aria-labelledby="leave-title">
+        <div class="acct-section-head">
+          <h2 class="acct-section-title acct-title-danger" id="leave-title">Leave this account</h2>
+          <p class="acct-section-sub">You lose access to everything in {{ account.name }}.</p>
+        </div>
+        <div class="card acct-list acct-danger">
+          <div class="acct-row">
+            <span class="acct-row-icon is-danger">{% icon "logout" 18 %}</span>
+            <div class="acct-row-text">
+              {% if is_last_owner %}
+              <div class="acct-row-title">You're its only owner</div>
+              <div class="acct-row-sub">Make someone else an owner before you leave.</div>
+              {% else %}
+              <div class="acct-row-title">Leave {{ account.name }}</div>
+              <div class="acct-row-sub">Someone has to invite you again to come back.</div>
+              {% endif %}
+            </div>
+            {% if not is_last_owner %}
+            <form method="post" action="{% url 'tenants:settings' %}" data-confirm="Leave {{ account.name }}?">{% csrf_token %}<input type="hidden" name="action" value="leave"><button class="btn btn-sm btn-outline-danger">Leave account</button></form>
+            {% endif %}
+          </div>
+        </div>
+      </section>
+
+    </div>
   </div>
 </div>
 {% endblock %}
