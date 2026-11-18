@@ -107,6 +107,10 @@ def checkin(device: Device, report: dict, ip: str | None) -> None:
     device.last_seen_at = now
     device.last_ip = ip
     _apply_info(device, report)
+    if isinstance(report.get("web_no_access"), list):
+        device.web_no_access = sorted(
+            {_text(b, 30) for b in report["web_no_access"][:20] if _text(b, 30)}
+        )
     battery = report.get("battery") or {}
     if isinstance(battery, dict):
         device.battery_percent = _int(battery.get("percent"), 0, 100)

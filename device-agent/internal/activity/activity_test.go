@@ -234,3 +234,42 @@ func TestFirefoxTimeIsTheGapToTheNextVisit(t *testing.T) {
 		t.Error("redirects aren't visits")
 	}
 }
+
+func TestABrowserTheSystemWontOpenIsReportedNotSkippedSilently(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can open anything")
+	}
+	setup(t)
+	homes := t.TempDir()
+	t.Setenv("NEXGUARD_HOMES", filepath.Join(homes, "*"))
+	path := filepath.Join(homes, "sara", filepath.FromSlash(chromiumGlobs()["Chrome"][0]))
+	root := filepath.Join(homes, "sara", globRoot(chromiumGlobs()["Chrome"][0]))
+	chromeHistory(t, filepath.Join(filepath.Dir(filepath.Dir(path)), "Default", "History"))
+	_ = SetControls(Controls{WebActivity: true})
+	if err := os.Chmod(root, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+	if err := ReadWebOnce(); err == nil {
+		t.Fatal("a refused browser must be an error the log shows")
+	}
+	if got := NoAccess(); len(got) != 1 || got[0] != "Chrome" {
+		t.Fatalf("no access: %v", got)
+	}
+	_ = os.Chmod(root, 0o755) // access given: the warning clears
+	if err := ReadWebOnce(); err != nil || len(NoAccess()) != 0 {
+		t.Fatalf("after access: %v %v", err, NoAccess())
+	}
+}
+
+func TestGlobRoot(t *testing.T) {
+	for in, want := range map[string]string{
+		filepath.Join("A", "Google", "Chrome", "*", "History"):                     filepath.Join("A", "Google", "Chrome"),
+		filepath.Join("A", "com.operasoftware.Opera", "History"):                   filepath.Join("A", "com.operasoftware.Opera"),
+		filepath.Join("AppData", "Roaming", "Opera Software", "Opera*", "History"): filepath.Join("AppData", "Roaming", "Opera Software"),
+	} {
+		if got := globRoot(in); got != want {
+			t.Errorf("globRoot(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

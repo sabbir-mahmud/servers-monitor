@@ -63,6 +63,9 @@ names); upgrading gets the relay backlog fixes below.
   against `SHA256SUMS`); otherwise the health-only script as before. That agent does
   health, screen time and websites; blocking still needs the administrator install. The
   agent takes `--user` and `--dir`, and reports `agent_mode`.
+- Browsers the system won't let the agent read (macOS without Full Disk Access) are named
+  on the device page with the steps to allow it, instead of being skipped silently. Arc
+  history on a Mac.
 - **Screen time, websites and blocking** on a child's or staff member's computer (or your
   own, in a solo account) running the device agent, switched on per device under **Controls**. Screen time by app (Mac, Windows;
   total only on Linux), websites as site + visits + time from Chrome, Edge, Brave, Vivaldi,

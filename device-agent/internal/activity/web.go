@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/url"
 	"os"
@@ -53,9 +54,14 @@ func ReadWebOnce() error {
 	var rows []WebRow
 	moved := map[string]int64{}
 	var errs []error
-	for _, f := range historyFiles() {
+	files, denied := historyFiles()
+	for _, f := range files {
 		after, known := seen[f.Path]
 		visits, last, err := readHistory(f, after, !known)
+		if errors.Is(err, fs.ErrPermission) {
+			denied[f.Browser] = true
+			continue
+		}
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s (%s): %w", f.Browser, f.User, err))
 			continue
@@ -65,6 +71,10 @@ func ReadWebOnce() error {
 	}
 	if err := addWeb(rows, moved); err != nil {
 		return err
+	}
+	setNoAccess(denied)
+	if len(denied) > 0 {
+		errs = append(errs, fmt.Errorf("the system won't let the agent read %v (on a Mac: give it Full Disk Access)", NoAccess()))
 	}
 	return errors.Join(errs...)
 }
@@ -219,31 +229,56 @@ func Domain(raw string) string {
 	return site
 }
 
-// historyFiles on this computer, for every local user.
-func historyFiles() []historyFile {
+// historyFiles on this computer, for every local user, and the browsers whose folders the
+// system refused to open (macOS protects other apps' data until the agent is given Full
+// Disk Access). Glob alone would skip those silently.
+func historyFiles() ([]historyFile, map[string]bool) {
 	var out []historyFile
+	denied := map[string]bool{}
+	refused := func(browser, dir string) bool {
+		_, err := os.ReadDir(dir)
+		if errors.Is(err, fs.ErrPermission) {
+			denied[browser] = true
+			return true
+		}
+		return false
+	}
 	for _, home := range homes() {
 		user := filepath.Base(home)
 		for browser, globs := range chromiumGlobs() {
 			for _, g := range globs {
+				if refused(browser, filepath.Join(home, globRoot(g))) {
+					continue
+				}
 				profiles, _ := filepath.Glob(filepath.Join(home, g))
 				for _, p := range profiles {
 					out = append(out, historyFile{Path: p, User: user, Browser: browser, Kind: "chromium"})
 				}
 			}
 		}
+		if refused("Firefox", filepath.Join(home, firefoxDir())) {
+			continue
+		}
 		profiles, _ := filepath.Glob(filepath.Join(home, firefoxDir(), "*", "places.sqlite"))
 		for _, p := range profiles {
 			out = append(out, historyFile{Path: p, User: user, Browser: "Firefox", Kind: "firefox"})
 		}
-		if runtime.GOOS == "darwin" {
+		if runtime.GOOS == "darwin" && !refused("Safari", filepath.Join(home, "Library", "Safari")) {
 			p := filepath.Join(home, "Library", "Safari", "History.db")
 			if _, err := os.Stat(p); err == nil {
 				out = append(out, historyFile{Path: p, User: user, Browser: "Safari", Kind: "safari"})
 			}
 		}
 	}
-	return out
+	return out, denied
+}
+
+// globRoot: the folder a profile glob starts in ("Google/Chrome/*/History" -> "Google/Chrome").
+func globRoot(glob string) string {
+	if i := strings.Index(glob, "*"); i >= 0 {
+		glob = glob[:i]
+	}
+	return filepath.Dir(filepath.Clean(glob + "x"))
 }
 
 func homes() []string {
@@ -303,6 +338,7 @@ func chromiumGlobs() map[string][]string {
 			"Vivaldi":  {j(a, "Vivaldi", "*", "History")},
 			"Chromium": {j(a, "Chromium", "*", "History")},
 			"Opera":    {j(a, "com.operasoftware.Opera", "History")},
+			"Arc":      {j(a, "Arc", "User Data", "*", "History")},
 		}
 	}
 	c := ".config"

@@ -342,3 +342,22 @@ def test_an_agent_without_admin_rights_gets_no_blocking(client, parent, sara):
     # Installed again by an administrator: blocking comes back.
     system = {**AGENT, "agent_mode": "system"}
     assert api_checkin(client, token, system).json()["controls"]["blocking"]
+
+
+def test_browsers_the_mac_wont_let_the_agent_read_are_explained(client, parent, sara):
+    client.force_login(parent)
+    device, code = add_device(client, sara, platform="macos", name="Sara's Mac")
+    token = api_pair(client, code, platform="macos", **AGENT).json()["token"]
+    DeviceControls.objects.create(device=device, web_activity=True)
+    api_checkin(client, token, {**AGENT, "web_no_access": ["Safari", "Chrome", 7, ""]})
+    device.refresh_from_db()
+    assert device.web_no_access == ["7", "Chrome", "Safari"]
+    page = client.get(reverse("devices:detail", args=[device.pk])).content.decode()
+    assert "Full Disk Access" in page and "/Library/Application Support/NexGuard/nexguard" in page
+    api_checkin(client, token, {**AGENT, "web_no_access": []})  # access given
+    device.refresh_from_db()
+    assert device.web_no_access == []
+    assert (
+        "Full Disk Access"
+        not in client.get(reverse("devices:detail", args=[device.pk])).content.decode()
+    )

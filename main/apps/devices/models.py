@@ -135,6 +135,8 @@ class Device(Machine):
     # The Go agent: "system" (a service an administrator installed: can block sites) or
     # "user" (installed by the one-line connect command as the person: can't). "" = not it.
     agent_mode = models.CharField(max_length=10, blank=True)
+    # Browsers the agent isn't allowed to read (macOS: until it has Full Disk Access).
+    web_no_access = models.JSONField(default=list, blank=True)
     battery_percent = models.PositiveSmallIntegerField(null=True, blank=True)
     charging = models.BooleanField(null=True, blank=True)
     storage_free = models.BigIntegerField(null=True, blank=True)

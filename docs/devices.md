@@ -103,8 +103,10 @@ Activity is kept `DEVICE_ACTIVITY_DAYS` (30) days and deleted with the device.
 
 Limits worth knowing:
 - Private and incognito windows aren't in the browser's history, so they don't show.
-- Safari history needs **Full Disk Access** for `/Library/Application Support/NexGuard/nexguard`
-  (System Settings → Privacy & Security). Without it Safari is skipped.
+- On a Mac, websites need **Full Disk Access** for `/Library/Application Support/NexGuard/nexguard`
+  (System Settings → Privacy & Security → Full Disk Access). macOS protects Safari's
+  history, and on recent versions Chrome's and other browsers' too. Until it's given, the
+  device page names the browsers it can't read and shows these steps.
 - Blocking is a hosts file: a VPN, a proxy or a browser's own secure DNS can get around
   it, and someone with administrator rights can undo it (the agent puts it back at the
   next check-in). Firefox's automatic DNS-over-HTTPS is switched off through its

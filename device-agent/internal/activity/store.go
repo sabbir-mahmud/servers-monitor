@@ -54,11 +54,34 @@ type Batch struct {
 
 type state struct {
 	Controls Controls          `json:"controls"`
-	Screen   map[string]int    `json:"screen"`   // "day\x00user\x00app" -> seconds
-	Web      map[string][2]int `json:"web"`      // "day\x00user\x00browser\x00domain" -> visits, seconds
-	Cursors  map[string]int64  `json:"cursors"`  // history file -> last visit id read
-	InFlight *Batch            `json:"inflight"` // sent, not yet confirmed
-	Applied  string            `json:"applied"`  // blocklist version in the hosts file
+	Screen   map[string]int    `json:"screen"`              // "day\x00user\x00app" -> seconds
+	Web      map[string][2]int `json:"web"`                 // "day\x00user\x00browser\x00domain" -> visits, seconds
+	Cursors  map[string]int64  `json:"cursors"`             // history file -> last visit id read
+	InFlight *Batch            `json:"inflight"`            // sent, not yet confirmed
+	Applied  string            `json:"applied"`             // blocklist version in the hosts file
+	NoAccess []string          `json:"no_access,omitempty"` // browsers the system won't let it read
+}
+
+// NoAccess: browsers whose history the system refused at the last read (sorted).
+func NoAccess() []string {
+	mu.Lock()
+	defer mu.Unlock()
+	return append([]string{}, load().NoAccess...)
+}
+
+func setNoAccess(denied map[string]bool) {
+	names := make([]string, 0, len(denied))
+	for b := range denied {
+		names = append(names, b)
+	}
+	sort.Strings(names)
+	mu.Lock()
+	defer mu.Unlock()
+	s := load()
+	if strings.Join(s.NoAccess, ",") != strings.Join(names, ",") {
+		s.NoAccess = names
+		save(s)
+	}
 }
 
 var (

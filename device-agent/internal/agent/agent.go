@@ -59,6 +59,9 @@ func CheckinOnce(cfg *config.Config, version string) error {
 	if batch != nil {
 		report["activity"] = batch
 	}
+	if activity.CurrentControls().WebActivity {
+		report["web_no_access"] = activity.NoAccess() // [] clears the dashboard's warning
+	}
 	res, err := client.Checkin(cfg.Token, report)
 	if errors.Is(err, api.ErrUnpaired) {
 		Forget()
