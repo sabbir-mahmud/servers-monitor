@@ -2,10 +2,11 @@
 #
 # Downloaded from {{ server }} for one pairing code. It:
 #   1. shows who will see this computer, and pairs only if you say yes;
-#   2. installs the NexGuard agent from that dashboard, running as you (no admin rights):
-#      health (CPU, memory, GPU, battery, storage, network, Windows version), and screen
-#      time and websites if the dashboard turns them on for this computer. If the
-#      dashboard has no agent to offer, a small health-only check-in task instead;
+#   2. installs the NexGuard agent from that dashboard as a protected service (Windows
+#      asks an administrator to allow it): health (CPU, memory, GPU, battery, storage,
+#      network, Windows version), and screen time, websites and website blocking if the
+#      dashboard turns them on. Without an administrator, the same agent running as you
+#      (no blocking); if the dashboard has no agent, a health-only check-in task;
 #   3. checks in once so the dashboard shows the computer straight away.
 #
 # To remove it later:  irm {{ server }}/d/uninstall.ps1 | iex
@@ -91,6 +92,54 @@ if (-not $Quiet) { Write-Host 'NexGuard is removed from this computer.' }
     if (-not $agentTmp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
   }
 
+  # --------------------------------------------- as an administrator: blocking included
+  # The protected service: it can block websites, and someone without an administrator
+  # can't stop or remove it. `nexguard install` copies itself to Program Files.
+  if ($agentTmp -and $env:NEXGUARD_USER_INSTALL -ne '1') {
+    Write-Host ''
+    Write-Host 'NexGuard installs as a protected service, so it can also block websites.'
+    Write-Host 'Windows asks next whether to allow it: choose Yes (an administrator account or'
+    Write-Host 'password is needed). If you choose No, NexGuard installs for you only, with no blocking.'
+    $exeQ = $agentTmp -replace "'", "''"
+    # Exit codes: 0 installed, 1 not paired (said no, or a bad code), 2 service failed.
+    $elevated = @"
+& '$exeQ' pair '$NgServer' '$NgCode'
+if (`$LASTEXITCODE -ne 0) { Read-Host 'Press Enter to close'; exit 1 }
+& '$exeQ' install
+if (`$LASTEXITCODE -ne 0) { Read-Host 'Press Enter to close'; exit 2 }
+Start-Sleep -Seconds 3
+exit 0
+"@
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($elevated))
+    $result = $null
+    try {
+      $p = Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -PassThru `
+        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded"
+      $result = $p.ExitCode
+    } catch {
+      Write-Host ''
+      Write-Host 'Not allowed as an administrator: installing for you only, without website blocking.'
+    }
+    if ($null -ne $result) {
+      Remove-Item $agentTmp -Force -ErrorAction SilentlyContinue
+      if ($result -eq 1) {
+        Write-Host ''
+        Write-Host 'Nothing was installed. If you said no, the code still works.'
+        return
+      }
+      if ($result -ne 0) { Stop-Setup "it's paired, but the service didn't start. Paste the line again to retry." }
+      # Replace what ran as you before (the check-in task, or the agent without blocking).
+      $u = Join-Path $dir 'uninstall.ps1'
+      if (Test-Path $u) { & $u -Quiet }
+      Write-Host ''
+      Write-Host 'Done. NexGuard runs as a protected service on this computer and can block websites.' -ForegroundColor Green
+      Write-Host "You can close this window. To remove it later, paste:  irm $NgServer/d/uninstall.ps1 | iex"
+      Write-Host ''
+      return
+    }
+  }
+
+  # ------------------------------------------- no administrator: the agent, running as you
   if ($agentTmp) {
     $newDir = -not (Test-Path $dir)
     New-Item -ItemType Directory -Force -Path $dir | Out-Null

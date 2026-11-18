@@ -33,8 +33,23 @@ else
     kill "$(cat "$DIR/agent.pid")" 2>/dev/null || true
   fi
 fi
+REMOVED=""
 if [ -d "$DIR" ]; then
   rm -rf "$DIR"
+  REMOVED=1
+fi
+# The protected service (installed with the administrator password) needs it again.
+SYSTEM_AGENT=/usr/local/bin/nexguard
+[ "$(uname -s)" = Darwin ] && SYSTEM_AGENT="/Library/Application Support/NexGuard/nexguard"
+if [ -x "$SYSTEM_AGENT" ]; then
+  echo "Removing the protected NexGuard service needs this computer's administrator password."
+  if sudo -p "Password for %u: " "$SYSTEM_AGENT" uninstall < /dev/tty; then
+    REMOVED=1
+  else
+    echo "It's still installed. An administrator can remove it with: sudo \"$SYSTEM_AGENT\" uninstall"
+  fi
+fi
+if [ -n "$REMOVED" ]; then
   echo "NexGuard is removed from this computer."
 else
   echo "NexGuard wasn't installed for this user."

@@ -70,16 +70,17 @@ check-in is noted in an `error` file next to it.
 The one-line command installs the NexGuard agent (`device-agent/`) when the dashboard has
 builds of it (`device-agent/build.sh` writes them to `device-agent/dist/`, or set
 `DEVICE_AGENT_DIR`). It downloads the one for that computer, checks it against
-`SHA256SUMS`, and runs it **as the person, with no administrator rights**: a login item
-on a Mac, a systemd user service on Linux, a scheduled task at sign-in on Windows. It
-reports health, and screen time and websites when they're turned on (below). Without
-builds on the dashboard, the command installs the health-only check-in script instead.
+`SHA256SUMS`, and asks for the computer's **administrator password** (sudo on a Mac or
+Linux, a permission prompt on Windows). It then runs as a protected system service: it
+reports health, screen time and websites, blocks websites when they're turned on (below),
+and only an administrator can stop or remove it.
 
-Running as the person, it sees only their own screen and browsers and **can't block
-websites** (that needs the hosts file). The person can also remove it. For blocking, and
-for a computer the person mustn't be able to stop, an administrator installs the same
-program as a system service instead: see
-[device-agent/README.md](../device-agent/README.md).
+Without the administrator password, the command installs the same agent **running as the
+person**: a login item on a Mac, a systemd user service on Linux, a scheduled task at
+sign-in on Windows. It sees only their own screen and browsers, **can't block websites**,
+and the person can remove it. To add blocking later, use **Pair again** and paste the line
+again with the password. Without agent builds on the dashboard, the command installs the
+health-only check-in script instead.
 
 ## Screen time, websites and blocking (agent only)
 

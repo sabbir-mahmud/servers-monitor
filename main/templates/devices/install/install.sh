@@ -3,10 +3,11 @@
 #
 # Downloaded from {{ server }} for one pairing code. It:
 #   1. shows who will see this computer, and pairs only if you say yes;
-#   2. installs the NexGuard agent from that dashboard, running as you (no admin rights):
-#      health (CPU, memory, GPU, battery, storage, network, system version), and screen
-#      time and websites if the dashboard turns them on for this computer. If the
-#      dashboard has no agent to offer, a small health-only check-in script instead;
+#   2. installs the NexGuard agent from that dashboard as a protected service (asks for
+#      this computer's administrator password): health (CPU, memory, GPU, battery,
+#      storage, network, system version), and screen time, websites and website blocking
+#      if the dashboard turns them on. Without an administrator, the same agent running as
+#      you (no blocking); if the dashboard has no agent, a health-only check-in script;
 #   3. checks in once so the dashboard shows the computer straight away.
 #
 # To remove it later:  curl -fsSL {{ server }}/d/uninstall.sh | sh
@@ -77,10 +78,57 @@ if [ -n "$ARCH" ] && [ "${NEXGUARD_NO_AGENT:-}" != 1 ]; then
   rm -f ${_bin:+"$_bin"} "$_sums"
 fi
 
-
-if [ -n "$AGENT_TMP" ]; then
+# ----------------------------------------------- as an administrator: blocking included
+# The protected service: it can block websites, and someone without the administrator
+# password can't stop or remove it. `nexguard install` copies itself where only an
+# administrator can change it.
+ADMIN=""
+if [ -n "$AGENT_TMP" ] && [ "${NEXGUARD_USER_INSTALL:-}" != 1 ] &&
+   command -v sudo >/dev/null 2>&1 && ( : < /dev/tty ) 2>/dev/null; then
+  SAID_HELLO=1
   say ""
   say "Connecting this computer to the dashboard at $SERVER"
+  say ""
+  say "NexGuard installs as a protected service, so it can also block websites."
+  say "Enter the password you use to sign in to this computer (it needs to be an"
+  say "administrator account). Without it, NexGuard installs for you only, with no blocking."
+  chmod 755 "$AGENT_TMP"
+  if sudo -p "Password for %u: " -v < /dev/tty; then
+    ADMIN=1
+  else
+    say ""
+    say "No administrator password: installing for you only, without website blocking."
+  fi
+fi
+if [ -n "$ADMIN" ]; then
+  # The agent shows what the dashboard will see (blocking included) and asks.
+  ok=0; sudo "$AGENT_TMP" pair "$SERVER" "$CODE" < /dev/tty || ok=$?
+  if [ "$ok" != 0 ]; then
+    rm -f "$AGENT_TMP"
+    say ""
+    say "Nothing was installed. If you said no, the code still works."
+    exit 1
+  fi
+  if ! sudo "$AGENT_TMP" install < /dev/null; then
+    rm -f "$AGENT_TMP"
+    fail "it's paired, but the service didn't start. Paste the line again to retry."
+  fi
+  rm -f "$AGENT_TMP"
+  # Replace what ran as you before (the check-in script, or the agent without blocking).
+  if [ -f "$DIR/uninstall.sh" ]; then sh "$DIR/uninstall.sh" quiet || true; fi
+  say ""
+  say "Done. NexGuard runs as a protected service on this computer and can block websites."
+  say "You can close this window. To remove it later, paste:  curl -fsSL $SERVER/d/uninstall.sh | sh"
+  say ""
+  exit 0
+fi
+
+# --------------------------------------------- no administrator: the agent, running as you
+if [ -n "$AGENT_TMP" ]; then
+  if [ -z "${SAID_HELLO:-}" ]; then
+    say ""
+    say "Connecting this computer to the dashboard at $SERVER"
+  fi
   NEW_DIR=""; [ -d "$DIR" ] || NEW_DIR=1
   mkdir -p "$DIR"
   chmod 700 "$DIR"

@@ -216,7 +216,7 @@ def test_the_installer_installs_the_agent_as_the_user(
     hosts.write_text("127.0.0.1 localhost\n")
     env = {"PATH": os.environ["PATH"], "HOME": str(home), "NEXGUARD_YES": "1",
            "NEXGUARD_NO_SCHEDULE": "1", "XDG_DATA_HOME": str(home / ".local/share"),
-           "NEXGUARD_HOSTS": str(hosts)}  # fmt: skip
+           "NEXGUARD_HOSTS": str(hosts), "NEXGUARD_USER_INSTALL": "1"}  # fmt: skip
     script = f"curl -fsSL {live_server.url}/d/{code}/install.sh | sh"
     result = subprocess.run(["sh", "-c", script], env=env, capture_output=True, text=True,
                             timeout=120)  # fmt: skip

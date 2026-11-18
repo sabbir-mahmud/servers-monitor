@@ -335,7 +335,7 @@ def test_an_agent_without_admin_rights_gets_no_blocking(client, parent, sara):
     assert resp.status_code == 200 and resp.content == b""
 
     page = client.get(reverse("devices:controls", args=[device.pk])).content.decode()
-    assert 'name="block_adult"' not in page and "without administrator rights" in page
+    assert 'name="block_adult"' not in page and "without an administrator" in page
     client.post(reverse("devices:controls", args=[device.pk]), {"screen_time": "on"})
     assert DeviceControls.objects.get(device=device).block_adult  # left as it was
 

@@ -55,8 +55,10 @@ names); upgrading gets the relay backlog fixes below.
   can stop or remove. `nexguard pair`, `install`, `status`, `checkin` and `uninstall`.
   It reports the same health readings as the scripts. `make device-agent` tests it and
   builds it, and CI tests it on Linux, macOS and Windows.
-- **The one-line connect command installs the device agent**, running as the person with
-  no administrator rights (login item, systemd user service, or sign-in task), when the
+- **The one-line connect command installs the device agent** as a protected service,
+  asking for the computer's administrator password (sudo on Mac and Linux, a Windows
+  permission prompt), so blocking works. Without an administrator it installs the same
+  agent running as the person (login item, systemd user service, or sign-in task), when the
   dashboard has agent builds (`DEVICE_AGENT_DIR`, served at `/d/agent/<file>` and checked
   against `SHA256SUMS`); otherwise the health-only script as before. That agent does
   health, screen time and websites; blocking still needs the administrator install. The
