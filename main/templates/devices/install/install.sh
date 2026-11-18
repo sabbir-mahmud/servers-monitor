@@ -4,7 +4,7 @@
 # Downloaded from {{ server }} for one pairing code. It:
 #   1. shows who will see this computer, and pairs only if you say yes;
 #   2. installs a small check-in that runs as you every few minutes
-#      (CPU, memory, GPU, battery, storage, system version; no admin rights);
+#      (CPU, memory, GPU, battery, storage, network, system version; no admin rights);
 #   3. checks in once so the dashboard shows the computer straight away.
 #
 # To remove it later:  curl -fsSL {{ server }}/d/uninstall.sh | sh
@@ -101,9 +101,9 @@ EOF
 
 cat > "$DIR/checkin.sh" <<'CHECKIN'
 #!/bin/sh
-# NexGuard check-in: sends CPU, memory, GPU, battery and storage use and the system
-# version to the dashboard. Runs every 5 minutes; reports as often as it asks (INTERVAL).
-VERSION='1.1.0'
+# NexGuard check-in: sends CPU, memory, GPU, battery and storage use, the network kind
+# (and Wi-Fi name where allowed) and the system version to the dashboard. Runs every 5 minutes; reports as often as it asks (INTERVAL).
+VERSION='1.2.0'
 DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$DIR/config"
 
@@ -114,7 +114,7 @@ last="$(cat "$DIR/last" 2>/dev/null || echo 0)"
 json_str() { printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\000-\037')"; }
 first() { head -n 1 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'; }
 
-pct=""; plugged=""; cpu=""; mem_total=""; mem_used=""; gpu=""
+pct=""; plugged=""; cpu=""; mem_total=""; mem_used=""; gpu=""; net=""; net_name=""
 num() { grep -E '^[0-9]+([.][0-9]+)?$' | head -n 1; }  # a plain number, or nothing
 if [ "$(uname -s)" = Darwin ]; then
   platform=macos
@@ -136,6 +136,18 @@ if [ "$(uname -s)" = Darwin ]; then
     /Pages occupied by compressor/ { c = $5 }
     END { gsub(/[.]/, "", a); gsub(/[.]/, "", w); gsub(/[.]/, "", c); if (ps) printf "%.0f", (a + w + c) * ps }' | num)"
   gpu="$(ioreg -r -d 1 -c IOAccelerator 2>/dev/null | sed -n 's/.*"Device Utilization %"=\([0-9]*\).*/\1/p' | num)"
+  # Network: the interface carrying the default route, Wi-Fi or wired. macOS 14+ hides the
+  # Wi-Fi name ("<redacted>") from apps without location access: then only the kind is sent.
+  ifc="$(route -n get default 2>/dev/null | awk '/interface:/ { print $2; exit }')"
+  if [ -z "$ifc" ]; then
+    net=none
+  elif networksetup -listallhardwareports 2>/dev/null | grep -A1 -E '^Hardware Port: (Wi-Fi|AirPort)$' | grep -qx "Device: $ifc"; then
+    net=wifi
+    net_name="$(ipconfig getsummary "$ifc" 2>/dev/null | sed -n 's/^ *SSID : //p' | first)"
+    case "$net_name" in ""|"<redacted>") net_name="" ;; esac
+  elif printf '%s' "$ifc" | grep -qE '^(en|bridge)[0-9]'; then
+    net=ethernet  # VPN tunnels (utun) and others: kind unknown, leave it out
+  fi
 else
   platform=linux
   os="$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | tr -d '"' | first)"
@@ -163,6 +175,18 @@ else
   if [ -z "$gpu" ] && command -v nvidia-smi >/dev/null 2>&1; then
     gpu="$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | first | num)"
   fi
+  ifc="$(ip route show default 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')"
+  if [ -z "$ifc" ]; then
+    command -v ip >/dev/null 2>&1 && net=none
+  elif [ -d "/sys/class/net/$ifc/wireless" ] || [ -d "/sys/class/net/$ifc/phy80211" ]; then
+    net=wifi
+    net_name="$(iwgetid -r 2>/dev/null | first)"
+    [ -n "$net_name" ] || net_name="$(nmcli -t -f active,ssid dev wifi 2>/dev/null | sed -n 's/^yes://p' | first)"
+  elif printf '%s' "$ifc" | grep -qE '^(ww|wwan|rmnet)'; then
+    net=cellular
+  elif [ -e "/sys/class/net/$ifc/device" ]; then
+    net=ethernet  # a physical NIC; tunnels and bridges have no device link
+  fi
 fi
 storage="$(df -kP "$disk" 2>/dev/null | awk 'NR==2 { printf "{\"total\":%.0f,\"free\":%.0f}", $2 * 1024, $4 * 1024 }')"
 
@@ -172,6 +196,7 @@ json="{\"platform\":\"$platform\",\"os_version\":$(json_str "$os"),\"model\":$(j
 [ -n "$cpu" ] && json="$json,\"cpu\":{\"percent\":$cpu}"
 [ -n "$mem_total" ] && [ -n "$mem_used" ] && json="$json,\"memory\":{\"total\":$mem_total,\"used\":$mem_used}"
 [ -n "$gpu" ] && json="$json,\"gpu\":{\"percent\":$gpu}"
+[ -n "$net" ] && json="$json,\"network\":{\"type\":\"$net\",\"name\":$(json_str "$net_name")}"
 json="$json}"
 
 out="$(mktemp)"

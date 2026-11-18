@@ -1283,8 +1283,9 @@ fieldset[disabled] .platform-card { cursor: default; opacity: .7; }
 .statbar-of { font-size: .9rem; font-weight: 500; color: var(--muted); letter-spacing: 0; }
 .statbar-sub { font-size: .76rem; color: var(--muted); text-decoration: none; }
 a.statbar-sub { color: var(--accent-ink); font-weight: 550; }
+.statbar.is-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 767.98px) {
-  .statbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .statbar, .statbar.is-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .statbar-item:nth-child(3) { border-left: 0; }
   .statbar-item:nth-child(n + 3) { border-top: 1px solid var(--line); }
   .statbar-item { padding: .7rem .85rem; }

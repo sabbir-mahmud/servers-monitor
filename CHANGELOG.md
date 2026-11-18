@@ -43,6 +43,13 @@ names); upgrading gets the relay backlog fixes below.
   battery and storage (6 h to 30 days, kept for `DEVICE_METRICS_DAYS`, 30). The consent
   message names this data. Installed check-ins need the new script (1.1.0), which comes with
   pairing again.
+- The device page's "right now" bar gains a second row with the latest CPU, memory and GPU
+  readings, so they show from the first check-in instead of once a chart has two points.
+- The computer check-ins (scripts 1.2.0 and the Go device agent) report the network: Wi-Fi,
+  wired, mobile or none, and the Wi-Fi name where the system allows it (macOS 14+ and
+  Windows 11 24H2+ hide it from apps without location access, so those usually show just
+  "Wi-Fi"). The consent message and the connect page say so. Pair again to get the new
+  script.
 - **Device agent** (`device-agent/`, Go, version 0.1.0): one static binary for Windows,
   macOS and Linux (x86-64 and ARM). It runs as a system service that only an administrator
   can stop or remove. `nexguard pair`, `install`, `status`, `checkin` and `uninstall`.

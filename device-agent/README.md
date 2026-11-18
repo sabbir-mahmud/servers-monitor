@@ -3,8 +3,9 @@
 The agent for Windows, Mac and Linux computers. An administrator installs it once. It
 runs as a system service (a Windows service, a macOS LaunchDaemon or a systemd unit),
 starts with the computer, and reports health to the dashboard: CPU, memory, GPU,
-battery, storage and system version. The person using the computer can't stop or
-remove it without administrator rights. It is one static file with no dependencies.
+battery, storage, network (Wi-Fi or wired, and the Wi-Fi name where the system allows)
+and system version. The person using the computer can't stop or remove it without
+administrator rights. It is one static file with no dependencies.
 
 ```sh
 sudo nexguard pair https://monitor.example.com K7PQ-3MXA   # shows who will see it, asks y/n

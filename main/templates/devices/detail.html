@@ -58,6 +58,37 @@
   </div>
 </section>
 
+{% if device.has_health %}
+<section class="statbar is-3" aria-label="Health at the last check-in">
+  {% with when=device.last_seen_at|ago %}
+  <div class="statbar-item">
+    <span class="statbar-label">CPU</span>
+    {% if device.cpu_percent is not None %}
+    <span class="statbar-value">{{ device.cpu_percent|floatformat:0 }}%</span>
+    <div class="vbar {% if device.cpu_percent >= 90 %}is-low{% endif %}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ device.cpu_percent|floatformat:0 }}" aria-label="CPU"><span style="width: {{ device.cpu_percent|floatformat:0 }}%"></span></div>
+    <span class="statbar-sub">{% if device.state == "online" %}Busy right now{% else %}As of {{ when }}{% endif %}</span>
+    {% else %}<span class="statbar-value">—</span><span class="statbar-sub">Not reported</span>{% endif %}
+  </div>
+  <div class="statbar-item">
+    <span class="statbar-label">Memory</span>
+    {% if device.memory_used_percent is not None %}
+    <span class="statbar-value">{{ device.memory_used_percent }}%</span>
+    <div class="vbar {% if device.memory_used_percent >= 90 %}is-low{% endif %}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ device.memory_used_percent }}" aria-label="Memory used"><span style="width: {{ device.memory_used_percent }}%"></span></div>
+    <span class="statbar-sub">{{ device.memory_used|filesizeformat }} of {{ device.memory_total|filesizeformat }}{% if device.state != "online" %} · as of {{ when }}{% endif %}</span>
+    {% else %}<span class="statbar-value">—</span><span class="statbar-sub">Not reported</span>{% endif %}
+  </div>
+  <div class="statbar-item">
+    <span class="statbar-label">GPU</span>
+    {% if device.gpu_percent is not None %}
+    <span class="statbar-value">{{ device.gpu_percent|floatformat:0 }}%</span>
+    <div class="vbar {% if device.gpu_percent >= 90 %}is-low{% endif %}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ device.gpu_percent|floatformat:0 }}" aria-label="GPU"><span style="width: {{ device.gpu_percent|floatformat:0 }}%"></span></div>
+    <span class="statbar-sub">{% if device.state == "online" %}Graphics right now{% else %}As of {{ when }}{% endif %}</span>
+    {% else %}<span class="statbar-value">—</span><span class="statbar-sub">Not reported on this computer</span>{% endif %}
+  </div>
+  {% endwith %}
+</section>
+{% endif %}
+
 {% if device.has_health or charts.cpu or charts.battery or charts.disk %}
 {% partialdef charts inline %}
 <section id="charts" class="card health-card" aria-labelledby="health-title"

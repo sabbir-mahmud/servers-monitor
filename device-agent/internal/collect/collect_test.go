@@ -41,3 +41,18 @@ func TestFirstNumber(t *testing.T) {
 		t.Error("no number should be false")
 	}
 }
+
+func TestNetworkFromThisMachine(t *testing.T) {
+	n, ok := Report("test")["network"].(map[string]any)
+	if !ok {
+		t.Skip("network kind unknown here (VPN or virtual adapter)")
+	}
+	switch n["type"] {
+	case netWiFi, netEthernet, netCellular, netNone:
+	default:
+		t.Fatalf("network %v", n)
+	}
+	if n["type"] != netWiFi && n["name"] != "" {
+		t.Fatalf("only Wi-Fi has a name: %v", n)
+	}
+}

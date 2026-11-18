@@ -3,7 +3,7 @@
 # Downloaded from {{ server }} for one pairing code. It:
 #   1. shows who will see this computer, and pairs only if you say yes;
 #   2. adds a scheduled task that checks in as you every 5 minutes
-#      (CPU, memory, GPU, battery, storage, Windows version; no administrator rights);
+#      (CPU, memory, GPU, battery, storage, network, Windows version; no admin rights);
 #   3. checks in once so the dashboard shows the computer straight away.
 #
 # To remove it later:  irm {{ server }}/d/uninstall.ps1 | iex
@@ -69,10 +69,10 @@ $NgCode = '{{ code }}'
     ConvertTo-Json | Set-Content -Path (Join-Path $dir 'config.json') -Encoding ASCII
 
   $checkin = @'
-# NexGuard check-in: sends CPU, memory, GPU, battery and storage use and the Windows
-# version to the dashboard. Runs every 5 minutes; reports as often as it asks (interval).
+# NexGuard check-in: sends CPU, memory, GPU, battery and storage use, the network kind
+# (and Wi-Fi name where allowed) and the Windows version to the dashboard. Runs every 5 minutes; reports as often as it asks (interval).
 $ErrorActionPreference = 'Stop'
-$version = '1.1.0'
+$version = '1.2.0'
 $dir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $configPath = Join-Path $dir 'config.json'
 $cfg = Get-Content $configPath -Raw | ConvertFrom-Json
@@ -119,6 +119,35 @@ try {
   $samples = (Get-Counter '\GPU Engine(*engtype_3D)\Utilization Percentage' -ErrorAction Stop).CounterSamples
   $gpu = ($samples | Measure-Object -Property CookedValue -Sum).Sum
   $body.gpu = @{ percent = [math]::Round([math]::Min(100, [double]$gpu), 1) }
+} catch { }
+try {
+  # Network: the adapter carrying the default route (lowest route + interface metric).
+  # No default route is "no connection", not an error (Get-NetRoute throws on no match).
+  $route = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -PolicyStore ActiveStore -ErrorAction SilentlyContinue |
+    Sort-Object { [int]$_.RouteMetric + [int]$_.InterfaceMetric } | Select-Object -First 1
+  if (-not $route) {
+    $body.network = @{ type = 'none'; name = '' }
+  } else {
+    $adapter = Get-NetAdapter -InterfaceIndex $route.InterfaceIndex -ErrorAction Stop
+    # NdisPhysicalMedium: 9 = Wi-Fi, 8 = mobile broadband, 14 = Ethernet. VPNs and
+    # virtual switches are left out: their kind says nothing about the connection.
+    $medium = [int]$adapter.NdisPhysicalMedium
+    if ($medium -eq 9) {
+      $ssid = ''
+      try {
+        # Windows 11 24H2+ hides the name from apps without location access; then the
+        # output has no SSID line and only the kind is sent.
+        $line = netsh wlan show interfaces 2>$null | Where-Object { $_ -match '^\s*SSID\s*:' } |
+          Select-Object -First 1
+        if ($line) { $ssid = ($line -replace '^\s*SSID\s*:\s*', '').Trim() }
+      } catch { }
+      $body.network = @{ type = 'wifi'; name = $ssid }
+    } elseif ($medium -eq 8) {
+      $body.network = @{ type = 'cellular'; name = '' }
+    } elseif ($medium -eq 14 -and -not $adapter.Virtual) {
+      $body.network = @{ type = 'ethernet'; name = '' }
+    }
+  }
 } catch { }
 
 $errorPath = Join-Path $dir 'error'
@@ -177,7 +206,7 @@ if (-not $Quiet) { Write-Host 'NexGuard is removed from this computer.' }
     -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
   $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
   Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $triggers -Settings $settings `
-    -Principal $principal -Description 'Reports CPU, memory, GPU, battery, storage and Windows version to NexGuard.' -Force | Out-Null
+    -Principal $principal -Description 'Reports CPU, memory, GPU, battery, storage, network and Windows version to NexGuard.' -Force | Out-Null
 
   # -------------------------------------------------------------------- first check-in
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script now

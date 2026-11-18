@@ -84,7 +84,11 @@ def test_device_page_shows_health_now_and_switches_range(client, laptop):
     page = client.get(url).content.decode()
     assert 'id="charts"' in page and "<dt>Memory</dt><dd>16.0\xa0GB</dd>" in page
     for label in ("CPU", "GPU"):
-        assert page.count(f">{label}<") == 1, label  # one chart each, no duplicate meter
+        assert page.count(f'class="spark-title">{label}<') == 1, label  # one chart each
+    # The latest reading sits in the "right now" bar, so it shows from the first check-in
+    # (a chart needs two buckets of data before it draws a line).
+    assert 'aria-label="Health at the last check-in"' in page
+    assert ">37%<" in page and ">75%<" in page and ">18%<" in page
     part = client.get(url, {"part": "charts", "range": "7d"}, HTTP_HX_REQUEST="true")
     body = part.content.decode()
     assert body.lstrip().startswith('<section id="charts"') and "range=7d" in body
@@ -96,6 +100,16 @@ def test_consent_names_the_health_data_for_computers(client, parent, sara):
     _, code = add_device(client, sara, platform="windows", name="Family PC")
     disclosure = api_pair(client, code, platform="windows", preview=True).json()["disclosure"]
     assert "CPU, memory, GPU, battery and storage use" in disclosure
+    assert "network (Wi-Fi name)" in disclosure
+    _, code = add_device(client, sara, platform="macos", name="Sara's Mac")
+    disclosure = api_pair(client, code, platform="macos", preview=True).json()["disclosure"]
+    assert "network (Wi-Fi name)" in disclosure and "location" not in disclosure
+
+
+def test_health_bar_is_hidden_until_a_computer_reports_health(client, laptop):
+    device, _ = laptop
+    page = client.get(reverse("devices:detail", args=[device.pk])).content.decode()
+    assert "Health at the last check-in" not in page
 
 
 def test_old_health_history_is_pruned(laptop, settings):

@@ -1,5 +1,5 @@
 // Package collect gathers what a computer reports at each check-in: system facts and
-// health (CPU, memory, GPU, battery, storage). Every reading is optional: one that fails
+// health (CPU, memory, GPU, battery, storage, network). Every reading is optional: one that fails
 // is left out, never the whole report, and never sent as a made-up zero.
 package collect
 
@@ -64,6 +64,9 @@ func Report(appVersion string) map[string]any {
 	}
 	if g, ok := gpuPercent(); ok && valid(g) {
 		r["gpu"] = map[string]any{"percent": round1(g)}
+	}
+	if n := network(); n != nil {
+		r["network"] = n
 	}
 	return r
 }
