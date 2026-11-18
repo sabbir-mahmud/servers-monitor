@@ -39,7 +39,7 @@ from apps.core.utils import client_ip
 from apps.users import throttle
 
 from . import activity, blocklist, services
-from .models import AGENT_APP, COMPUTERS, CONTROLLED_PEOPLE
+from .models import AGENT_APP, COMPUTERS
 
 MAX_BODY = 16 * 1024
 MAX_CHECKIN_BODY = 128 * 1024  # an agent's activity batch: at most 500 rows of ~150 bytes
@@ -142,8 +142,7 @@ def _disclosure(device, info: dict) -> str:
     )
     text = f"{device.account.name} will see this device's last online time, {what}."
     agent = str(info.get("app_version", "")).startswith(AGENT_APP)
-    person = device.person
-    if agent and device.platform in COMPUTERS and person and person.kind in CONTROLLED_PEOPLE:
+    if agent and device.platform in COMPUTERS and device.controls_owner_ok:
         text += (" They can also turn on screen time (which apps are used, and for how "
                  "long), websites visited (site names and time, not pages or searches) and "
                  "blocking of adult or chosen websites on this computer.")  # fmt: skip

@@ -240,16 +240,25 @@ class Device(Machine):
     @property
     def controls_block_reason(self) -> str:
         """Why screen time, web activity and blocking can't be turned on ("" if they can).
-        Only children and company staff: on another adult's computer this is how
-        stalkerware is abused. Only the agent: it runs as a service the user can't remove,
-        and only it can read other users' browsers or edit the hosts file."""
+        Only your own computers (a solo account), a child's or a staff member's: on another
+        adult's computer this is how stalkerware is abused. Only the agent: it runs as a
+        service the user can't remove, and only it can read other users' browsers or edit
+        the hosts file."""
         if self.platform not in COMPUTERS:
             return "Only for Windows, Mac and Linux computers."
-        if self.person is None or self.person.kind not in CONTROLLED_PEOPLE:
+        if not self.controls_owner_ok:
             return "Only for a child's or a staff member's computer."
         if not self.app_version.startswith(AGENT_APP):
             return "Needs the NexGuard agent installed by an administrator."
         return ""
+
+    @property
+    def controls_owner_ok(self) -> bool:
+        """Whose computer it is allows controls: a solo developer's own, or one assigned to
+        a child or a staff member (select_related("account", "person") avoids queries)."""
+        if self.account.kind == "solo":
+            return True
+        return self.person is not None and self.person.kind in CONTROLLED_PEOPLE
 
     @property
     def controls_allowed(self) -> bool:

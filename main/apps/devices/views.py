@@ -126,7 +126,7 @@ class DeviceDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
     context_object_name = "device"
 
     def get_queryset(self):
-        return super().get_queryset().select_related("person")
+        return super().get_queryset().select_related("account", "person")
 
     def get_template_names(self):
         if self.request.htmx and self.request.GET.get("part") == "charts":  # range / refresh
@@ -181,7 +181,7 @@ class DeviceControlsView(StaffViewMixin, AccountScopedMixin, UpdateView):
     context_object_name = "device"
 
     def get_queryset(self):
-        return super().get_queryset().select_related("person")
+        return super().get_queryset().select_related("account", "person")
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(

@@ -9,11 +9,17 @@ from django.utils import timezone
 
 from apps.audit.models import AuditLog
 from apps.devices import activity, blocklist
-from apps.devices.models import ActivityBatch, DeviceControls, ScreenTime, WebActivity
+from apps.devices.models import (
+    ActivityBatch,
+    Device,
+    DeviceControls,
+    ScreenTime,
+    WebActivity,
+)
 from apps.tenants.models import Person
 
 from .conftest import add_member, make_account
-from .test_devices import add_device, api_checkin, api_pair
+from .test_devices import add_device, api_checkin, api_pair, code_on
 
 pytestmark = pytest.mark.django_db
 
@@ -102,6 +108,24 @@ def test_staff_computers_in_a_company_can_have_controls(client, django_user_mode
     client.force_login(boss)
     device, _ = pair_computer(client, staff, name="Karim's Mac")
     assert device.controls_allowed
+
+
+def test_a_solo_developers_own_computer_can_have_controls(client, django_user_model):
+    solo = make_account("Sabbir", kind="solo")
+    me = django_user_model.objects.create_user("me", "me@example.com", "pw-x-1234567")
+    add_member(me, "owner", solo)
+    client.force_login(me)
+    resp = client.post(reverse("devices:create"), {"platform": "macos", "name": "My Mac"})
+    device = Device.objects.get(name="My Mac")
+    code = code_on(client.get(resp["Location"]).content.decode())
+    preview = api_pair(client, code, platform="macos", preview=True, **AGENT).json()
+    assert "screen time" in preview["disclosure"]
+    token = api_pair(client, code, platform="macos", **AGENT).json()["token"]
+    device.refresh_from_db()
+    assert device.person is None and device.controls_allowed
+    assert api_checkin(client, token, AGENT).json()["controls"] is not None
+    page = client.get(reverse("devices:detail", args=[device.pk])).content.decode()
+    assert 'id="controls-title"' in page and reverse("devices:controls", args=[device.pk]) in page
 
 
 def test_consent_names_activity_only_for_the_agent_on_a_controllable_computer(

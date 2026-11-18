@@ -70,7 +70,8 @@ check-in is noted in an `error` file next to it.
 For computers that need to stay monitored, such as a child's account or a company laptop,
 there is a Go agent in `device-agent/`. An administrator installs it once, and it runs as
 a system service that a standard user can't stop. It reports the same health readings,
-and on a **child's** or **staff member's** computer it can also do the things below. For
+and on a **child's** or **staff member's** computer, or your own in a solo account, it can
+also do the things below. For
 now it's installed by hand: see
 [device-agent/README.md](../device-agent/README.md). A one-line install from the pair
 page comes next.
@@ -78,8 +79,8 @@ page comes next.
 ## Screen time, websites and blocking (agent only)
 
 On the device page, **Controls → Change** turns each of these on or off. Only for a
-computer assigned to a child (family account) or a staff member (company account) and
-running the agent: on another adult's computer, this is how monitoring gets abused, and
+computer assigned to a child (family account) or a staff member (company account), or
+your own computer in a solo account, and running the agent: on another adult's computer, this is how monitoring gets abused, and
 the scripts run as the user, who could simply delete them. Pairing tells the person what
 can be turned on. Changes reach the computer at its next check-in.
 

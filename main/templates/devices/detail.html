@@ -161,7 +161,7 @@
 </section>
 {% endif %}
 
-{% if device.platform in "windows macos linux" and device.person %}
+{% if device.platform in "windows macos linux" and device.person or device.platform in "windows macos linux" and ACCOUNT.kind == "solo" %}
 <section class="card controls-card" aria-labelledby="controls-title">
   <div class="dlist-head">
     <h2 class="card-title-lg" id="controls-title">{% icon "shield" 17 %} Controls</h2>
