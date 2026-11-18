@@ -231,8 +231,12 @@ cat > "$DIR/uninstall.sh" <<'UNINSTALL'
 if [ "$(uname -s)" = Darwin ]; then
   DIR="$HOME/Library/Application Support/NexGuard"
   PLIST="$HOME/Library/LaunchAgents/com.nexguard.device.plist"
-  launchctl bootout "gui/$(id -u)/com.nexguard.device" 2>/dev/null || launchctl unload "$PLIST" 2>/dev/null || true
-  rm -f "$PLIST"
+  # Only when this install scheduled one: launchd jobs live in the login session, not in
+  # $HOME, so an install made under another HOME (tests) must not stop the real one.
+  if [ -f "$PLIST" ]; then
+    launchctl bootout "gui/$(id -u)/com.nexguard.device" 2>/dev/null || launchctl unload "$PLIST" 2>/dev/null || true
+    rm -f "$PLIST"
+  fi
 else
   DIR="${XDG_DATA_HOME:-$HOME/.local/share}/nexguard"
   UNITS="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
@@ -241,8 +245,9 @@ else
     rm -f "$UNITS/nexguard-device.timer" "$UNITS/nexguard-device.service"
     systemctl --user daemon-reload >/dev/null 2>&1 || true
   fi
-  if command -v crontab >/dev/null 2>&1 && crontab -l 2>/dev/null | grep -q nexguard; then
-    crontab -l 2>/dev/null | grep -v nexguard | crontab - || true
+  # Only this install's line (crontab is per user, not per $HOME, like launchd above).
+  if command -v crontab >/dev/null 2>&1 && crontab -l 2>/dev/null | grep -qF "$DIR/checkin.sh"; then
+    crontab -l 2>/dev/null | grep -vF "$DIR/checkin.sh" | crontab - || true
   fi
 fi
 rm -rf "$DIR"

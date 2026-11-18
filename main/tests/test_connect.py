@@ -154,3 +154,13 @@ def test_the_installer_pairs_and_checks_in_for_real(live_server, settings, tmp_p
     device.delete()
     subprocess.run(["sh", str(installed / "checkin.sh"), "now"], env=env, timeout=60)
     assert not installed.exists()
+
+
+@pytest.mark.parametrize("path", ["/d/K7PQ3MXA/install.sh", "/d/uninstall.sh"])
+def test_uninstall_only_stops_what_this_install_scheduled(client, path):
+    """launchd jobs and the crontab belong to the login, not to $HOME: an install made under
+    another HOME (as the tests above do) must never stop the computer's real check-in."""
+    script = client.get(path).content.decode()
+    assert 'if [ -f "$PLIST" ]; then\n    launchctl bootout' in script
+    assert 'grep -vF "$DIR/checkin.sh" | crontab -' in script
+    assert "grep -v nexguard | crontab -" not in script.split("run every 5 minutes")[0]
