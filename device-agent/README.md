@@ -37,7 +37,7 @@ On Windows, run the same commands from an administrator PowerShell (`nexguard.ex
 dashboard; see [docs/devices.md](../docs/devices.md)):
 - Screen time: one look a minute (Windows: a hidden `nexguard sample` helper in the
   signed-in person's session, because the service can't see their screen).
-- Websites: browser history read every 10 minutes from a copy of each history database
+- Websites: browser history read every 3 minutes from a copy of each history database
   (pure-Go SQLite), reduced to the site on this computer. Cursors in `activity.json` mean
   each visit counts once; nothing from before it was switched on is sent.
 - Blocking: a managed section in the hosts file between `# >>> NexGuard` markers. Lines

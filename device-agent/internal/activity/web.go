@@ -20,8 +20,8 @@ import (
 	_ "modernc.org/sqlite" // pure Go: the agent stays one static file, no C library
 )
 
-// WebEvery: how often browser histories are read.
-const WebEvery = 10 * time.Minute
+// WebEvery: how often browser histories are read (a copy of each, so not every minute).
+const WebEvery = 3 * time.Minute
 
 const (
 	maxVisitSeconds = 3600            // one visit can't count more than this

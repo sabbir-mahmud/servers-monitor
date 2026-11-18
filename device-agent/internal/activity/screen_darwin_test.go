@@ -33,3 +33,12 @@ func TestLiveSampleOnThisMac(t *testing.T) {
 	}
 	t.Logf("user=%s app=%q idle=%s locked=%v active=%v", u.User, u.App, u.Idle, u.Locked, u.Active())
 }
+
+func TestLiveAccessOnThisMac(t *testing.T) {
+	if os.Getenv("NEXGUARD_LIVE") != "1" {
+		t.Skip("set NEXGUARD_LIVE=1 to check this Mac")
+	}
+	t.Setenv("NEXGUARD_CONFIG_DIR", t.TempDir())
+	t.Setenv("NEXGUARD_USER", "1")
+	t.Logf("refused: %v", CheckAccess())
+}

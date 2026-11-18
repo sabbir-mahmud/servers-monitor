@@ -273,3 +273,31 @@ func TestGlobRoot(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckAccessWritesWhatTheInstallerWaitsFor(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can open anything")
+	}
+	setup(t)
+	homes := t.TempDir()
+	t.Setenv("NEXGUARD_HOMES", filepath.Join(homes, "*"))
+	root := filepath.Join(homes, "sara", filepath.FromSlash(firefoxDir()))
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chmod(root, 0)
+	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+	if got := CheckAccess(); len(got) != 1 || got[0] != "Firefox" {
+		t.Fatalf("refused: %v", got)
+	}
+	if a, err := ReadAccess(); err != nil || len(a.NoAccess) != 1 {
+		t.Fatalf("access.json: %+v %v", a, err)
+	}
+	_ = os.Chmod(root, 0o755)
+	if got := CheckAccess(); len(got) != 0 {
+		t.Fatalf("after access: %v", got)
+	}
+	if a, _ := ReadAccess(); len(a.NoAccess) != 0 {
+		t.Fatal("access.json must clear")
+	}
+}

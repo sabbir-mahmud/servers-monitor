@@ -164,10 +164,31 @@ func writeLines(path string, lines []string) error {
 
 // sampleLoop counts screen time every minute and reads browser histories every 10, while
 // the dashboard has them switched on.
+// accessLoop: which browsers the system won't let the agent read. Often while some are
+// refused, so the installer (waiting for Full Disk Access) sees the change in seconds.
+func accessLoop(stop <-chan struct{}) {
+	for {
+		wait := 5 * time.Minute
+		if len(activity.CheckAccess()) > 0 {
+			wait = 10 * time.Second
+		}
+		select {
+		case <-stop:
+			return
+		case <-time.After(wait):
+		}
+	}
+}
+
 func sampleLoop(stop <-chan struct{}) {
 	tick := time.NewTicker(activity.SampleEvery)
 	defer tick.Stop()
-	lastWeb := time.Time{}
+	// Read once now: the first read only notes where each history ends, so sites start
+	// counting from here rather than one interval later.
+	if err := activity.ReadWebOnce(); err != nil {
+		log.Printf("websites: %v", err)
+	}
+	lastWeb := time.Now()
 	for {
 		select {
 		case <-stop:
@@ -188,6 +209,7 @@ func sampleLoop(stop <-chan struct{}) {
 // and waiting quietly while not paired.
 func Run(version string, stop <-chan struct{}) {
 	go sampleLoop(stop)
+	go accessLoop(stop)
 	backoff := time.Duration(0)
 	for {
 		wait := notPairedWait

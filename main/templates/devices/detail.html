@@ -149,7 +149,7 @@
       {% if device.web_no_access %}
       <div class="alert alert-warning small" role="status">{% icon "alert" %}<div>
         <strong>{{ device.web_no_access|join:", " }}: not allowed to read.</strong>
-        {% if device.platform == "macos" %}On the Mac, open System Settings → Privacy &amp; Security → Full Disk Access, click +, press ⌘ ⇧ G, enter <code>{% if device.agent_mode == "user" %}~/Library/Application Support/NexGuard/nexguard{% else %}/Library/Application Support/NexGuard/nexguard{% endif %}</code> and switch it on. Visits from then on show up within about 15 minutes.{% else %}The computer's security settings stop the agent reading this browser's history.{% endif %}
+        {% if device.platform == "macos" %}On the Mac, open System Settings → Privacy &amp; Security → Full Disk Access, click +, press ⌘ ⇧ G, enter <code>{% if device.agent_mode == "user" %}~/Library/Application Support/NexGuard/nexguard{% else %}/Library/Application Support/NexGuard/nexguard{% endif %}</code> and switch it on. Visits from then on show up within about 10 minutes.{% else %}The computer's security settings stop the agent reading this browser's history.{% endif %}
       </div></div>
       {% endif %}
       <table class="table table-sm site-table mb-0">

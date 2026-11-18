@@ -169,6 +169,9 @@ func status() error {
 	c := activity.CurrentControls()
 	fmt.Println("Screen time:", onOff(c.ScreenTime))
 	fmt.Println("Websites visited:", onOff(c.WebActivity))
+	if a, err := activity.ReadAccess(); err == nil && len(a.NoAccess) > 0 {
+		fmt.Printf("Can't read: %s (give %s Full Disk Access)\n", strings.Join(a.NoAccess, ", "), exePath())
+	}
 	if config.UserMode() {
 		fmt.Println("Blocking: needs the administrator install (sudo nexguard install)")
 	} else if n := block.Count(); n > 0 {
@@ -206,6 +209,13 @@ func runInForeground() error {
 	go func() { <-sigs; close(stop) }()
 	agent.Run(Version, stop)
 	return nil
+}
+
+func exePath() string {
+	if p, err := os.Executable(); err == nil {
+		return p
+	}
+	return "the agent"
 }
 
 func onOff(on bool) string {

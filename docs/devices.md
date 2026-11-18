@@ -94,7 +94,7 @@ can be turned on. Changes reach the computer at its next check-in.
 | | What it records | How |
 |---|---|---|
 | **Screen time** | Minutes in use per day, by app in front | Every minute, while someone is signed in, the screen is unlocked and the keyboard or mouse was used in the last 2 minutes. Mac: `ioreg` idle time and `lsappinfo`. Windows: a hidden helper in the person's session (`nexguard sample`). Linux: `loginctl` sessions; no per-app split (shows as "Desktop"). |
-| **Websites visited** | Site (e.g. `youtube.com`), visits and time per day | Every 10 minutes, from Chrome, Edge, Brave, Vivaldi, Opera, Chromium, Firefox and Safari history, for every user on the computer. The address is cut down to the site **on the computer**: pages and searches are never sent. Only visits after it was switched on. |
+| **Websites visited** | Site (e.g. `youtube.com`), visits and time per day | Every 3 minutes, from Chrome, Edge, Brave, Arc, Vivaldi, Opera, Chromium, Firefox and Safari history, for every user on the computer. The address is cut down to the site **on the computer**: pages and searches are never sent. Only visits after it was switched on. |
 | **Block adult websites** | — | About 77,000 sites (`ADULT_BLOCKLIST_URL`) written into the system hosts file. |
 | **SafeSearch** | — | Google, Bing, DuckDuckGo and YouTube pointed at their SafeSearch-only addresses. |
 | **Also block / Always allow** | — | Your own lists; a site covers its `www.` address too. |
@@ -105,8 +105,10 @@ Limits worth knowing:
 - Private and incognito windows aren't in the browser's history, so they don't show.
 - On a Mac, websites need **Full Disk Access** for `/Library/Application Support/NexGuard/nexguard`
   (System Settings → Privacy & Security → Full Disk Access). macOS protects Safari's
-  history, and on recent versions Chrome's and other browsers' too. Until it's given, the
-  device page names the browsers it can't read and shows these steps.
+  history, and on recent versions Chrome's and other browsers' too. The connect command
+  asks for it on a Mac: it opens that settings page and a Finder window with the agent,
+  and waits until it's switched on (Control C skips). Until it's given, the device page
+  names the browsers it can't read and shows the steps.
 - Blocking is a hosts file: a VPN, a proxy or a browser's own secure DNS can get around
   it, and someone with administrator rights can undo it (the agent puts it back at the
   next check-in). Firefox's automatic DNS-over-HTTPS is switched off through its

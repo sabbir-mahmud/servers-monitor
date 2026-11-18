@@ -20,6 +20,43 @@ set -eu
 say() { printf '%s\n' "$*"; }
 fail() { printf '\n%s\n\n' "Couldn't connect this computer: $*" >&2; exit 1; }
 
+# Full Disk Access (Mac): macOS keeps browsers' history from other programs until a person
+# allows it in System Settings; no program can switch it on for itself. The running agent
+# writes to access.json which browsers it still can't read, so this asks only when needed
+# and sees the moment it's allowed.
+no_access() { sed -n 's/.*"no_access":\[\([^]]*\)\].*/\1/p' "$1" 2>/dev/null | tr -d '"' | sed 's/,/, /g'; }
+disk_access() {  # disk_access PROGRAM ACCESS_FILE
+  [ "$PLATFORM" = macos ] || return 0
+  ( : < /dev/tty ) 2>/dev/null || return 0
+  _i=0
+  until [ -f "$2" ] || [ "$_i" -ge 30 ]; do sleep 1; _i=$((_i + 1)); done
+  _blocked="$(no_access "$2")"
+  [ -n "$_blocked" ] || return 0
+  say ""
+  say "One more step, so websites show on the dashboard: allow NexGuard to read the"
+  say "history of $_blocked. macOS only lets you do this yourself."
+  say "System Settings (Full Disk Access) and a Finder window with \"nexguard\" open now:"
+  say "  drag \"nexguard\" from Finder into the list, then make sure its switch is on."
+  say "  (Or click +, press Command Shift G and paste: $1)"
+  open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" 2>/dev/null || true
+  open -R "$1" 2>/dev/null || true
+  say ""
+  say "Waiting for it... Press Control C to skip: everything else is done, and the device"
+  say "page shows these steps until it's allowed."
+  _i=0
+  while [ "$_i" -lt 120 ]; do  # up to 10 minutes
+    sleep 5
+    _i=$((_i + 1))
+    if [ -z "$(no_access "$2")" ]; then
+      say ""
+      say "Full Disk Access is on. Websites visited from now on will show on the dashboard."
+      return 0
+    fi
+  done
+  say ""
+  say "Not allowed yet. Websites start by themselves once it is; the device page has the steps."
+}
+
 case "$(uname -s)" in
   Darwin) PLATFORM=macos; DIR="$HOME/Library/Application Support/NexGuard" ;;
   Linux) PLATFORM=linux; DIR="${XDG_DATA_HOME:-$HOME/.local/share}/nexguard" ;;
@@ -109,6 +146,8 @@ if [ -n "$ADMIN" ]; then
     say "Nothing was installed. If you said no, the code still works."
     exit 1
   fi
+  SYSTEM_DIR="/Library/Application Support/NexGuard"
+  [ "$PLATFORM" = macos ] && { sudo rm -f "$SYSTEM_DIR/access.json" || true; }  # the new service writes it
   if ! sudo "$AGENT_TMP" install < /dev/null; then
     rm -f "$AGENT_TMP"
     fail "it's paired, but the service didn't start. Paste the line again to retry."
@@ -118,6 +157,8 @@ if [ -n "$ADMIN" ]; then
   if [ -f "$DIR/uninstall.sh" ]; then sh "$DIR/uninstall.sh" quiet || true; fi
   say ""
   say "Done. NexGuard runs as a protected service on this computer and can block websites."
+  disk_access "$SYSTEM_DIR/nexguard" "$SYSTEM_DIR/access.json"
+  say ""
   say "You can close this window. To remove it later, paste:  curl -fsSL $SERVER/d/uninstall.sh | sh"
   say ""
   exit 0
@@ -240,6 +281,7 @@ chmod 700 "$DIR/uninstall.sh"
 PLIST_END
     JOB="gui/$(id -u)/com.nexguard.agent"
     launchctl bootout "$JOB" 2>/dev/null || true
+    rm -f "$DIR/access.json"  # the agent starting now writes it
     tries=0
     until launchctl print "$JOB" >/dev/null 2>&1 || [ "$tries" -ge 5 ]; do
       tries=$((tries + 1))
@@ -288,6 +330,9 @@ UNIT_END
   else
     say "Done. ${PAIRED:-This computer is connected.}"
     say "The agent runs $SCHEDULE. You can close this window."
+  fi
+  if [ "${NEXGUARD_NO_SCHEDULE:-}" != 1 ] && [ -z "${NOT_SCHEDULED:-}" ]; then
+    disk_access "$AGENT" "$DIR/access.json"
   fi
   if [ -n "${NOT_SCHEDULED:-}" ]; then
     say ""
