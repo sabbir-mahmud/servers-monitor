@@ -437,3 +437,15 @@ def test_geoip_lookups_are_local_and_safe(settings, tmp_path):
     assert geoip.refresh(force=True) is False and not geoip.path().exists()  # fetch failed
     settings.DEVICE_GEOIP_URL = ""
     assert geoip.refresh(force=True) is False
+
+
+def test_controls_page_shows_what_each_switch_is_doing(client, parent, sara):
+    device, token = _mac_with_location(client, parent, sara)
+    DeviceControls.objects.filter(device=device).update(screen_time=True)
+    api_checkin(client, token, AGENT)  # check-in after the save: in effect, no position
+    url = reverse("devices:controls", args=[device.pk])
+    page = client.get(url).content.decode()
+    assert "In effect since the check-in" in page and "Nothing yet today" in page
+    assert "no public address to place it by" in page  # test client is 127.0.0.1
+    client.post(url, {"screen_time": "on"})  # saved after the check-in: not picked up yet
+    assert "Waiting for Sara&#x27;s Mac to pick up" in client.get(url).content.decode()

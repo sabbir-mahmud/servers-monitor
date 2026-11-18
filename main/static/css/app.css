@@ -1823,3 +1823,59 @@ kbd { font-family: var(--font-mono); font-size: .85em; padding: .05rem .4rem; bo
   .acct-glance-item, .acct-nav a { transition: none; }
   .acct-glance-item:active { transform: none; }
 }
+
+/* ---------------------------------------------------------------- device controls
+   Same family as the account pages: one column, every control a row with its switch at
+   the right; the whole row is the label, so it's a big tap target. */
+.ctl-device { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+.ctl-form .acct-section-sub { max-width: 60ch; }
+.ctl-row { cursor: pointer; margin: 0; transition: background-color .15s ease; }
+.ctl-row:hover { background: color-mix(in srgb, var(--ink) 3%, transparent); }
+.ctl-row:focus-within { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.ctl-row .acct-row-text { display: flex; flex-direction: column; gap: .15rem; }
+.ctl-row .acct-row-title, .ctl-row .acct-row-sub { display: block; }
+.ctl-row:has(input:checked) .acct-row-icon { color: var(--good-ink); background: color-mix(in srgb, var(--good) 14%, var(--surface)); }
+.ctl-switch { flex: none; margin: 0 0 0 auto; padding: 0; min-height: 0; }
+.ctl-switch .form-check-input { float: none; margin: 0; width: 2.6em; height: 1.45em; cursor: pointer; }
+.ctl-lists { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin-top: .9rem; }
+.ctl-list { padding: 1.1rem 1.25rem; display: flex; flex-direction: column; gap: .35rem; min-width: 0; }
+.ctl-list + .ctl-list { border-left: 1px solid var(--line); }
+.ctl-list-label { display: inline-flex; align-items: center; gap: .4rem; font-weight: 600; font-size: .92rem; color: var(--ink); }
+.ctl-list-help { margin: 0 0 .25rem; font-size: .8rem; color: var(--muted); }
+.ctl-list textarea { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: .85rem; resize: vertical; min-height: 6.5rem; }
+.ctl-savebar { position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap; padding: .85rem 1.1rem; margin-top: -.75rem;
+  background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(10px);
+  border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 -6px 24px -12px rgb(0 0 0 / .18); }
+.ctl-savebar-actions { display: flex; gap: .5rem; margin-left: auto; }
+@media (max-width: 640px) {
+  .ctl-lists { grid-template-columns: 1fr; }
+  .ctl-list + .ctl-list { border-left: 0; border-top: 1px solid var(--line); }
+  .ctl-savebar { border-radius: 0; margin-inline: -16px; border-inline: 0; }
+  .ctl-savebar-actions { width: 100%; }
+  .ctl-savebar-actions .btn { flex: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .ctl-row { transition: none; } }
+
+/* Device controls: live state under each switch, unsaved-changes save bar. */
+.ctl-status { display: inline-flex; align-items: center; gap: .35rem; align-self: flex-start; margin-top: .35rem;
+  padding: .15rem .55rem; border-radius: 999px; font-size: .75rem; font-weight: 500;
+  color: var(--good-ink); background: color-mix(in srgb, var(--good) 12%, var(--surface)); }
+.ctl-status.is-warn { color: var(--warning-ink); background: color-mix(in srgb, var(--warning) 15%, var(--surface));
+  border-radius: 10px; align-items: flex-start; line-height: 1.4; padding: .3rem .6rem; }
+.ctl-status.is-warn .icon { flex: none; margin-top: .1rem; }
+.ctl-row:not(:has(input:checked)) .ctl-status { opacity: .45; } /* switched off, not saved yet */
+.ctl-sync { display: inline-flex; align-items: center; gap: .3rem; }
+.ctl-sync.is-pending { color: var(--warning-ink); }
+.ctl-count { margin-left: .2rem; min-width: 1.4rem; padding: 0 .4rem; border-radius: 999px; font-size: .72rem;
+  font-weight: 600; text-align: center; color: var(--ink-2); background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.ctl-count:empty { display: none; }
+.ctl-undo { color: var(--ink-2); text-decoration: none; }
+.ctl-undo:hover { color: var(--ink); }
+.ctl-form.is-dirty .ctl-savebar { border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  box-shadow: 0 -6px 28px -10px color-mix(in srgb, var(--accent) 35%, transparent); }
+.ctl-form.is-dirty [data-dirty-note] { color: var(--ink); font-weight: 600; }
+.ctl-form.is-dirty [data-dirty-note] .icon { color: var(--accent); }
+.ctl-savebar { transition: border-color .2s ease, box-shadow .2s ease; }
+.ctl-savebar .btn-primary:disabled { opacity: .45; }
+@media (prefers-reduced-motion: reduce) { .ctl-savebar { transition: none; } }

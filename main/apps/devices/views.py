@@ -1,7 +1,9 @@
+import ipaddress
 from datetime import date, timedelta
 
 from django.conf import settings
 from django.contrib import messages
+from django.db.models import Sum
 from django.shortcuts import redirect
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
@@ -188,13 +190,42 @@ class DeviceControlsView(StaffViewMixin, AccountScopedMixin, UpdateView):
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(
-            DEVICE_ACTIVITY_DAYS=settings.DEVICE_ACTIVITY_DAYS, **kwargs
+            DEVICE_ACTIVITY_DAYS=settings.DEVICE_ACTIVITY_DAYS, live=self._live(), **kwargs
         )
+
+    def _live(self) -> dict:
+        """What each control is doing on the computer right now, for the row under it:
+        three small aggregate queries, only for a computer that can have controls."""
+        device = self.object
+        if not device.controls_allowed:
+            return {}
+        today = timezone.localdate()
+        screen = device.screen_time.filter(day=today).aggregate(s=Sum("seconds"))["s"] or 0
+        sites = device.web_activity.filter(day=today).values("domain").distinct().count()
+        last = device.locations.order_by("-recorded_at").only("source", "recorded_at").first()
+        saved = getattr(self._controls(), "updated_at", None)
+        try:
+            public_ip = bool(device.last_ip) and ipaddress.ip_address(device.last_ip).is_global
+        except ValueError:
+            public_ip = False
+        return {
+            "screen_today": screen,
+            "sites_today": sites,
+            "location_source": last.source if last else "",
+            "public_ip": public_ip,
+            # Saved after the last check-in: the computer hasn't picked it up yet.
+            "pending": bool(saved and device.last_seen_at and saved > device.last_seen_at),
+        }
+
+    def _controls(self):
+        if not hasattr(self, "_controls_obj"):
+            device = self.object
+            self._controls_obj = activity.controls_for(device) or DeviceControls(device=device)
+        return self._controls_obj
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
-        device = self.object
-        kwargs["instance"] = activity.controls_for(device) or DeviceControls(device=device)
+        kwargs["instance"] = self._controls()
         return kwargs
 
     def get_form(self, form_class=None):

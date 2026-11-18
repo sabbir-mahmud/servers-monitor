@@ -386,3 +386,66 @@ document.addEventListener("DOMContentLoaded", () => {
   input.addEventListener("input", sync);
   sync();
 });
+
+// Device controls: the header tiles and list counts follow the switches as they change, the
+// save bar says how many changes aren't saved yet (Save stays off until there are some),
+// Undo puts everything back, ⌘S/Ctrl+S saves, and leaving with unsaved changes asks first.
+(function () {
+  const valueOf = (el) => (el.type === "checkbox" ? el.checked : el.value.trim());
+  const lines = (text) => text.split(/\n/).map((l) => l.trim()).filter(Boolean).length;
+
+  function bind(form) {
+    const fields = [...form.querySelectorAll("input[type=checkbox][name], textarea[name]")];
+    const start = new Map(fields.map((f) => [f, valueOf(f)]));
+    const alwaysDirty = form.hasAttribute("data-dirty"); // re-shown after a failed save
+    const note = form.querySelector("[data-dirty-note]");
+    const noteText = note && note.querySelector("span");
+    const save = form.querySelector("[data-save]");
+    const undo = form.querySelector(".ctl-undo");
+    const on = (names) => names.split(" ").some((n) => {
+      const el = form.elements[n];
+      return el && (el.type === "checkbox" ? el.checked : lines(el.value) > 0);
+    });
+    let dirty = 0;
+
+    const update = () => {
+      dirty = fields.filter((f) => valueOf(f) !== start.get(f)).length;
+      const isDirty = dirty > 0 || alwaysDirty;
+      form.classList.toggle("is-dirty", isDirty);
+      if (save) save.disabled = !isDirty;
+      if (undo) undo.hidden = dirty === 0;
+      if (noteText) noteText.textContent = dirty
+        ? `${dirty} unsaved change${dirty === 1 ? "" : "s"}`
+        : note.dataset.clean;
+      document.querySelectorAll("[data-mirror]").forEach((el) => {
+        el.textContent = on(el.dataset.mirror) ? "On" : "Off";
+      });
+      document.querySelectorAll("[data-mirror-icon]").forEach((el) =>
+        el.classList.toggle("is-good", on(el.dataset.mirrorIcon)));
+      document.querySelectorAll("[data-line-count]").forEach((el) => {
+        const t = form.elements[el.dataset.lineCount];
+        const n = t ? lines(t.value) : 0;
+        el.textContent = n ? String(n) : "";
+      });
+    };
+
+    form.addEventListener("input", update);
+    form.addEventListener("change", update);
+    form.addEventListener("reset", () => setTimeout(update)); // values change after the event
+    let submitting = false;
+    form.addEventListener("submit", () => { submitting = true; });
+    window.addEventListener("beforeunload", (e) => {
+      if (dirty && !submitting) { e.preventDefault(); e.returnValue = ""; }
+    });
+    document.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s" && save && !save.disabled) {
+        e.preventDefault();
+        form.requestSubmit(save);
+      }
+    });
+    update();
+  }
+
+  document.addEventListener("DOMContentLoaded", () =>
+    document.querySelectorAll("form[data-controls-form]").forEach(bind));
+})();
