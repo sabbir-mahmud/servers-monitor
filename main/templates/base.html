@@ -67,20 +67,24 @@
       </nav>
 
       <div class="sidebar-foot">
-        <button type="button" class="btn btn-sm btn-outline-secondary w-100" data-install-app hidden>{% icon "download" 15 %} Install app</button>
-        <div class="segmented theme-switch" role="group" aria-label="Appearance">
-          <button type="button" data-theme-set="light" aria-pressed="false" title="Light">{% icon "sun" 15 %}<span class="visually-hidden">Light</span></button>
-          <button type="button" data-theme-set="system" aria-pressed="true" title="Match system">{% icon "monitor" 15 %}<span class="visually-hidden">System</span></button>
-          <button type="button" data-theme-set="dark" aria-pressed="false" title="Dark">{% icon "moon" 15 %}<span class="visually-hidden">Dark</span></button>
-        </div>
-        <div class="user-chip">
-          <a class="avatar" href="{% url 'account' %}" title="My account" aria-label="My account">{{ user.initials }}</a>
-          <a class="flex-grow-1 user-chip-link" style="min-width:0" href="{% url 'account' %}">
-            <div class="user-name">{{ user.display_name }}</div>
-            <div class="user-role">{% if MEMBERSHIP %}{{ MEMBERSHIP.role_label }}{% elif user.is_superuser %}Superuser{% else %}No account{% endif %}</div>
-          </a>
-          <button type="button" class="icon-btn" title="Log out" aria-label="Log out" data-bs-toggle="modal" data-bs-target="#logout-dialog">{% icon "logout" 17 %}</button>
-        </div>
+        <section class="account-card" aria-label="You and appearance">
+          <div class="user-chip">
+            <a class="avatar" href="{% url 'account' %}" title="My account" aria-label="My account">{{ user.initials }}</a>
+            <a class="flex-grow-1 user-chip-link" style="min-width:0" href="{% url 'account' %}">
+              <div class="user-name">{{ user.display_name }}</div>
+              <div class="user-role">{% if MEMBERSHIP %}{{ MEMBERSHIP.role_label }}{% elif user.is_superuser %}Superuser{% else %}No account{% endif %}</div>
+            </a>
+            <button type="button" class="icon-btn" title="Log out" aria-label="Log out" data-bs-toggle="modal" data-bs-target="#logout-dialog">{% icon "logout" 17 %}</button>
+          </div>
+          <div class="account-card-tools">
+            <div class="segmented theme-switch" role="group" aria-label="Appearance">
+              <button type="button" data-theme-set="light" aria-pressed="false" title="Light">{% icon "sun" 15 %}<span class="visually-hidden">Light</span></button>
+              <button type="button" data-theme-set="system" aria-pressed="true" title="Match system">{% icon "monitor" 15 %}<span class="visually-hidden">System</span></button>
+              <button type="button" data-theme-set="dark" aria-pressed="false" title="Dark">{% icon "moon" 15 %}<span class="visually-hidden">Dark</span></button>
+            </div>
+            <button type="button" class="icon-btn install-btn" data-install-app hidden title="Install app" aria-label="Install app">{% icon "download" 16 %}</button>
+          </div>
+        </section>
       </div>
     </div>
   </aside>
