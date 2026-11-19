@@ -1,5 +1,6 @@
 import ipaddress
 from datetime import date, timedelta
+from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.contrib import messages
@@ -90,6 +91,8 @@ class DevicePairView(StaffViewMixin, AccountScopedMixin, DetailView):
             code=code,
             server_url=server,
             qr=_qr(server, code) if code and not is_computer else "",
+            # The phone app can't reach the dashboard computer's own loopback address.
+            server_is_loopback=urlsplit(server).hostname in ("localhost", "127.0.0.1", "::1"),
             is_computer=is_computer,
             # Paired before and a new code is out: it's being moved to a new/reset device.
             repairing=device.paired_at is not None and bool(device.pairing_code_hash),

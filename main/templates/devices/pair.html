@@ -56,9 +56,7 @@
       <div class="steps">
         <div class="step"><span class="step-num"></span><div>
           <h2>Install NexGuard on the {{ device.get_platform_display }}</h2>
-          {% if device.platform == "android" %}<p>From Google Play. The app shows a notification while it's monitoring: that's required, and it's how {{ device.person.name|default:"they" }} know.</p>
-          {% elif device.platform == "ios" %}<p>From the App Store. Allow location "Always" when asked, so you can see where the phone is.</p>
-          {% endif %}
+          <p>Open the NexGuard app on it. It reports while it's open and each time it's opened again, and in the background where the phone allows. When it asks for location, allow it so you can see where the phone is.</p>
         </div></div>
         <div class="step"><span class="step-num"></span><div>
           <h2>Scan the QR code, or enter the code</h2>
@@ -66,6 +64,7 @@
           <p class="small text-body-secondary mt-2 mb-1">Server: <code id="pair-server">{{ server_url }}</code>
             <button type="button" class="btn btn-sm btn-link p-0 ms-1" data-copy="#pair-server">{% icon "copy" 13 %} <span data-copy-label>Copy</span></button></p>
           <p class="small text-body-secondary mb-0">Shown once. Lost it? Make a new code below; this one stops working.</p>
+          {% if server_is_loopback %}<p class="small text-danger mt-2 mb-0">{% icon "alert" 13 %} A phone can't reach <code>{{ server_url }}</code>: that's this computer's own address. Open the dashboard by its network address (or set <code>DASHBOARD_URL</code>), then make a new code.</p>{% endif %}
         </div></div>
         <div class="step"><span class="step-num"></span><div>
           <h2>Check what the app says</h2>

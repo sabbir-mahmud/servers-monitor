@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "NexGuard",
+    "slug": "nexguard",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "io.nexguard.phone"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "io.nexguard.phone"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-background-task",
+      "expo-status-bar",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "NexGuard uses the camera to scan the pairing QR code on your dashboard.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "NexGuard shares this phone\u2019s location with the account you paired it with, as shown before you allowed it."
+        }
+      ]
+    ],
+    "scheme": "nexguard"
+  }
+}

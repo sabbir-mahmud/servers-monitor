@@ -83,6 +83,12 @@ names); upgrading gets the relay backlog fixes below.
   using the code, and `Accept: text/plain` answers as `key=value` lines for shell clients.
 - Sign-up (`ALLOW_SIGNUP`) asks for the account kind and makes the person its owner.
 - `OIDC_ACCOUNT`: which company account SSO users join.
+- **NexGuard phone app** for Android and iOS (`phone-app/`, Expo SDK 58, runs in Expo Go):
+  scan the pair page's QR code or type the code, read what the account will see, and pair
+  on *Allow*. It reports battery, storage, network and (if allowed) location while open
+  and each time it's opened, and from the background in a development or store build.
+  `make phone-app` starts it. The phone pair page warns when the dashboard's address is
+  `127.0.0.1`, which a phone can't reach.
 - Device agent 0.2.0 keeps its own log in `logs/nexguard.log` next to its config: one JSON
   line per event (started, paired, checked in, settings switched on or off by the dashboard,
   errors), readable by everyone, rotated at 1 MB. No token, website or app names.

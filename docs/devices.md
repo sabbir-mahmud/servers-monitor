@@ -32,7 +32,32 @@ Nothing to install first, no administrator rights, no Python.
 The dashboard's pair page turns to **Paired** within seconds. At the computer yourself?
 The pair page has the same steps under *Do it from here*.
 
-Phones use the NexGuard app instead: the pair page shows a QR code to scan.
+## Add a phone (Android or iPhone)
+
+Phones use the NexGuard phone app ([phone-app/](../phone-app/README.md), Expo SDK 58).
+
+1. **Devices → Add device**, pick Android or iPhone, give it a name. The pair page shows a
+   QR code (`nexguard://pair?server=…&code=…`) and the code.
+2. On the phone, open NexGuard and choose **Scan the QR code**, or type the dashboard
+   address and the code.
+3. It shows what the account will see (last online time, battery, storage, network and
+   location) and pairs only on **Allow**. Then it asks once for location; without it,
+   everything else is still shared.
+
+The phone must be able to reach the dashboard's address. If the dashboard runs on
+`127.0.0.1`, the pair page warns that a phone can't use it: open the dashboard by its
+network address, or set `DASHBOARD_URL`.
+
+**When it reports.** It reports when it opens, every 15 minutes while open (or at the
+dashboard's interval), and each time it comes back to the front. In **Expo Go** that's
+all: Expo Go runs nothing in the background, on Android or iOS. A development or store
+build also checks in from the background (`expo-background-task`). The system runs that at
+most every 15 minutes, and less often when it's saving battery. Location comes from the
+check-in itself (while in use), never from continuous background tracking.
+
+**Unpairing.** *Unpair this phone* in the app forgets the token there. Removing the
+device on the dashboard makes its next check-in fail with 401, and the app then goes
+back to the pairing screen by itself.
 
 ## What gets installed
 

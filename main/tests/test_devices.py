@@ -81,6 +81,18 @@ def test_parent_adds_a_phone_and_sees_the_code_once(client, parent, sara):
     assert AuditLog.objects.filter(action="device.create", target="Sara's phone").exists()
 
 
+def test_phone_pair_page_warns_when_the_phone_cant_reach_the_dashboard(
+    client, parent, sara, settings
+):
+    client.force_login(parent)
+    settings.DASHBOARD_URL = "http://127.0.0.1:8000"
+    page = add_device(client, sara, with_page=True)[2]
+    assert "A phone can't reach" in page
+    settings.DASHBOARD_URL = "http://192.168.1.20:8000"
+    page = add_device(client, sara, name="Sara's tablet", with_page=True)[2]
+    assert "A phone can't reach" not in page and "192.168.1.20" in page
+
+
 def test_child_card_lists_devices_with_their_state(client, parent, sara):
     client.force_login(parent)
     device, code = add_device(client, sara)
