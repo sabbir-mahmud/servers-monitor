@@ -52,7 +52,15 @@ built with EAS).
    location) and pairs only on **Allow**. Then it asks once for location; without it,
    everything else is still shared.
 
-The phone must be able to reach the dashboard's address. If the dashboard runs on
+**Phones check in through the Redis relay, not to the dashboard.** Pairing gives the phone
+its own Upstash login, allowed only to push signed check-ins to its own list. The relay
+process (`manage.py relay`) picks them up. So a phone keeps reporting from anywhere, on
+mobile data or another Wi-Fi, while the dashboard stays private. This needs an Upstash
+`REDIS_URL`: without one, pairing a phone fails and says why. See
+[architecture.md](architecture.md#the-relay-protocol).
+
+Only pairing talks to the dashboard, so the phone must reach the dashboard's address once,
+while you set it up. If the dashboard runs on
 `127.0.0.1`, the pair page warns that a phone can't use it: open the dashboard by its
 network address, or set `DASHBOARD_URL`.
 

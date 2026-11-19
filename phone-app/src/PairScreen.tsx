@@ -105,11 +105,15 @@ export function PairScreen({ onPaired }: { onPaired: (session: Session) => void 
     setError('');
     try {
       const paired = await pair(target.server, target.code, deviceInfo());
+      if (!paired.relay) {
+        throw new Error('This dashboard is too old for this app: update it, then make a new code.');
+      }
       const session: Session = {
         server: target.server,
         token: paired.token,
         device: paired.device,
         checkinSeconds: paired.checkin_seconds,
+        relay: paired.relay,
       };
       await saveSession(session);
       // Location is part of what was just agreed to; the system asks once. A "no" still pairs.

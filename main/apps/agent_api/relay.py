@@ -204,9 +204,11 @@ def unqueue_command(command) -> bool:
     return bool(client().lrem(keys(command.server)[0], 1, command_message(command)))
 
 
-def receive(server_ids, timeout: int) -> tuple[str, dict] | None:
-    """Block until any agent sends something. Returns (server id, message) or None."""
-    mapping = inbox_keys(server_ids)
+def receive(server_ids, timeout: int, device_ids=()) -> tuple[str, str, dict] | None:
+    """Block until any agent or phone sends something. Returns ("server" or "device", its
+    id, message) or None."""
+    mapping = {key: ("server", pk) for key, pk in inbox_keys(server_ids).items()}
+    mapping |= {device_inbox_key(pk): ("device", str(pk)) for pk in device_ids}
     if not mapping:
         time.sleep(min(timeout, 5))
         return None
@@ -224,4 +226,64 @@ def receive(server_ids, timeout: int) -> tuple[str, dict] | None:
         return None
     if not isinstance(message, dict):
         return None
-    return mapping[key], message
+    return (*mapping[key], message)
+
+
+# --------------------------------------------------------------------------- phones
+#
+# Phones check in through the relay too, so they report from anywhere while the dashboard
+# stays private. A phone app can't open a Redis connection, so it uses Upstash's HTTPS REST
+# API: its own ACL user (`sm-d-<device id>`), allowed only RPUSH and PING on its own inbox,
+# with a REST token from `ACL RESTTOKEN` (an Upstash extension). Plain Redis has no REST
+# API, so phones need Upstash.
+
+DEVICE_COMMANDS = ("+rpush", "+ping")
+
+
+def device_username(device) -> str:
+    return f"sm-d-{device.pk}"
+
+
+def device_inbox_key(device_id) -> str:
+    return f"{settings.RELAY_KEY_PREFIX}:d:{device_id}:in"
+
+
+def rest_url() -> str:
+    """Where phones reach the relay over HTTPS: RELAY_REST_URL, or the Upstash host in
+    REDIS_URL. Empty when this dashboard's Redis has no REST API."""
+    if settings.RELAY_REST_URL:
+        return settings.RELAY_REST_URL.rstrip("/")
+    host = settings.RELAY_PUBLIC_HOST or urllib.parse.urlsplit(settings.REDIS_URL).hostname or ""
+    return f"https://{host}" if host.endswith(".upstash.io") else ""
+
+
+def provision_device(device) -> dict:
+    """Create (or reset) the phone's ACL user with a fresh password, REST token and signing
+    key. Returns what the phone needs; the dashboard stores only `device.relay_salt` (the
+    caller saves it). Resetting cuts off a phone that had the old token."""
+    url = rest_url()
+    if not url:
+        raise RelayError(
+            "phones check in through an Upstash Redis relay, and this dashboard's REDIS_URL "
+            "isn't Upstash"
+        )
+    device.relay_salt = signing.new_salt()
+    user, inbox = device_username(device), device_inbox_key(device.pk)
+    try:
+        password = client().execute_command("ACL", "GENTOKEN", user)
+        client().execute_command(
+            "ACL", "SETUSER", user, "reset", "on", f">{password}", "resetchannels",
+            f"~{inbox}", "-@all", *DEVICE_COMMANDS,
+        )  # fmt: skip
+        token = client().execute_command("ACL", "RESTTOKEN", user, password)
+    except redis.RedisError as exc:
+        raise RelayError(f"could not create the phone's Redis user: {exc}") from exc
+    return {"url": url, "token": token, "inbox": inbox, "key": signing.device_key(device).hex()}
+
+
+def deprovision_device(device) -> None:
+    try:
+        client().execute_command("ACL", "DELUSER", device_username(device))
+        client().delete(device_inbox_key(device.pk))
+    except (redis.RedisError, RelayError) as exc:
+        logger.warning("Could not remove the relay user for %s: %s", device.name, exc)

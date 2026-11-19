@@ -1,4 +1,6 @@
-// The dashboard's device API (main/apps/devices/api.py): /device/v1/pair and /checkin.
+// The dashboard's device API (main/apps/devices/api.py): only /device/v1/pair. Check-ins go
+// through the Redis relay (relay.ts).
+import type { RelayLogin } from './relay';
 
 export type DeviceInfo = {
   id: string;
@@ -9,8 +11,7 @@ export type DeviceInfo = {
 };
 
 export type PairPreview = { disclosure: string; device: DeviceInfo };
-export type Paired = PairPreview & { token: string; checkin_seconds: number };
-export type CheckinAnswer = { checkin_seconds: number; server_time: string; device: DeviceInfo };
+export type Paired = PairPreview & { token: string; checkin_seconds: number; relay?: RelayLogin };
 
 /** An answer from the dashboard that wasn't a success, in its own words where it gave some. */
 export class ApiError extends Error {
@@ -24,7 +25,7 @@ export class ApiError extends Error {
 
 const TIMEOUT_MS = 20_000;
 
-async function post<T>(server: string, path: string, body: object, token?: string): Promise<T> {
+async function post<T>(server: string, path: string, body: object): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   let response: Response;
@@ -34,7 +35,6 @@ async function post<T>(server: string, path: string, body: object, token?: strin
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify(body),
       signal: controller.signal,
@@ -66,8 +66,4 @@ export function previewPairing(server: string, code: string, info: object) {
 
 export function pair(server: string, code: string, info: object) {
   return post<Paired>(server, 'pair', { ...info, code });
-}
-
-export function checkin(server: string, token: string, report: object) {
-  return post<CheckinAnswer>(server, 'checkin', report, token);
 }

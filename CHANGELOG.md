@@ -83,6 +83,12 @@ names); upgrading gets the relay backlog fixes below.
   using the code, and `Accept: text/plain` answers as `key=value` lines for shell clients.
 - Sign-up (`ALLOW_SIGNUP`) asks for the account kind and makes the person its owner.
 - `OIDC_ACCOUNT`: which company account SSO users join.
+- **Phones check in through the Redis relay** (Upstash REST), not to the dashboard, so they
+  report from anywhere while the dashboard stays private. Pairing a phone creates its own
+  ACL user `sm-d-<id>` (only `RPUSH`/`PING` on `sm:d:<id>:in`) and returns a REST token and a
+  signing key. The relay process applies signed `ci` messages and drops forged, stale or
+  too-frequent ones. Removing a phone deletes its user. New `RELAY_REST_URL`, and
+  `Device.relay_salt` (migration `devices.0008`). Phones need an Upstash `REDIS_URL`.
 - **NexGuard phone app** for Android and iOS (`phone-app/`, Expo SDK 58, runs in Expo Go):
   scan the pair page's QR code or type the code, read what the account will see, and pair
   on *Allow*. It reports battery, storage, network and (if allowed) location while open

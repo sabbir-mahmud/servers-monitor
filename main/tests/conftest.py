@@ -176,6 +176,12 @@ class FakeRedis:
                     raise redis.ResponseError("The password must be generated with ACL GENTOKEN")
             self.users[args[2]] = rules if "reset" in rules else self.users.get(args[2], []) + rules
             return "OK"
+        if op == ["ACL", "RESTTOKEN"]:  # Upstash: a REST token for an ACL user
+            if args[3] not in self.tokens:
+                import redis
+
+                raise redis.ResponseError("WRONGPASS invalid username-password pair")
+            return f"rest_{args[2]}"
         if op == ["ACL", "DELUSER"]:
             return int(self.users.pop(args[2], None) is not None)
         raise NotImplementedError(args)
@@ -214,6 +220,7 @@ def fake_relay(monkeypatch, settings):
 
     fake = FakeRedis()
     settings.REDIS_URL = "rediss://default:admin-secret@relay.test:6379"
+    settings.RELAY_REST_URL = "https://relay.test"  # as if Upstash: phones can pair
     monkeypatch.setattr(relay, "client", lambda: fake)
     return fake
 

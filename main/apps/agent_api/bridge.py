@@ -1,7 +1,8 @@
 """The dashboard's side of the relay: one small process, `manage.py relay`.
 
-- Receiver thread: BLPOPs every enabled server's inbox and applies heartbeats, acks and
-  command output. One blocking call covers the whole fleet.
+- Receiver thread: BLPOPs every enabled server's inbox and every paired phone's, and
+  applies heartbeats, acks, command output and phone check-ins. One blocking call covers
+  the whole fleet.
 - Scheduler thread: re-sends commands Redis couldn't take at queue time (an outbox), runs
   the offline/expiry sweep every 15 s and prunes old metrics hourly. These are DB-only and
   cost no Redis commands while nothing is queued.
@@ -12,6 +13,7 @@ It replaces Celery + beat. Run exactly one per dashboard.
 """
 
 import ipaddress
+import json
 import logging
 import threading
 import time
@@ -28,6 +30,8 @@ from apps.core import backup
 from apps.devices import activity as device_activity
 from apps.devices import blocklist as device_blocklist
 from apps.devices import geoip as device_geoip
+from apps.devices import services as device_services
+from apps.devices.models import PHONES, Device
 from apps.devices.services import prune_locations
 from apps.devices.services import prune_samples as prune_device_samples
 from apps.fleet import rollups
@@ -210,6 +214,42 @@ def _job_ping(server: Server, message: dict) -> None:
     receive_ping(monitor, status, exit_code)
 
 
+def handle_device(device: Device, message: dict) -> None:
+    """Apply one message from a phone: {"t": "ci", "body": "<JSON text>", "sig": "<hex>"},
+    the body being {"at": <unix time>, "report": {…}}. The phone signs the body text itself.
+    Never raises on bad input."""
+    usage.count_agent_message(message.get("t"))
+    body, sig = message.get("body"), message.get("sig")
+    if message.get("t") != "ci" or not isinstance(body, str):
+        logger.warning("Unknown message from phone %s", device.name)
+        return
+    if not signing.verify_from_device(device, body, sig):
+        logger.warning("Rejected unsigned or forged check-in for phone %s", device.name)
+        return
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return
+    report = data.get("report") if isinstance(data, dict) else None
+    if not isinstance(report, dict) or _check_in_stale(device, data.get("at")):
+        return
+    if device.last_seen_at and (timezone.now() - device.last_seen_at).total_seconds() < 30:
+        return  # at most one stored check-in per 30 s, however fast it sends
+    try:
+        device_services.checkin(device, report, None)
+    except (ValueError, TypeError, ValidationError) as exc:
+        logger.warning("Unusable check-in from phone %s: %s", device.name, exc)
+
+
+def _check_in_stale(device: Device, sent_at) -> bool:
+    """A check-in that sat in the relay longer than the phone counts as online (a backlog
+    while this process was down) would show old readings as current: skip it."""
+    if isinstance(sent_at, bool) or not isinstance(sent_at, int | float):
+        return True
+    age = time.time() - sent_at
+    return age > device.checkin_seconds * 2 + 120 + CLOCK_SKEW_SECONDS
+
+
 class Bridge:
     def __init__(self, block_seconds: int | None = None):
         self.block = block_seconds or settings.RELAY_BLOCK_SECONDS
@@ -222,8 +262,13 @@ class Bridge:
         while not self.stop.is_set():
             close_old_connections()
             ids = list(Server.objects.filter(is_enabled=True).values_list("pk", flat=True))
+            phones = list(
+                Device.objects.filter(platform__in=PHONES)
+                .exclude(relay_salt="")
+                .values_list("pk", flat=True)
+            )
             try:
-                got = relay.receive(ids, self.block)
+                got = relay.receive(ids, self.block, phones)
                 backoff = 1
             except (redis.RedisError, relay.RelayError, OSError) as exc:
                 logger.warning("Relay unavailable: %s (retrying in %ss)", exc, backoff)
@@ -232,10 +277,15 @@ class Bridge:
                 continue
             if got is None:
                 continue
-            server_id, message = got
-            if not self.limiter.allow(server_id):
+            source, pk, message = got
+            if not self.limiter.allow(pk):
                 continue
-            server = Server.objects.filter(pk=server_id).first()
+            if source == "device":
+                device = Device.objects.select_related("account", "person").filter(pk=pk).first()
+                if device is not None:
+                    handle_device(device, message)
+                continue
+            server = Server.objects.filter(pk=pk).first()
             if server is not None:
                 handle(server, message)
 

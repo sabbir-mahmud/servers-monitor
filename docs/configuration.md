@@ -75,6 +75,7 @@ the defaults when a variable is unset.
 | `ROLLUP_RETENTION_DAYS` | `400` | Hourly server rollups and daily application uptime kept this long: charts up to 90 days, per-mount disk forecasts and status-page history. About 24 rows per server per day. |
 | `DEVICE_ACTIVITY_DAYS` | `30` | Screen time and websites of children's and staff computers kept this long. Deleted with the device. |
 | `DEVICE_GEOIP_URL` | DB-IP City Lite, `{month}` filled in | Free city-level IP database for computers with Location on that can't report a precise position. The relay fetches it about monthly (~60 MB download) and looks addresses up locally; no address is sent anywhere. Empty turns it off. |
+| `RELAY_REST_URL` | `https://<Upstash host>` | Where phones reach the relay over Upstash's HTTPS REST API. Taken from `REDIS_URL` when that's Upstash. Phones need it: without Upstash they can't be paired. |
 | `DEVICE_AGENT_DIR` | `device-agent/dist` | Agent builds (`device-agent/build.sh`) the one-line connect command installs. Without them it installs the health-only check-in script. |
 | `PHONE_APP_DIR` | `phone-app/dist` | The phone app's Android build (`make phone-app-apk`). The Android pair page offers the newest `.apk` there as a direct download at `/d/app/NexGuard.apk`, with a QR code for the phone's camera. |
 | `IOS_APP_URL` | empty | NexGuard's TestFlight public link or App Store page. iPhones can't install an app from a download, so the iPhone pair page links here (with a QR code). |

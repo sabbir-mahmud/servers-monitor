@@ -125,6 +125,9 @@ class Device(Machine):
     # Pairing (see pairing.py). Empty: no code outstanding / not paired.
     pairing_code_hash = models.CharField(max_length=64, blank=True, editable=False)
     token_hash = models.CharField(max_length=64, blank=True, editable=False)
+    # Phones: salt of the key their relay check-ins are signed with (apps/agent_api/
+    # signing.py). Set when paired; empty for computers, which check in over HTTPS.
+    relay_salt = models.CharField(max_length=32, blank=True, editable=False)
     paired_at = models.DateTimeField(null=True, blank=True)
 
     # Reported by the device (last_seen_at and hostname live on Machine).

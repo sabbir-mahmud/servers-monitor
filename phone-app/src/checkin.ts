@@ -6,9 +6,10 @@
 import * as BackgroundTask from 'expo-background-task';
 import * as TaskManager from 'expo-task-manager';
 
-import { ApiError, checkin } from './api';
+import { ApiError } from './api';
+import { pushCheckin, sealCheckin } from './relay';
 import { collectReport, type Report } from './report';
-import { clearSession, loadSession, saveSession } from './session';
+import { clearSession, loadSession } from './session';
 
 export const BACKGROUND_TASK = 'nexguard-checkin';
 
@@ -18,8 +19,10 @@ export type CheckinResult =
 
 let inFlight: Promise<CheckinResult | null> | null = null;
 
-/** Checks in once with the stored pairing; null when this phone isn't paired. A 401 means it
- * was removed on the dashboard or paired again elsewhere: the pairing is forgotten. */
+/** Checks in once, through the relay, with the stored pairing; null when this phone isn't
+ * paired. A 401 means it was removed on the dashboard or paired again elsewhere: the pairing
+ * is forgotten. The relay doesn't answer back: success means the message is queued, and
+ * the dashboard applies it when its relay process picks it up (within a minute). */
 export function checkinNow(): Promise<CheckinResult | null> {
   inFlight ??= run().finally(() => {
     inFlight = null;
@@ -32,13 +35,7 @@ async function run(): Promise<CheckinResult | null> {
   if (!session) return null;
   const report = await collectReport();
   try {
-    const answer = await checkin(session.server, session.token, report);
-    const changed =
-      answer.checkin_seconds !== session.checkinSeconds ||
-      JSON.stringify(answer.device) !== JSON.stringify(session.device);
-    if (changed) {
-      await saveSession({ ...session, device: answer.device, checkinSeconds: answer.checkin_seconds });
-    }
+    await pushCheckin(session.relay, sealCheckin(session.relay, report));
     return { ok: true, at: new Date(), report };
   } catch (error) {
     const unpaired = error instanceof ApiError && error.status === 401;

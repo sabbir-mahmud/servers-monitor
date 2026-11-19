@@ -32,6 +32,27 @@ sm:a:<server id>:in    agent → dashboard   hb (heartbeat), ack, res (result/ou
   (see [security.md](security.md#signed-commands)). The signed form is canonical (sorted keys,
   no spaces), so a queued command can still be found again with `LREM`.
 
+**Phones** use the relay too, so they report from anywhere while the dashboard stays
+private. A phone app can't open a Redis connection, so it uses Upstash's HTTPS REST API:
+
+```
+sm:d:<device id>:in    phone → dashboard   ci (check-in)
+```
+
+- Pairing (`POST /device/v1/pair`, the only HTTP call a phone makes) creates the ACL user
+  `sm-d-<device id>`, allowed only `RPUSH` and `PING` on that one key. It returns a REST
+  token for it (`ACL RESTTOKEN`, an Upstash extension) and a signing key that Redis never
+  sees. Plain Redis has no REST API, so phones need Upstash.
+- A check-in is `{"t":"ci","body":"<JSON text>","sig":"<hex HMAC-SHA256 of body>"}`, where the
+  body is `{"at": <unix time>, "report": {...}}`. The phone signs the exact text it sends,
+  so the check doesn't depend on two languages serialising JSON the same way.
+- The relay process `BLPOP`s phone inboxes in the same call as server inboxes. It drops
+  check-ins that are unsigned, forged, older than the phone counts as online, or less than
+  30 s after the last one.
+- Pairing again resets the user and the key, which cuts off the old phone. Removing the
+  device deletes the user, and the phone's next push gets a 401, so the app forgets its
+  pairing.
+
 Message types:
 
 | Type | Direction | Fields |

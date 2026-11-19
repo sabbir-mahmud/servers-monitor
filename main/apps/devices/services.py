@@ -13,6 +13,7 @@ from . import pairing
 from .models import (
     AGENT_APP,
     COMPUTERS,
+    PHONES,
     Device,
     DeviceLocation,
     DeviceSample,
@@ -69,10 +70,22 @@ def preview(code: str, info: dict) -> Device:
 
 
 @transaction.atomic
-def pair(code: str, info: dict, ip: str | None) -> tuple[Device, str]:
+def pair(code: str, info: dict, ip: str | None) -> tuple[Device, str, dict | None]:
     """Exchange a pairing code for a device token. The code is used up; a device already
-    paired under this entry (reset, or a replacement phone) loses its old token."""
+    paired under this entry (reset, or a replacement phone) loses its old token.
+
+    A phone also gets its own relay login (apps/agent_api/relay.py), returned third: it
+    checks in through Upstash, never to this dashboard. If that can't be made, nothing
+    changes and the code still works."""
     device = _device_for_code(code, info, lock=True)
+    relay_login = None
+    if device.platform in PHONES:
+        from apps.agent_api import relay
+
+        try:
+            relay_login = relay.provision_device(device)  # sets device.relay_salt
+        except relay.RelayError as exc:
+            raise PairingError(f"This dashboard can't take phones right now: {exc}.", 503) from exc
     raw, token_hash = pairing.new_token()
     now = timezone.now()
     device.token_hash = token_hash
@@ -85,7 +98,7 @@ def pair(code: str, info: dict, ip: str | None) -> tuple[Device, str]:
 
     record(None, "device.pair", target=device.name, account=device.account, from_ip=ip,
            platform=device.platform, model=device.model)  # fmt: skip
-    return device, raw
+    return device, raw, relay_login
 
 
 def _article(word: str) -> str:

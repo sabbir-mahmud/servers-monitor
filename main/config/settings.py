@@ -266,6 +266,9 @@ if not REDIS_URL and not DEBUG and "test" not in sys.argv and "pytest" not in sy
 RELAY_KEY_PREFIX = config("RELAY_KEY_PREFIX", default="sm")
 # Host agents should use if it differs from REDIS_URL's (rare: a different DNS name).
 RELAY_PUBLIC_HOST = config("RELAY_PUBLIC_HOST", default="")
+# Phones reach the relay over Upstash's HTTPS REST API: https://<the Upstash host> unless
+# set here. Without Upstash, phones can't be paired.
+RELAY_REST_URL = config("RELAY_REST_URL", default="")
 # How long the bridge blocks waiting for agent messages per Redis command. Longer = fewer
 # billed commands when idle; new servers are noticed within this many seconds.
 RELAY_BLOCK_SECONDS = config("RELAY_BLOCK_SECONDS", default=60, cast=int)

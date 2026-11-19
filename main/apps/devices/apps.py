@@ -5,3 +5,6 @@ class DevicesConfig(AppConfig):
     name = "apps.devices"
     label = "devices"
     verbose_name = "Devices"
+
+    def ready(self) -> None:
+        from . import signals  # noqa: F401

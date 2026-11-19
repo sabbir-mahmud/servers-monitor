@@ -23,6 +23,11 @@
 Clients that send `Accept: text/plain` (the shell installer) get the same fields as
 `key=value` lines instead of JSON, nested objects flattened with `_` (`device_name=…`).
 
+Phones check in through the Redis relay instead (Upstash REST): pairing a phone also
+returns "relay": {"url", "token", "inbox", "key"}, its own Redis login allowed only to RPUSH
+signed check-ins to its inbox (apps/agent_api/relay.py, bridge.py `handle_device`).
+`/checkin` serves the computer agent and scripts.
+
 Token auth only, never the session cookie, so these are CSRF-exempt safely. A 401 from
 check-in means the device was removed or paired again elsewhere: the app should forget
 its token and show the pairing screen.
@@ -116,7 +121,7 @@ def pair(request):
                 request,
                 {"disclosure": _disclosure(device, data), "device": _device_json(device)},
             )
-        device, token = services.pair(code, data, client_ip(request))
+        device, token, relay_login = services.pair(code, data, client_ip(request))
     except services.PairingError as exc:
         return _error(request, exc.status, str(exc))
     return _respond(
@@ -126,6 +131,8 @@ def pair(request):
             "device": _device_json(device),
             "checkin_seconds": device.checkin_seconds,
             "disclosure": _disclosure(device, data),
+            # Phones: check in by RPUSHing signed messages here (Upstash REST), not /checkin.
+            **({"relay": relay_login} if relay_login else {}),
         },
         status=201,
     )

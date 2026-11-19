@@ -57,6 +57,26 @@ def server_key(server) -> bytes | None:
     return key_for(server.pk, server.signing_salt) if server.signing_salt else None
 
 
+def device_key(device, secret: str | None = None) -> bytes | None:
+    """A phone's key, in its own namespace so it can never equal a server's."""
+    if not device.relay_salt:
+        return None
+    return key_for(f"device:{device.pk}", device.relay_salt, secret)
+
+
+def verify_from_device(device, body: str, sig) -> bool:
+    """Phone → dashboard. The phone signs the exact JSON text it sends (`body`), so nothing
+    depends on two languages serialising JSON the same way."""
+    if not isinstance(sig, str) or not device.relay_salt:
+        return False
+    for secret in (settings.SECRET_KEY, *settings.SECRET_KEY_FALLBACKS):
+        key = device_key(device, secret)
+        expected = hmac.new(key, body.encode(), hashlib.sha256).hexdigest()
+        if hmac.compare_digest(sig, expected):
+            return True
+    return False
+
+
 def verify_from_server(server, message: dict) -> bool:
     """Agent → dashboard. Also accepts keys derived from SECRET_KEY_FALLBACKS, so a key
     rotation doesn't silently drop every heartbeat while agents are being re-keyed."""

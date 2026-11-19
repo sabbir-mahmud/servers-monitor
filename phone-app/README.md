@@ -5,12 +5,19 @@ SDK 58 (React Native 0.88). Release builds are made on EAS: project
 [`@sabbirmahmud/nexguard`](https://expo.dev/accounts/sabbirmahmud/projects/nexguard).
 
 It scans the QR code on the dashboard's pair page (or takes the address and code typed
-in). It then shows exactly what the account will see, and pairs only on **Allow**.
-Afterwards it reports to `POST /device/v1/checkin`: battery, free and total storage,
-network (Wi-Fi, mobile data or offline), model and system version, and location if the
-person allowed it. It reports while open, each time it's opened, and from the background
-when the system allows (at most every 15 minutes). The token is kept in the Keychain /
-Keystore (`expo-secure-store`).
+in). It then shows exactly what the account will see, and pairs only on **Allow**. That's
+the only time it talks to the dashboard. Afterwards it reports battery, free and total
+storage, network (Wi-Fi, mobile data or offline), model and system version, and location
+if the person allowed it.
+
+**Check-ins go through the Redis relay, not to the dashboard.** Pairing gives the phone its
+own Upstash login (a REST token for an ACL user allowed only to `RPUSH` to
+`sm:d:<id>:in`) and a signing key. Each check-in is signed (HMAC-SHA256, `@noble/hashes`)
+and pushed over HTTPS to Upstash. The dashboard's relay process picks it up within a
+minute. So the phone reports from anywhere, and the dashboard needn't be reachable from
+the internet. It reports while open, each time it's opened, and from the background when
+the system allows (at most every 15 minutes). The token, login and key are kept in the
+Keychain / Keystore (`expo-secure-store`).
 
 ## Android: build it, and the dashboard hands it out
 
@@ -90,8 +97,9 @@ connects to self-hosted servers whose address the person types in.
 | `src/PairScreen.tsx` | QR scan or typed code, then the disclosure, then pair on *Allow* |
 | `src/StatusScreen.tsx` | Last report, readings, *Report now*, *Share location*, *Unpair* |
 | `src/checkin.ts` | One check-in (shared by the timer and the background task). A 401 forgets the pairing |
+| `src/relay.ts` | Signs a check-in and `RPUSH`es it to Upstash over REST |
 | `src/report.ts` | Battery, storage, network, location, each best effort |
-| `src/api.ts` | `/device/v1/pair` (preview and real) and `/device/v1/checkin` |
+| `src/api.ts` | `/device/v1/pair` (preview and real), the only dashboard call |
 | `src/pairLink.ts` | Parses `nexguard://pair?server=…&code=…` and checks codes and addresses |
 | `src/session.ts` | The pairing in `expo-secure-store` |
 
