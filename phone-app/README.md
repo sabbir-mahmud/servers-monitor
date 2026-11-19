@@ -73,9 +73,13 @@ build. EAS asks you to register each iPhone first (`eas device:create`).
 Expo Go runs nothing in the background, so there it reports only while open. The EAS
 builds don't have that limit. The status screen says which one is running.
 
-**Release builds and `http://`.** Android and iOS block plain `http://` in release builds,
-so the EAS build needs the dashboard on `https://` (`DASHBOARD_URL`). Only Expo Go allows
-`http://`, for development.
+**`http://` dashboards.** The release builds connect to `http://` as well as `https://`,
+because a self-hosted dashboard often runs on plain `http://` on a home network. This
+turns on cleartext traffic on Android (`expo-build-properties`) and sets
+`NSAllowsArbitraryLoads` on iOS. Over `http://` the device token and the readings cross
+the network unencrypted, so use `https://` for a dashboard reachable from the internet.
+App Store review may ask why `NSAllowsArbitraryLoads` is on. The answer is that it
+connects to self-hosted servers whose address the person types in.
 
 ## Layout
 

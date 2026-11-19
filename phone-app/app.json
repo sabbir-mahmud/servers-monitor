@@ -8,7 +8,13 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "io.nexguard.phone"
+      "bundleIdentifier": "io.nexguard.phone",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsLocalNetworking": true
+        }
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -43,7 +49,15 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "NexGuard shares this phone’s location with the account you paired it with, as shown before you allowed it."
+          "locationWhenInUsePermission": "NexGuard shares this phone\u2019s location with the account you paired it with, as shown before you allowed it."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
         }
       ]
     ],

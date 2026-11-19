@@ -40,12 +40,7 @@ async function post<T>(server: string, path: string, body: object, token?: strin
       signal: controller.signal,
     });
   } catch {
-    // Release builds block plain http:// (Android and iOS); only Expo Go allows it.
-    const hint =
-      !__DEV__ && server.startsWith('http://')
-        ? ' This app only connects to https:// dashboards.'
-        : " Check the address and the phone's connection.";
-    throw new ApiError(`Can't reach ${server}.${hint}`, 0);
+    throw new ApiError(`Can't reach ${server}. Check the address and the phone's connection.`, 0);
   } finally {
     clearTimeout(timer);
   }

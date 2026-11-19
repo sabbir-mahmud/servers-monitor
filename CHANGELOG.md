@@ -90,7 +90,8 @@ names); upgrading gets the relay backlog fixes below.
   Built with EAS (`phone-app/eas.json`). `make phone-app-apk` builds the Android `.apk`,
   which the dashboard serves at `/d/app/NexGuard.apk` (`PHONE_APP_DIR`). The Android pair
   page shows a QR code for the phone's camera to download it. iPhones get `IOS_APP_URL`
-  (TestFlight or the App Store). `make phone-app` runs it in Expo Go for development. The
+  (TestFlight or the App Store). The release builds also connect to plain `http://`
+  dashboards (home networks). `make phone-app` runs it in Expo Go for development. The
   phone pair page warns when the dashboard's address is `127.0.0.1`, which a phone can't
   reach.
 - Device agent 0.2.0 keeps its own log in `logs/nexguard.log` next to its config: one JSON
