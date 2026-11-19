@@ -5,7 +5,7 @@ from django import forms
 
 from apps.tenants.scoping import AccountFormMixin
 
-from .models import DnsType, Kind, Method, Monitor
+from .models import DnsType, Kind, Method, Monitor, StatusPage
 
 ALL = {k.value for k in Kind}
 PROBED = ALL - {Kind.HEARTBEAT}
@@ -303,3 +303,30 @@ class MonitorForm(AccountFormMixin, forms.ModelForm):
         for key in ("failure_threshold", "interval_seconds", "method", "keyword"):
             setattr(self.instance, key, data.get(key, getattr(self.instance, key)))
         return data
+
+
+class StatusPageForm(AccountFormMixin, forms.ModelForm):
+    class Meta:
+        model = StatusPage
+        fields = ["title", "slug", "intro", "monitors", "show_incidents", "is_published"]
+        labels = {
+            "title": "Title",
+            "slug": "Address",
+            "intro": "A line under the title",
+            "monitors": "Applications on the page",
+            "show_incidents": "Show the last 14 days of incidents",
+            "is_published": "Published (anyone with the link can see it)",
+        }
+        help_texts = {
+            "intro": 'Optional. For example: "Live status of Acme\'s website and API."',
+            "monitors": "Only their names and up/down state are shown: never URLs or errors.",
+        }
+        widgets = {"monitors": forms.CheckboxSelectMultiple}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["monitors"].queryset = Monitor.objects.order_by("name")
+        self.scope_choices()
+        from apps.tenants.forms import _style
+
+        _style(self)

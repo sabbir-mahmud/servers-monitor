@@ -158,6 +158,7 @@ def alert_json(a: Alert) -> dict:
         "message": a.message,
         "server": str(a.server_id) if a.server_id else None,
         "monitor": str(a.monitor_id) if a.monitor_id else None,
+        "device": str(a.device_id) if a.device_id else None,
         "opened_at": _ts(a.opened_at),
         "resolved_at": _ts(a.resolved_at),
         "acknowledged_at": _ts(a.acknowledged_at),

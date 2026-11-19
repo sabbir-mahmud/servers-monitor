@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Status pages{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'monitors:list' %}">{% icon "arrow-left" 15 %} Applications</a>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Status pages</h1>
+    <p class="page-sub">Public pages for your users: which applications are up, 90 days of uptime, incidents and planned maintenance. Served by this dashboard; nothing to publish.</p>
+  </div>
+  {% if perms.monitors.change_monitor %}<a class="btn btn-primary" href="{% url 'monitors:status_page_create' %}">{% icon "plus" %} New status page</a>{% endif %}
+</div>
+<div class="card"><div class="table-responsive"><table class="table align-middle">
+  <thead><tr><th>Page</th><th>Applications</th><th>Address</th><th></th></tr></thead>
+  <tbody>
+  {% for p in object_list %}
+    <tr>
+      <td class="fw-medium">{% if perms.monitors.change_monitor %}<a class="row-link" href="{% url 'monitors:status_page_update' p.pk %}">{{ p.title }}</a>{% else %}{{ p.title }}{% endif %}{% if not p.is_published %} <span class="chip ms-1">Draft</span>{% endif %}</td>
+      <td class="small">{% for m in p.monitors.all %}{{ m.name }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
+      <td><a href="{{ p.get_absolute_url }}" target="_blank" rel="noopener"><code>{{ p.get_absolute_url }}</code></a></td>
+      <td class="text-end">{% if perms.monitors.change_monitor %}<a class="btn btn-sm btn-outline-secondary" href="{% url 'monitors:status_page_update' p.pk %}">{% icon "edit" %} Edit</a>{% endif %}</td>
+    </tr>
+  {% empty %}
+    <tr><td colspan="4" class="empty">{% icon "globe" 28 %}<div class="empty-title">No status pages yet</div><div>Make one to tell your users what's up without them asking.</div></td></tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+{% endblock %}

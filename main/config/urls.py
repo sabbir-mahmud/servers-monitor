@@ -11,6 +11,7 @@ from apps.core import pwa
 from apps.core import views as core_views
 from apps.devices import connect as device_connect
 from apps.devices.urls import api_urlpatterns as device_api_urls
+from apps.monitors import views as monitor_views
 from apps.tenants import views as tenant_views
 from apps.users import views as user_views
 
@@ -76,6 +77,7 @@ urlpatterns = [
     path("d/agent/<str:name>", device_connect.agent_file, name="device_agent_file"),
     path("d/app/NexGuard.apk", device_connect.android_app, name="phone_app_android"),
     path("d/<str:code>/", device_connect.page, name="device_connect"),
+    path("status/<slug:slug>/", monitor_views.public_status_page, name="status_page"),
     path(
         "d/<str:code>/install.sh",
         device_connect.install_script,

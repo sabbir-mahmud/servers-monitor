@@ -14,8 +14,8 @@ from apps.fleet.views import MUTE_CHOICES
 from apps.tenants.scoping import AccountScopedMixin, get_scoped_or_404, scoped
 
 from . import checker, stats
-from .forms import MonitorForm
-from .models import Monitor, MonitorStatus
+from .forms import MonitorForm, StatusPageForm
+from .models import Monitor, MonitorStatus, StatusPage
 
 
 class MonitorListView(StaffViewMixin, AccountScopedMixin, HtmxTemplateMixin, ListView):
@@ -260,3 +260,86 @@ class MonitorToggleView(StaffViewMixin, View):
             request, f"{monitor.name} {'resumed' if monitor.is_enabled else 'paused'}."
         )
         return redirect(safe_next(request, reverse("monitors:detail", args=[pk])))
+
+
+# --------------------------------------------------------------------------- status pages
+
+
+class StatusPageListView(StaffViewMixin, AccountScopedMixin, ListView):
+    permission_required = "monitors.view_monitor"
+    model = StatusPage
+    template_name = "monitors/status_pages.html"
+
+    def get_queryset(self):
+        return super().get_queryset().prefetch_related("monitors")
+
+
+class _StatusPageForm:
+    model = StatusPage
+    form_class = StatusPageForm
+    template_name = "monitors/status_page_form.html"
+    success_url = reverse_lazy("monitors:status_pages")
+
+
+class StatusPageCreateView(StaffViewMixin, AccountScopedMixin, _StatusPageForm, CreateView):
+    permission_required = "monitors.change_monitor"
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        record(self.request, "status_page.create", target=self.object.title)
+        messages.success(self.request, f"{self.object.title} created.")
+        return response
+
+
+class StatusPageUpdateView(StaffViewMixin, AccountScopedMixin, _StatusPageForm, UpdateView):
+    permission_required = "monitors.change_monitor"
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        record(self.request, "status_page.update", target=self.object.title,
+               fields=form.changed_data)  # fmt: skip
+        messages.success(self.request, f"{self.object.title} saved.")
+        return response
+
+
+class StatusPageDeleteView(StaffViewMixin, AccountScopedMixin, DeleteView):
+    permission_required = "monitors.change_monitor"
+    model = StatusPage
+    template_name = "confirm_delete.html"
+    success_url = reverse_lazy("monitors:status_pages")
+    extra_context = {"delete_label": "Delete status page"}
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(
+            cancel_url=reverse("monitors:status_pages"),
+            delete_note="Its link stops working at once. The applications are unaffected.",
+            **kwargs,
+        )
+
+    def form_valid(self, form):
+        record(self.request, "status_page.delete", target=self.object.title)
+        return super().form_valid(form)
+
+
+def public_status_page(request, slug):
+    """The public page: no sign-in. A draft is visible only to the account's own members."""
+    from django.http import Http404
+    from django.shortcuts import render
+
+    from . import status_pages
+
+    page = StatusPage.objects.filter(slug=slug).first()
+    if page is None:
+        raise Http404
+    if not page.is_published:
+        member = (request.user.is_authenticated
+                  and getattr(request, "account", None) is not None
+                  and request.account.pk == page.account_id)  # fmt: skip
+        if not member:
+            raise Http404
+    ctx = status_pages.context(page)
+    ctx["AUTH_PAGE"] = True
+    response = render(request, "monitors/status_public.html", ctx)
+    response["Cache-Control"] = "public, max-age=60"
+    response["X-Robots-Tag"] = "noindex"
+    return response

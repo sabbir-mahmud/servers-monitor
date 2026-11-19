@@ -42,9 +42,10 @@
     <div class="collapse d-lg-flex sidebar-body" id="sidenav">
       <nav class="side-nav" aria-label="Main">
         {% if perms.tenants.view_person %}
-        <a class="side-link {% if url_name == 'people' or 'person' in url_name or ns == 'devices' %}active{% endif %}" href="{% url 'tenants:people' %}" {% if url_name == 'people' %}aria-current="page"{% endif %}>{% icon "users" %}<span class="side-text">{{ ACCOUNT.people_label }}</span>
+        <a class="side-link {% if url_name == 'people' or 'person' in url_name or ns == 'devices' and 'place' not in url_name %}active{% endif %}" href="{% url 'tenants:people' %}" {% if url_name == 'people' %}aria-current="page"{% endif %}>{% icon "users" %}<span class="side-text">{{ ACCOUNT.people_label }}</span>
           {% if NAV.people_attention %}<span class="nav-badge is-critical" title="{{ NAV.people_attention }} need a look">{{ NAV.people_attention }}</span>{% elif NAV.people %}<span class="nav-badge">{{ NAV.people }}</span>{% endif %}</a>
         {% endif %}
+        {% if perms.devices.view_device and ACCOUNT.kind != "solo" %}<a class="side-link {% if 'place' in url_name %}active{% endif %}" href="{% url 'devices:places' %}" {% if 'place' in url_name %}aria-current="page"{% endif %}>{% icon "map-pin" %}<span class="side-text">Places</span></a>{% endif %}
         {% if perms.fleet.view_server %}<a class="side-link {% if ns == 'fleet' or ns == 'devices' and ACCOUNT.kind == 'solo' %}active{% endif %}" href="{% url 'fleet:dashboard' %}" {% if url_name == 'dashboard' and ns == 'fleet' %}aria-current="page"{% endif %}>{% icon "server" %}<span class="side-text">{{ MACHINES|capfirst }}</span>
           {% if NAV.servers_offline %}<span class="nav-badge is-critical" title="{{ NAV.servers_offline }} offline">{{ NAV.servers_offline }}</span>{% elif NAV.servers %}<span class="nav-badge">{{ NAV.servers }}</span>{% endif %}</a>{% endif %}
         {% if perms.monitors.view_monitor %}<a class="side-link {% if ns == 'monitors' %}active{% endif %}" href="{% url 'monitors:list' %}" {% if ns == 'monitors' %}aria-current="page"{% endif %}>{% icon "globe" %}<span class="side-text">Applications</span>

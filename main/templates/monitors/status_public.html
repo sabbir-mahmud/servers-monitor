@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}{{ page.title }}{% endblock %}
+{% block auth %}
+<div class="status-public">
+  <header class="status-head">
+    <h1 class="status-title">{{ page.title }}</h1>
+    {% if page.intro %}<p class="status-intro">{{ page.intro }}</p>{% endif %}
+    {% if not page.is_published %}<p class="chip">Draft: only your account can see this</p>{% endif %}
+  </header>
+
+  <div class="status-banner status-banner-{{ overall }}" role="status">
+    {% if overall == "up" %}{% icon "check" 20 %} All systems operational
+    {% elif overall == "maintenance" %}{% icon "wrench" 20 %} Maintenance in progress
+    {% elif overall == "slow" %}{% icon "alert" 20 %} Some systems are slow
+    {% else %}{% icon "alert" 20 %} {% if down == 1 %}One system is down{% else %}{{ down }} systems are down{% endif %}{% endif %}
+  </div>
+
+  {% for w in windows %}
+  <div class="card status-card"><div class="card-body">
+    <div class="fw-semibold">{% icon "wrench" 15 %} {{ w.title }}</div>
+    <div class="small text-body-secondary">{% if w.starts_at <= now %}Under way, until {{ w.ends_at|date:"M j, H:i" }}{% else %}Planned {{ w.starts_at|date:"M j, H:i" }} – {{ w.ends_at|date:"M j, H:i" }}{% endif %} {{ TIME_ZONE_NAME }}</div>
+  </div></div>
+  {% endfor %}
+
+  <div class="card status-card">
+    {% for r in rows %}
+    <div class="status-row">
+      <div class="status-row-head">
+        <span class="fw-semibold">{{ r.name }}</span>
+        <span class="status-state status-state-{{ r.state }}">{% if r.state == "up" %}Operational{% elif r.state == "down" %}Down{% elif r.state == "slow" %}Slow{% elif r.state == "paused" %}Paused{% else %}Checking{% endif %}</span>
+      </div>
+      <div class="ubar ubar-tall" role="img" aria-label="Daily uptime, last {{ days }} days">{% for b in r.bar %}<i class="ubar-{{ b.state }}" title="{{ b.day|date:'M j' }}: {% if b.pct is None %}no data{% else %}{{ b.pct }}% up{% endif %}"></i>{% endfor %}</div>
+      <div class="status-row-foot"><span>{{ days }} days ago</span><span>{% if r.uptime is not None %}{{ r.uptime }}% uptime{% endif %}</span><span>Today</span></div>
+    </div>
+    {% empty %}<div class="empty">Nothing to show yet.</div>{% endfor %}
+  </div>
+
+  {% if page.show_incidents %}
+  <h2 class="status-sub">Past 14 days</h2>
+  <div class="card status-card">
+    {% for i in incidents %}
+    <div class="status-incident">
+      <div class="fw-semibold">{{ i.name }} {% if i.resolved_at %}was down{% else %}is down{% endif %}</div>
+      <div class="small text-body-secondary">{{ i.opened_at|date:"M j, H:i" }}{% if i.resolved_at %} – {{ i.resolved_at|date:"H:i" }}, {% else %}, ongoing, {% endif %}{% if i.minutes < 1 %}under a minute{% elif i.minutes < 120 %}{{ i.minutes }} min{% else %}{% widthratio i.minutes 60 1 %} h{% endif %}</div>
+    </div>
+    {% empty %}<div class="status-incident text-body-secondary">No incidents.</div>{% endfor %}
+  </div>
+  {% endif %}
+  <footer class="status-foot">Times in {{ TIME_ZONE_NAME }} · Updated {{ now|date:"H:i" }}</footer>
+</div>
+{% endblock %}

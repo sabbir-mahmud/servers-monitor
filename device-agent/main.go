@@ -93,7 +93,10 @@ func main() {
 			err = svc.Install(Version)
 		}
 	case "uninstall":
-		err = svc.Uninstall(agent.Forget)
+		err = svc.Uninstall(func() {
+			agent.Goodbye(Version)
+			agent.Forget()
+		})
 	case "status":
 		err = status()
 	case "checkin":

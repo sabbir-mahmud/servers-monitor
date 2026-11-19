@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}{% if object %}Edit {{ object.name }}{% else %}Add a place{% endif %}{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'devices:places' %}">{% icon "arrow-left" 15 %} Places</a>
+<div class="page-head"><div>
+  <h1 class="page-title">{% if object %}Edit {{ object.name }}{% else %}Add a place{% endif %}</h1>
+  <p class="page-sub">Get told when someone arrives or leaves, or hasn't arrived on time. Works with devices that share their location. Times are in {{ TIME_ZONE_NAME }}.</p>
+</div></div>
+<form method="post" novalidate style="max-width: 48rem">{% csrf_token %}
+  {% if form.non_field_errors %}<div class="alert alert-danger" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+  <div class="card mb-3"><div class="card-header">{% icon "map-pin" 17 %} Where</div><div class="card-body form-section">
+    {% include "alerts/_field.html" with field=form.name %}
+    {% include "alerts/_field.html" with field=form.location %}
+    {% if form.from_device.field.queryset.exists %}{% include "alerts/_field.html" with field=form.from_device %}{% endif %}
+    {% include "alerts/_field.html" with field=form.radius_m %}
+  </div></div>
+  <div class="card mb-3"><div class="card-header">{% icon "bell" 17 %} What to tell you</div><div class="card-body form-section">
+    {% include "alerts/_field.html" with field=form.notify_arrive %}
+    {% include "alerts/_field.html" with field=form.notify_leave %}
+    <div>
+      <span class="form-label d-block">{{ form.people.label }}</span>
+      <div class="check-grid">{% for cb in form.people %}<label class="check-tile">{{ cb.tag }} <span class="check-tile-name">{{ cb.choice_label }}</span></label>{% empty %}<span class="muted small">Nobody added yet.</span>{% endfor %}</div>
+      <div class="form-text">{{ form.people.help_text }}</div>
+      {% for e in form.people.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+    </div>
+    <div class="row g-3">
+      <div class="col-sm-4">{% include "alerts/_field.html" with field=form.arrive_by %}</div>
+      <div class="col-sm-8">
+        <span class="form-label d-block">{{ form.arrive_days.label }}</span>
+        <div class="check-grid">{% for cb in form.arrive_days %}<label class="check-tile">{{ cb.tag }} <span class="check-tile-name">{{ cb.choice_label }}</span></label>{% endfor %}</div>
+        {% for e in form.arrive_days.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+      </div>
+    </div>
+  </div></div>
+  <div class="d-flex gap-2">
+    <button class="btn btn-primary">{% icon "check" %} {% if object %}Save{% else %}Add place{% endif %}</button>
+    <a class="btn btn-link" href="{% url 'devices:places' %}">Cancel</a>
+    {% if object %}<a class="btn btn-link text-critical ms-auto" href="{% url 'devices:place_delete' object.pk %}">{% icon "trash" %} Delete</a>{% endif %}
+  </div>
+</form>
+{% endblock %}

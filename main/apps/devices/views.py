@@ -8,7 +8,7 @@ from django.db.models import Sum
 from django.shortcuts import redirect
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
-from django.views.generic import CreateView, DeleteView, DetailView, UpdateView
+from django.views.generic import CreateView, DeleteView, DetailView, ListView, UpdateView
 
 from apps.audit.services import record
 from apps.core import crypto
@@ -17,8 +17,8 @@ from apps.tenants.models import Person
 from apps.tenants.scoping import AccountScopedMixin, scoped
 
 from . import activity, connect, maps, services
-from .forms import DeviceControlsForm, DeviceForm
-from .models import COMPUTERS, Device, DeviceControls
+from .forms import DeviceControlsForm, DeviceForm, PlaceForm
+from .models import COMPUTERS, Device, DeviceControls, DevicePlace, Place
 
 CODE_SESSION_KEY = "device-code:{}"
 
@@ -311,4 +311,76 @@ class DeviceDeleteView(StaffViewMixin, AccountScopedMixin, DeleteView):
     def form_valid(self, form):
         record(self.request, "device.delete", target=self.object.name)
         messages.success(self.request, f"{self.object.name} removed.")
+        return super().form_valid(form)
+
+
+# --------------------------------------------------------------------------- places
+
+
+class PlaceListView(StaffViewMixin, AccountScopedMixin, ListView):
+    permission_required = "devices.view_device"
+    model = Place
+    template_name = "devices/places.html"
+
+    def get_queryset(self):
+        return super().get_queryset().prefetch_related("people")
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        inside = {}
+        for s in DevicePlace.objects.filter(place__in=ctx["object_list"], inside=True
+                                            ).select_related("device__person"):  # fmt: skip
+            inside.setdefault(s.place_id, []).append(s)
+        for place in ctx["object_list"]:
+            place.here = inside.get(place.pk, [])
+            place.map = maps.static_map(place.latitude, place.longitude, place.radius_m)
+        return ctx
+
+
+class _PlaceFormMixin:
+    model = Place
+    form_class = PlaceForm
+    template_name = "devices/place_form.html"
+    success_url = reverse_lazy("devices:places")
+
+
+class PlaceCreateView(StaffViewMixin, AccountScopedMixin, _PlaceFormMixin, CreateView):
+    permission_required = "devices.change_device"
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        record(self.request, "place.create", target=self.object.name)
+        messages.success(self.request, f"{self.object.name} added.")
+        return response
+
+
+class PlaceUpdateView(StaffViewMixin, AccountScopedMixin, _PlaceFormMixin, UpdateView):
+    permission_required = "devices.change_device"
+
+    def form_valid(self, form):
+        moved = {"location", "from_device", "radius_m", "people"} & set(form.changed_data)
+        response = super().form_valid(form)
+        if moved:  # start again from the next fix, quietly
+            DevicePlace.objects.filter(place=self.object).delete()
+        record(self.request, "place.update", target=self.object.name, fields=form.changed_data)
+        messages.success(self.request, f"{self.object.name} saved.")
+        return response
+
+
+class PlaceDeleteView(StaffViewMixin, AccountScopedMixin, DeleteView):
+    permission_required = "devices.change_device"
+    model = Place
+    template_name = "confirm_delete.html"
+    success_url = reverse_lazy("devices:places")
+    extra_context = {"delete_label": "Delete place"}
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(
+            cancel_url=reverse("devices:places"),
+            delete_note="Nobody is told about arriving or leaving here any more.", **kwargs
+        )  # fmt: skip
+
+    def form_valid(self, form):
+        record(self.request, "place.delete", target=self.object.name)
+        messages.success(self.request, f"{self.object.name} deleted.")
         return super().form_valid(form)

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}{% if object %}Edit {{ object.title }}{% else %}New status page{% endif %}{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'monitors:status_pages' %}">{% icon "arrow-left" 15 %} Status pages</a>
+<div class="page-head"><div>
+  <h1 class="page-title">{% if object %}Edit {{ object.title }}{% else %}New status page{% endif %}</h1>
+  <p class="page-sub">Anyone with the link can see it once it's published. It shows names and up/down only.</p>
+</div>{% if object %}<a class="btn btn-outline-secondary" href="{{ object.get_absolute_url }}" target="_blank" rel="noopener">{% icon "link" %} Open the page</a>{% endif %}</div>
+<form method="post" novalidate style="max-width: 48rem">{% csrf_token %}
+  {% if form.non_field_errors %}<div class="alert alert-danger" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+  <div class="card mb-3"><div class="card-body form-section">
+    {% include "alerts/_field.html" with field=form.title %}
+    <div>
+      <label class="form-label" for="{{ form.slug.id_for_label }}">{{ form.slug.label }}</label>
+      <div class="input-group"><span class="input-group-text">{{ DASHBOARD_URL|default:"" }}/status/</span>{{ form.slug }}</div>
+      {% for e in form.slug.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+    </div>
+    {% include "alerts/_field.html" with field=form.intro %}
+    <div>
+      <span class="form-label d-block">{{ form.monitors.label }}</span>
+      <div class="check-grid">{% for cb in form.monitors %}<label class="check-tile">{{ cb.tag }} <span class="check-tile-name">{{ cb.choice_label }}</span></label>{% empty %}<span class="muted small">No applications yet.</span>{% endfor %}</div>
+      <div class="form-text">{{ form.monitors.help_text }}</div>
+      {% for e in form.monitors.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+    </div>
+    {% include "alerts/_field.html" with field=form.show_incidents %}
+    {% include "alerts/_field.html" with field=form.is_published %}
+  </div></div>
+  <div class="d-flex gap-2">
+    <button class="btn btn-primary">{% icon "check" %} {% if object %}Save{% else %}Create{% endif %}</button>
+    <a class="btn btn-link" href="{% url 'monitors:status_pages' %}">Cancel</a>
+    {% if object %}<a class="btn btn-link text-critical ms-auto" href="{% url 'monitors:status_page_delete' object.pk %}">{% icon "trash" %} Delete</a>{% endif %}
+  </div>
+</form>
+{% endblock %}

@@ -117,6 +117,11 @@ export function ErrorText({ children }: { children: ReactNode }) {
 }
 
 const styles = StyleSheet.create({
+  sosWrap: { alignItems: 'center', gap: space.sm },
+  sos: { width: 112, height: 112, borderRadius: 56, alignItems: 'center', justifyContent: 'center' },
+  sosText: { fontSize: 28, fontWeight: '800', letterSpacing: 1 },
+  sosSent: { borderWidth: 2, borderRadius: radius.lg, padding: space.lg, gap: space.md },
+  sosSentTitle: { fontSize: type.body, fontWeight: '700' },
   button: {
     minHeight: 50,
     borderRadius: radius.md,
@@ -140,3 +145,53 @@ const styles = StyleSheet.create({
   },
   muted: { fontSize: type.small, lineHeight: 20 },
 });
+
+type SosProps = {
+  state: 'idle' | 'sending' | 'sent';
+  account: string;
+  onSos: () => void;
+  onOk: () => void;
+};
+
+/** Hold for a second and a half to send, so a pocket can't press it. */
+export function SosButton({ state, account, onSos, onOk }: SosProps) {
+  const c = useColors();
+  if (state === 'sent') {
+    return (
+      <View style={[styles.sosSent, { borderColor: c.bad, backgroundColor: c.surface }]}>
+        <Text style={[styles.sosSentTitle, { color: c.bad }]} accessibilityRole="header">
+          SOS sent
+        </Text>
+        <Muted>
+          {account} has been alerted with where this phone is. If you’re safe, tell them.
+        </Muted>
+        <Button label="I’m OK" kind="secondary" onPress={onOk} />
+      </View>
+    );
+  }
+  const sending = state === 'sending';
+  return (
+    <View style={styles.sosWrap}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="SOS"
+        accessibilityHint={`Hold to alert ${account} with your location`}
+        accessibilityState={{ busy: sending }}
+        disabled={sending}
+        delayLongPress={1500}
+        onLongPress={onSos}
+        style={({ pressed }) => [
+          styles.sos,
+          { backgroundColor: c.bad, opacity: sending ? 0.6 : pressed ? 0.8 : 1 },
+        ]}
+      >
+        {sending ? (
+          <ActivityIndicator color={c.onAccent} />
+        ) : (
+          <Text style={[styles.sosText, { color: c.onAccent }]}>SOS</Text>
+        )}
+      </Pressable>
+      <Muted center>Press and hold to alert {account} with your location.</Muted>
+    </View>
+  );
+}

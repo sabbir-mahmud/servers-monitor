@@ -26,6 +26,8 @@ export type Report = ReturnType<typeof deviceInfo> & {
   storage?: { free: number; total: number };
   network?: { type: 'wifi' | 'cellular' | 'ethernet' | 'none' };
   location?: { lat: number; lon: number; accuracy?: number; at: string; source: 'gps' };
+  // Whether location is allowed: turning it off is reported, so it isn't silently lost.
+  permissions?: { location: boolean };
 };
 
 async function battery(): Promise<Report['battery']> {
@@ -60,7 +62,7 @@ async function network(): Promise<Report['network']> {
 }
 
 /** Only with permission already given: a check-in never asks (the pairing screen does). */
-async function location(): Promise<Report['location']> {
+export async function location(): Promise<Report['location']> {
   const { granted } = await Location.getForegroundPermissionsAsync();
   if (!granted) return undefined;
   const fix =
@@ -83,11 +85,13 @@ const settle = <T,>(work: () => Promise<T> | T): Promise<T | undefined> =>
     .catch(() => undefined);
 
 export async function collectReport(): Promise<Report> {
-  const [b, s, n, l] = await Promise.all([
+  const [b, s, n, l, perm] = await Promise.all([
     settle(battery),
     settle(storage),
     settle(network),
     settle(location),
+    settle(() => Location.getForegroundPermissionsAsync()),
   ]);
-  return { ...deviceInfo(), battery: b, storage: s, network: n, location: l };
+  const permissions = perm ? { location: perm.granted } : undefined;
+  return { ...deviceInfo(), battery: b, storage: s, network: n, location: l, permissions };
 }

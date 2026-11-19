@@ -482,3 +482,67 @@ class ActivityBatch(models.Model):
 
     def __str__(self):
         return str(self.batch_id)
+
+
+WEEKDAYS = [(0, "Mon"), (1, "Tue"), (2, "Wed"), (3, "Thu"), (4, "Fri"), (5, "Sat"), (6, "Sun")]
+
+
+class Place(models.Model):
+    """A named circle on the map (Home, School). Devices that report a location there
+    announce arriving and leaving; with `arrive_by`, the chosen people are expected there by
+    that time on the chosen days, and an alert opens if they haven't arrived."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    account = models.ForeignKey("tenants.Account", on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=60)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    radius_m = models.PositiveIntegerField(default=150)
+    notify_arrive = models.BooleanField(default=True)
+    notify_leave = models.BooleanField(default=True)
+    # Whose arrivals and departures count; none = every device in the account.
+    people = models.ManyToManyField("tenants.Person", blank=True, related_name="places")
+    arrive_by = models.TimeField(null=True, blank=True)
+    arrive_days = models.JSONField(default=list, blank=True)  # weekday numbers, Monday = 0
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(fields=["account", "name"], name="place_name_per_account"),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    def get_absolute_url(self):
+        from django.urls import reverse
+
+        return reverse("devices:place_update", args=[self.pk])
+
+    @property
+    def arrive_days_label(self) -> str:
+        days = sorted(self.arrive_days or [])
+        if days == [0, 1, 2, 3, 4]:
+            return "weekdays"
+        if days == list(range(7)):
+            return "every day"
+        return ", ".join(label for n, label in WEEKDAYS if n in days)
+
+
+class DevicePlace(models.Model):
+    """Whether a device is inside a place, as of its last usable location."""
+
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name="place_states")
+    place = models.ForeignKey(Place, on_delete=models.CASCADE, related_name="device_states")
+    inside = models.BooleanField()
+    changed_at = models.DateTimeField()
+    last_arrived_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["device", "place"], name="device_place_unique"),
+        ]
+
+    def __str__(self):
+        return f"{self.device} {'in' if self.inside else 'out of'} {self.place}"

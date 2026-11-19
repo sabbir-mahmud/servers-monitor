@@ -135,3 +135,50 @@ func TestCheckinIsLoggedForThePerson(t *testing.T) {
 		t.Fatal("the pairing token must never be logged")
 	}
 }
+
+// An edited hosts file is reported once with the next check-in, then forgotten.
+func TestEditedBlocklistIsReportedOnce(t *testing.T) {
+	var reports []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/device/v1/checkin":
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			reports = append(reports, body)
+			_, _ = w.Write([]byte(`{"checkin_seconds":300,"controls":{"blocking":"v1"}}`))
+		case "/device/v1/blocklist":
+			_, _ = w.Write([]byte("0.0.0.0 bad.example\n"))
+		}
+	}))
+	defer srv.Close()
+	cfg := paired(t, srv.URL)
+	tamper = nil
+	_ = CheckinOnce(cfg, "test") // first apply: not tampering
+	_ = os.WriteFile(os.Getenv("NEXGUARD_HOSTS"), []byte("127.0.0.1 localhost\n"), 0o644)
+	_ = CheckinOnce(cfg, "test") // notices and puts it back
+	_ = CheckinOnce(cfg, "test") // reports it
+	_ = CheckinOnce(cfg, "test") // and only once
+	got := []any{reports[0]["tamper"], reports[1]["tamper"], reports[2]["tamper"], reports[3]["tamper"]}
+	if got[0] != nil || got[1] != nil || got[3] != nil {
+		t.Fatalf("tamper sent at the wrong time: %v", got)
+	}
+	if list, _ := got[2].([]any); len(list) != 1 || list[0] != "hosts_edited" {
+		t.Fatalf("tamper not reported: %v", got)
+	}
+}
+
+func TestGoodbyeTellsTheDashboard(t *testing.T) {
+	var bye any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		bye = body["bye"]
+		_, _ = w.Write([]byte(`{"checkin_seconds":300}`))
+	}))
+	defer srv.Close()
+	paired(t, srv.URL)
+	Goodbye("test")
+	if bye != "uninstall" {
+		t.Fatalf("bye = %v", bye)
+	}
+}

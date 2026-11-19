@@ -19,6 +19,12 @@ class AlertKind(models.TextChoices):
     DOMAIN = "domain", "Domain expiring"
     CONTAINER = "container", "Container stopped"
     TEMPERATURE = "temperature", "Running hot"
+    # Devices (computers and phones)
+    DEVICE_OFFLINE = "device_offline", "Device not reporting"
+    BATTERY = "battery", "Battery low"
+    PLACE = "place", "Place"
+    SOS = "sos", "SOS"
+    TAMPER = "tamper", "Protection removed"
 
 
 class Severity(models.TextChoices):
@@ -32,12 +38,15 @@ class Alert(models.Model):
     # on it without a join, and a channel only ever hears about its own account.
     account = models.ForeignKey("tenants.Account", on_delete=models.CASCADE, related_name="+")
     # Exactly one of these is set: server alerts come from heartbeats, monitor alerts from
-    # application health checks.
+    # application health checks, device alerts from check-ins and the sweep.
     server = models.ForeignKey(
         "fleet.Server", null=True, blank=True, on_delete=models.CASCADE, related_name="alerts"
     )
     monitor = models.ForeignKey(
         "monitors.Monitor", null=True, blank=True, on_delete=models.CASCADE, related_name="alerts"
+    )
+    device = models.ForeignKey(
+        "devices.Device", null=True, blank=True, on_delete=models.CASCADE, related_name="alerts"
     )
     kind = models.CharField(max_length=20, choices=AlertKind.choices)
     # Distinguishes several open alerts of one kind on one server (the service name).
@@ -45,6 +54,9 @@ class Alert(models.Model):
     severity = models.CharField(max_length=10, choices=Severity.choices)
     message = models.CharField(max_length=300)
     value = models.FloatField(null=True, blank=True)
+    # Something that happened rather than a condition (arrived at School): created already
+    # resolved, announced once, never "resolved" or reminded.
+    is_event = models.BooleanField(default=False)
     opened_at = models.DateTimeField(auto_now_add=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
     acknowledged_by = models.ForeignKey(
@@ -67,9 +79,18 @@ class Alert(models.Model):
                 condition=Q(resolved_at__isnull=True, monitor__isnull=False),
                 name="alert_one_open_per_monitor_kind",
             ),
+            models.UniqueConstraint(
+                fields=["device", "kind", "subject"],
+                condition=Q(resolved_at__isnull=True, device__isnull=False),
+                name="alert_one_open_per_device_subject",
+            ),
             models.CheckConstraint(
-                condition=Q(server__isnull=False) ^ Q(monitor__isnull=False),
-                name="alert_server_xor_monitor",
+                condition=(
+                    Q(server__isnull=False, monitor__isnull=True, device__isnull=True)
+                    | Q(server__isnull=True, monitor__isnull=False, device__isnull=True)
+                    | Q(server__isnull=True, monitor__isnull=True, device__isnull=False)
+                ),
+                name="alert_exactly_one_source",
             ),
         ]
         indexes = [
@@ -82,7 +103,8 @@ class Alert(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.server or self.monitor} {self.get_kind_display()} {self.subject}".strip()
+        source = self.server or self.monitor or self.device
+        return f"{source} {self.get_kind_display()} {self.subject}".strip()
 
     @property
     def is_open(self) -> bool:
@@ -133,6 +155,9 @@ class Channel(models.Model):
     )
     include_servers = models.BooleanField(default=True)
     include_apps = models.BooleanField(default=True)
+    include_devices = models.BooleanField(default=True)
+    weekly_report = models.BooleanField(default=False)
+    last_report_at = models.DateTimeField(null=True, blank=True, editable=False)
     notify_resolved = models.BooleanField(default=True)
     repeat_minutes = models.PositiveIntegerField(
         default=0,
@@ -194,6 +219,8 @@ class Channel(models.Model):
             return False
         if alert.monitor_id and not self.include_apps:
             return False
+        if alert.device_id:
+            return self.include_devices  # devices have no environment
         if self.environments:
             server = alert.server if alert.server_id else getattr(alert.monitor, "server", None)
             # Apps not linked to a server have no environment; they always pass.
@@ -208,6 +235,7 @@ class DeliveryEvent(models.TextChoices):
     REPEAT = "repeat", "Reminder"
     TEST = "test", "Test"
     SYSTEM = "system", "System"
+    REPORT = "report", "Weekly report"
 
 
 class Delivery(models.Model):

@@ -215,25 +215,31 @@ def _job_ping(server: Server, message: dict) -> None:
 
 
 def handle_device(device: Device, message: dict) -> None:
-    """Apply one message from a phone: {"t": "ci", "body": "<JSON text>", "sig": "<hex>"},
-    the body being {"at": <unix time>, "report": {…}}. The phone signs the body text itself.
+    """Apply one message from a phone: {"t": "ci" | "sos", "body": "<JSON text>",
+    "sig": "<hex>"}. A check-in's body is {"at": <unix time>, "report": {…}}; an SOS's is
+    {"at": …, "location": {…}, "cancel": false}. The phone signs the body text itself.
     Never raises on bad input."""
     usage.count_agent_message(message.get("t"))
-    body, sig = message.get("body"), message.get("sig")
-    if message.get("t") != "ci" or not isinstance(body, str):
+    body, sig, kind = message.get("body"), message.get("sig"), message.get("t")
+    if kind not in ("ci", "sos") or not isinstance(body, str):
         logger.warning("Unknown message from phone %s", device.name)
         return
     if not signing.verify_from_device(device, body, sig):
-        logger.warning("Rejected unsigned or forged check-in for phone %s", device.name)
+        logger.warning("Rejected unsigned or forged %s for phone %s", kind, device.name)
         return
     try:
         data = json.loads(body)
     except ValueError:
         return
+    if kind == "sos":
+        if isinstance(data, dict):
+            device_services.sos(device, data)
+        return
     report = data.get("report") if isinstance(data, dict) else None
     if not isinstance(report, dict) or _check_in_stale(device, data.get("at")):
         return
-    if device.last_seen_at and (timezone.now() - device.last_seen_at).total_seconds() < 30:
+    recent = device.last_seen_at and (timezone.now() - device.last_seen_at).total_seconds() < 30
+    if recent and "bye" not in report:
         return  # at most one stored check-in per 30 s, however fast it sends
     try:
         device_services.checkin(device, report, None)

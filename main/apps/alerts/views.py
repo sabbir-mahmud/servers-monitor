@@ -27,7 +27,7 @@ class AlertListView(StaffViewMixin, AccountScopedMixin, HtmxTemplateMixin, ListV
     model = Alert
 
     def get_queryset(self):
-        qs = super().get_queryset().select_related("server", "monitor", "acknowledged_by")
+        qs = super().get_queryset().select_related("server", "monitor", "device", "acknowledged_by")
         state = self.request.GET.get("state", "open")
         if state == "open":
             qs = qs.filter(resolved_at__isnull=True)

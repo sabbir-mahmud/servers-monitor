@@ -7,7 +7,7 @@
     <h1 class="page-title">Applications</h1>
     <p class="page-sub">Websites, ports, hosts, DNS, domains and cron jobs, checked from this dashboard. <span class="live-badge ms-1"><span class="dot"></span>Updates every 15s</span></p>
   </div>
-  {% if perms.monitors.add_monitor %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'monitors:create' %}">{% icon "plus" %} Add monitor</a></div>{% endif %}
+  <div class="page-actions"><a class="btn btn-outline-secondary" href="{% url 'monitors:status_pages' %}">{% icon "globe" %} Status pages</a>{% if perms.monitors.add_monitor %} <a class="btn btn-primary" href="{% url 'monitors:create' %}">{% icon "plus" %} Add monitor</a>{% endif %}</div>
 </div>
 
 {% partialdef board inline %}

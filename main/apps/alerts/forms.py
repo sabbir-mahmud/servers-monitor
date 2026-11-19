@@ -51,6 +51,8 @@ class ChannelForm(AccountFormMixin, forms.ModelForm):
             "environments",
             "include_servers",
             "include_apps",
+            "include_devices",
+            "weekly_report",
             "notify_resolved",
             "repeat_minutes",
             "is_enabled",
@@ -62,6 +64,8 @@ class ChannelForm(AccountFormMixin, forms.ModelForm):
             "min_severity": "Minimum severity",
             "include_servers": "Server alerts (offline, CPU, memory, disk, services)",
             "include_apps": "Application alerts (down, certificate expiring)",
+            "include_devices": "Device alerts (not reporting, battery, places, SOS, tampering)",
+            "weekly_report": "A weekly summary, Sundays at 18:00",
             "notify_resolved": "Also send a message when an alert resolves",
             "is_enabled": "Enabled",
         }
@@ -81,6 +85,8 @@ class ChannelForm(AccountFormMixin, forms.ModelForm):
         self.kind = self.instance.kind or kind or ChannelKind.TELEGRAM
         # UUID primary keys exist before the first save, so ask Django instead of the pk.
         editing = not self.instance._state.adding
+        if not editing:
+            self.fields["weekly_report"].initial = True
         if self.kind == ChannelKind.TELEGRAM:
             del self.fields["webhook_url"]
             self.fields["telegram_token"].help_text = (
@@ -154,8 +160,8 @@ class ChannelForm(AccountFormMixin, forms.ModelForm):
                 self.add_error("webhook_url", problem)
         if self.kind_spec:
             self._clean_config(data)
-        if not data.get("include_servers") and not data.get("include_apps"):
-            raise forms.ValidationError("Choose server alerts, application alerts or both.")
+        if not any(data.get(f) for f in ("include_servers", "include_apps", "include_devices")):
+            raise forms.ValidationError("Choose at least one kind of alert to send.")
         return data
 
     def _clean_config(self, data):

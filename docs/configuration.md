@@ -95,6 +95,7 @@ the defaults when a variable is unset.
 | `ALERT_CPU_PERCENT` | `90` | Open a CPU alert at this 3-sample average. |
 | `ALERT_MEMORY_PERCENT` | `90` | Memory alert threshold. |
 | `ALERT_DISK_PERCENT` | `90` | Fullest-disk alert threshold. |
+| `DEVICE_OFFLINE_ALERT_HOURS` | `4` | A paired computer or phone silent this long opens a "not reporting" alert. Phones may pause for a while to save battery, so keep it in hours. |
 
 Notification channels are configured in the UI, not here.
 

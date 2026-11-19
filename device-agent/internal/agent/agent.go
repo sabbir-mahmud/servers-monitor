@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/activity"
@@ -30,6 +31,51 @@ type Status struct {
 	OK       bool      `json:"ok"`
 	Error    string    `json:"error,omitempty"`
 	Interval int       `json:"interval,omitempty"`
+}
+
+// Tampering noticed since the last check-in (the service runs for days, so memory is
+// enough): sent with the next report, then forgotten once it was delivered.
+var (
+	tamperMu sync.Mutex
+	tamper   []string
+)
+
+func noteTamper(code string) {
+	tamperMu.Lock()
+	defer tamperMu.Unlock()
+	for _, c := range tamper {
+		if c == code {
+			return
+		}
+	}
+	tamper = append(tamper, code)
+}
+
+func takeTamper() []string {
+	tamperMu.Lock()
+	defer tamperMu.Unlock()
+	return append([]string(nil), tamper...)
+}
+
+func clearTamper(sent []string) {
+	tamperMu.Lock()
+	defer tamperMu.Unlock()
+	tamper = tamper[len(sent):]
+}
+
+// Goodbye tells the dashboard this computer's agent is being removed, so the people who
+// look after it hear about it at once instead of "not reporting" hours later. Best effort:
+// an offline computer uninstalls all the same.
+func Goodbye(version string) {
+	cfg, err := config.Load()
+	if err != nil || cfg.Token == "" {
+		return
+	}
+	client := api.New(cfg.Server, "nexguard-agent/"+version)
+	client.HTTP.Timeout = 10 * time.Second
+	if _, err := client.Checkin(cfg.Token, map[string]any{"bye": "uninstall"}); err != nil {
+		slog.Warn("couldn't tell the dashboard about the uninstall", "error", err.Error())
+	}
 }
 
 func statusPath() string { return filepath.Join(config.Dir(), "status.json") }
@@ -66,6 +112,10 @@ func CheckinOnce(cfg *config.Config, version string) error {
 	if activity.CurrentControls().WebActivity {
 		report["web_no_access"] = activity.NoAccess() // [] clears the dashboard's warning
 	}
+	noticed := takeTamper()
+	if len(noticed) > 0 {
+		report["tamper"] = noticed
+	}
 	res, err := client.Checkin(cfg.Token, report)
 	if errors.Is(err, api.ErrUnpaired) {
 		Forget()
@@ -80,6 +130,7 @@ func CheckinOnce(cfg *config.Config, version string) error {
 	if batch != nil {
 		activity.Confirm(batch.ID)
 	}
+	clearTamper(noticed)
 	if res.CheckinSeconds >= 60 && res.CheckinSeconds != cfg.Interval {
 		cfg.Interval = res.CheckinSeconds
 		if err := config.Save(cfg); err != nil {
@@ -132,7 +183,8 @@ func applyControls(client *api.Client, token string, c *api.Controls) error {
 		return block.Remove()
 	}
 	lines := readLines(blocklistPath())
-	if c.Blocking != activity.Applied() || lines == nil {
+	wasApplied := c.Blocking == activity.Applied() && lines != nil
+	if !wasApplied {
 		have := activity.Applied()
 		if lines == nil {
 			have = "" // nothing cached: ask for the full list
@@ -149,6 +201,11 @@ func applyControls(client *api.Client, token string, c *api.Controls) error {
 		}
 	}
 	if block.Fingerprint() != block.FingerprintOf(lines) {
+		if wasApplied { // nothing changed on the dashboard: someone edited the hosts file
+			noteTamper("hosts_edited")
+			slog.Warn("the blocked-sites list was changed outside NexGuard: putting it back",
+				"file", block.Path())
+		}
 		if _, err := block.Apply(lines); err != nil {
 			return fmt.Errorf("couldn't update %s: %w", block.Path(), err)
 		}

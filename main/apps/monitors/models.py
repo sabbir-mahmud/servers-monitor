@@ -335,3 +335,32 @@ class MonitorDaily(models.Model):
 
     def __str__(self):
         return f"{self.monitor_id} {self.day}: {self.up}/{self.total}"
+
+
+class StatusPage(models.Model):
+    """A public, read-only page at /status/<slug>/: chosen applications' current state,
+    90 days of daily uptime, recent incidents and maintenance. No sign-in, no internal
+    detail (no URLs, hosts, error text or server names)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    account = models.ForeignKey("tenants.Account", on_delete=models.CASCADE, related_name="+")
+    title = models.CharField(max_length=80)
+    slug = models.SlugField(
+        max_length=60, unique=True, help_text="The page's address: /status/<this>/."
+    )
+    intro = models.CharField(max_length=300, blank=True)
+    monitors = models.ManyToManyField(Monitor, related_name="status_pages")
+    show_incidents = models.BooleanField(default=True)
+    is_published = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["title"]
+
+    def __str__(self):
+        return self.title
+
+    def get_absolute_url(self):
+        from django.urls import reverse
+
+        return reverse("status_page", args=[self.slug])

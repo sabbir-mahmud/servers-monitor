@@ -25,6 +25,18 @@ export function sealCheckin(login: RelayLogin, report: object, at = Date.now()):
   return JSON.stringify({ t: 'ci', body, sig });
 }
 
+/** An SOS (or its cancel: "I'm OK"), signed the same way: {"t":"sos","body":…,"sig":…}. */
+export function sealSos(
+  login: RelayLogin,
+  location: object | undefined,
+  cancel: boolean,
+  at = Date.now(),
+): string {
+  const body = JSON.stringify({ at: Math.floor(at / 1000), location, cancel });
+  const sig = bytesToHex(hmac(sha256, hexToBytes(login.key), utf8ToBytes(body)));
+  return JSON.stringify({ t: 'sos', body, sig });
+}
+
 /** RPUSH one sealed check-in. A 401 means the login was removed (the phone was removed on
  * the dashboard, or paired again elsewhere). */
 export async function pushCheckin(login: RelayLogin, sealed: string): Promise<void> {

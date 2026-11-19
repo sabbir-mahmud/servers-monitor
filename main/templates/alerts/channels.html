@@ -34,6 +34,8 @@
         <span class="chip">{% if c.min_severity == "critical" %}Critical only{% else %}Warning + critical{% endif %}</span>
         {% if c.include_servers %}<span class="chip">Servers</span>{% endif %}
         {% if c.include_apps %}<span class="chip">Applications</span>{% endif %}
+        {% if c.include_devices %}<span class="chip">Devices</span>{% endif %}
+        {% if c.weekly_report %}<span class="chip">Weekly report</span>{% endif %}
         {% for env in c.environments %}<span class="chip chip-env">{{ env }}</span>{% empty %}<span class="chip">All environments</span>{% endfor %}
         {% if c.notify_resolved %}<span class="chip">+ resolved</span>{% endif %}
         {% if c.repeat_minutes %}<span class="chip">{% icon "refresh" 11 %} every {{ c.repeat_minutes }}m</span>{% endif %}

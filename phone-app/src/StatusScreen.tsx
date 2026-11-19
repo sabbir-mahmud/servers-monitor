@@ -4,11 +4,18 @@ import { useEffect, useState } from 'react';
 import { Alert, AppState, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { backgroundAvailable, checkinNow, stopBackgroundCheckins, type CheckinResult } from './checkin';
+import {
+  backgroundAvailable,
+  checkinNow,
+  sayGoodbye,
+  sendSos,
+  stopBackgroundCheckins,
+  type CheckinResult,
+} from './checkin';
 import type { Report } from './report';
 import { clearSession, type Session } from './session';
 import { space, type, useColors } from './theme';
-import { Button, Card, ErrorText, Muted, Row } from './ui';
+import { Button, Card, ErrorText, Muted, Row, SosButton } from './ui';
 
 function bytes(n: number): string {
   const gb = n / 1e9;
@@ -48,6 +55,7 @@ export function StatusScreen({ session, onUnpaired }: { session: Session; onUnpa
   const [busy, setBusy] = useState(false);
   const [locationOn, setLocationOn] = useState(true);
   const [background, setBackground] = useState<boolean | null>(null);
+  const [sos, setSos] = useState<'idle' | 'sending' | 'sent'>('idle');
 
   // State changes only after the awaits: the effect below calls this too.
   async function report() {
@@ -96,16 +104,32 @@ export function StatusScreen({ session, onUnpaired }: { session: Session; onUnpa
     }
   }
 
+  async function sendHelp(cancel: boolean) {
+    setSos('sending');
+    try {
+      await sendSos(cancel);
+      setSos(cancel ? 'idle' : 'sent');
+      if (cancel) Alert.alert('Sent', `${session.device.account} has been told you’re OK.`);
+    } catch (error) {
+      setSos(cancel ? 'sent' : 'idle');
+      Alert.alert(
+        cancel ? 'Couldn’t send' : 'SOS not sent',
+        error instanceof Error ? error.message : 'Try again, or call for help.',
+      );
+    }
+  }
+
   function unpair() {
     Alert.alert(
       'Stop sharing?',
-      `This phone stops reporting to ${session.device.account}. The dashboard keeps showing it as offline until it's removed there.`,
+      `This phone stops reporting to ${session.device.account}, and they’re told it was unpaired.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Unpair',
           style: 'destructive',
           onPress: async () => {
+            await sayGoodbye();
             await stopBackgroundCheckins();
             await clearSession();
             onUnpaired();
@@ -157,6 +181,13 @@ export function StatusScreen({ session, onUnpaired }: { session: Session; onUnpa
             : `Reports about every ${minutes} minutes while NexGuard is open, and each time you open it. ` +
               'Expo Go can’t run apps in the background; an installed build of NexGuard can.'}
         </Muted>
+
+        <SosButton
+          state={sos}
+          account={d.account}
+          onSos={() => void sendHelp(false)}
+          onOk={() => void sendHelp(true)}
+        />
 
         <Button label="Report now" busy={busy} onPress={() => void check()} />
         <Button label="Unpair this phone" kind="danger" disabled={busy} onPress={unpair} />

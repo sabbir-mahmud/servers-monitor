@@ -7,8 +7,8 @@ import * as BackgroundTask from 'expo-background-task';
 import * as TaskManager from 'expo-task-manager';
 
 import { ApiError } from './api';
-import { pushCheckin, sealCheckin } from './relay';
-import { collectReport, type Report } from './report';
+import { pushCheckin, sealCheckin, sealSos } from './relay';
+import { collectReport, location, type Report } from './report';
 import { clearSession, loadSession } from './session';
 
 export const BACKGROUND_TASK = 'nexguard-checkin';
@@ -46,6 +46,25 @@ async function run(): Promise<CheckinResult | null> {
     const message = error instanceof Error ? error.message : 'The check-in failed.';
     return { ok: false, at: new Date(), message, unpaired };
   }
+}
+
+/** The SOS button: tells everyone on the account at once, with where the phone is. With
+ * `cancel`, "I'm OK": closes the alert. Throws with a message to show when it can't send. */
+export async function sendSos(cancel = false): Promise<void> {
+  const session = await loadSession();
+  if (!session) throw new ApiError('This phone isn’t paired.', 401);
+  const where = cancel ? undefined : await location().catch(() => undefined);
+  await pushCheckin(session.relay, sealSos(session.relay, where, cancel));
+}
+
+/** Unpairing on the phone itself: tell the dashboard first (best effort), so the people
+ * who see this phone hear about it instead of finding it "not reporting" hours later. */
+export async function sayGoodbye(): Promise<void> {
+  const session = await loadSession();
+  if (!session) return;
+  await pushCheckin(session.relay, sealCheckin(session.relay, { bye: 'unpaired' })).catch(
+    () => undefined,
+  );
 }
 
 // Must be defined when the bundle loads (index.ts imports this file), not in a component.

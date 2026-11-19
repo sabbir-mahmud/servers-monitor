@@ -359,6 +359,9 @@ ALERT_DISK_PERCENT = config("ALERT_DISK_PERCENT", default=90, cast=float)
 # Resolve only once the value drops this far below the threshold, so a value hovering at
 # the line doesn't open and close an alert every heartbeat.
 ALERT_HYSTERESIS_PERCENT = 5.0
+# A paired device silent this long opens a "not reporting" alert (phones may legitimately
+# go quiet for a while when the system saves battery, so not minutes).
+DEVICE_OFFLINE_ALERT_HOURS = config("DEVICE_OFFLINE_ALERT_HOURS", default=4, cast=float)
 # CPU alerts on the average of the last N samples: one compile spike is not an incident.
 ALERT_CPU_SAMPLES = 3
 # Notifications are configured in the dashboard (Incidents → Notifications). If set, this

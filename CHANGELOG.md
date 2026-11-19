@@ -12,6 +12,24 @@ working without an upgrade (`server-monitor-agent`, `smctl` and the relay keys k
 names); upgrading gets the relay backlog fixes below.
 
 ### Added
+- **Device alerts**: a computer or phone not reporting for `DEVICE_OFFLINE_ALERT_HOURS`
+  (4), and battery low and not charging (15 %, critical at 5 %). Channels get a "Device
+  alerts" switch, on by default.
+- **Places**: name Home or School on a map (coordinates, a map link, or where a device is
+  now) and hear "Sara arrived at School" and "Sara left Home", plus "hasn't arrived by
+  08:30" on chosen days. Announced once; coarse fixes and edge wobble are ignored.
+- **SOS** in the phone app: press and hold to send a critical alert with a map link to
+  where the phone is, through the relay; "I'm OK" closes it.
+- **Public status pages**, served by the dashboard at `/status/<name>/`: current state, 90
+  days of daily uptime, incidents and maintenance for chosen applications. No sign-in for
+  visitors, nothing to publish, no URLs or error text shown.
+- **Weekly report** to channels that ask for it (on by default for new ones), Sundays at
+  18:00: screen time, top apps and sites and arrivals per person, quiet devices,
+  application uptime and server alerts.
+- **Tamper alerts**: the device agent tells the dashboard when it's uninstalled and when
+  someone edited its blocked-sites list (it puts it back); dropping from the protected
+  service to user mode is reported; a phone reports unpairing on itself and location being
+  turned off. **Rebuild the device agent and the phone app** to get these.
 - **Accounts** of three kinds. **Parent**: children and the people who look after them.
   **Solo developer**: servers, uptime monitors, jobs and the API, just you.
   **Company**: all of that plus a team. Every server, monitor, alert, channel, job, schedule,

@@ -209,5 +209,12 @@ def sweep(now=None) -> dict:
                     f"{server.name} has not reported for {ago}",
                     Severity.CRITICAL,
                 )
+    from apps.devices import places
+
+    from . import device_rules, reports
+
+    devices_silent = device_rules.sweep(now)
+    places.sweep(now)
+    reports.process(now)
     expired = expire_commands(now)
-    return {"offline": went_offline, "expired_commands": expired}
+    return {"offline": went_offline, "devices_silent": devices_silent, "expired_commands": expired}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Places{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Places</h1>
+    <p class="page-sub">Home, School, the office: you're told when someone arrives or leaves, and if they haven't arrived by the time you expect them.</p>
+  </div>
+  {% if perms.devices.change_device %}<a class="btn btn-primary" href="{% url 'devices:place_create' %}">{% icon "plus" %} Add a place</a>{% endif %}
+</div>
+<div class="place-grid">
+{% for p in object_list %}
+  <div class="card place-card">
+    {% if p.map %}{% include "devices/_map.html" with m=p.map label=p.name initials=p.name|initials tone=p.pk|stringformat:"s"|avatar_tone href="" %}{% endif %}
+    <div class="card-body">
+      <div class="d-flex align-items-start justify-content-between gap-2">
+        <div>
+          <div class="fw-semibold">{% if perms.devices.change_device %}<a class="row-link" href="{% url 'devices:place_update' p.pk %}">{{ p.name }}</a>{% else %}{{ p.name }}{% endif %}</div>
+          <div class="row-sub">{{ p.radius_m }} m around the point{% if p.people.all %} · {% for person in p.people.all %}{{ person.name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% else %} · everyone{% endif %}</div>
+        </div>
+      </div>
+      <div class="d-flex flex-wrap gap-1 mt-2">
+        {% if p.notify_arrive %}<span class="chip">Arrivals</span>{% endif %}
+        {% if p.notify_leave %}<span class="chip">Departures</span>{% endif %}
+        {% if p.arrive_by %}<span class="chip">{% icon "clock" 11 %} by {{ p.arrive_by|time:"H:i" }}, {{ p.arrive_days_label }}</span>{% endif %}
+      </div>
+      <div class="small mt-2">{% if p.here %}{% icon "map-pin" 13 %} Here now: {% for s in p.here %}{% if s.device.person %}{{ s.device.person.name }}{% else %}{{ s.device.name }}{% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}{% else %}<span class="text-body-secondary">Nobody here now.</span>{% endif %}</div>
+    </div>
+  </div>
+{% empty %}
+  <div class="card"><div class="empty">{% icon "map-pin" 28 %}<div class="empty-title">No places yet</div><div>Add Home or School to hear when someone arrives or leaves.</div></div></div>
+{% endfor %}
+</div>
+{% endblock %}

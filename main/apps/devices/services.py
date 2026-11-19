@@ -116,7 +116,15 @@ def authenticate(raw_token: str) -> Device | None:
 
 
 def checkin(device: Device, report: dict, ip: str | None) -> None:
+    if report.get("bye") is not None:
+        # The agent is being uninstalled, or the phone unpaired on itself: no readings in
+        # it, only the news.
+        from apps.alerts import device_rules
+
+        device_rules.evaluate_checkin(device, {"bye": report["bye"]}, device.agent_mode)
+        return
     now = timezone.now()
+    was_mode = device.agent_mode
     device.last_seen_at = now
     device.last_ip = ip
     _apply_info(device, report)
@@ -151,11 +159,18 @@ def checkin(device: Device, report: dict, ip: str | None) -> None:
         device.location_accuracy_m, device.location_at = location["accuracy_m"], location["at"]
     device.save()
     _record_sample(device, now)
+    from apps.alerts import device_rules
+
+    device_rules.evaluate_checkin(device, report, was_mode)
     if "activity" in report:
         from . import activity
 
         activity.apply(device, report["activity"])
     if location is not None and record_location:
+        from . import places
+
+        places.evaluate(device, location["latitude"], location["longitude"],
+                        location["accuracy_m"], location["at"])  # fmt: skip
         DeviceLocation.objects.create(
             device=device,
             recorded_at=location["at"],
@@ -351,3 +366,48 @@ def prune_locations(batch_size: int = 5000) -> int:
         if not ids:
             return total
         total += DeviceLocation.objects.filter(pk__in=ids).delete()[0]
+
+
+SOS_MAX_AGE = 15 * 60  # seconds: an older SOS (relay backlog, replay) is not raised
+
+
+def sos(device: Device, data: dict) -> None:
+    """The phone's SOS button: a critical alert on every channel, with where it is. "I'm
+    OK" on the phone (cancel) closes it."""
+    import time
+
+    from apps.alerts import device_rules
+    from apps.alerts.models import Alert, AlertKind, Severity
+
+    sent_at = data.get("at")
+    if isinstance(sent_at, bool) or not isinstance(sent_at, int | float):
+        return
+    if abs(time.time() - sent_at) > SOS_MAX_AGE:
+        return
+    who = device.person.name if device.person_id else device.name
+    if data.get("cancel") is True:
+        device_rules.resolve_alert(device, AlertKind.SOS)
+        return
+    now = timezone.now()
+    where = ""
+    location = _location(data.get("location"), now)
+    if location is not None:
+        device.latitude, device.longitude = location["latitude"], location["longitude"]
+        device.location_accuracy_m, device.location_at = location["accuracy_m"], location["at"]
+        device.save(update_fields=["latitude", "longitude", "location_accuracy_m",
+                                   "location_at"])  # fmt: skip
+        DeviceLocation.objects.create(
+            device=device, recorded_at=location["at"], latitude=location["latitude"],
+            longitude=location["longitude"], accuracy_m=location["accuracy_m"],
+            source=location["source"],
+        )  # fmt: skip
+        lat, lon = location["latitude"], location["longitude"]
+        accuracy = f" (±{location['accuracy_m']} m)" if location["accuracy_m"] else ""
+        where = (f" at {lat:.5f}, {lon:.5f}{accuracy}: https://www.openstreetmap.org/"
+                 f"?mlat={lat:.5f}&mlon={lon:.5f}#map=17/{lat:.5f}/{lon:.5f}")  # fmt: skip
+    elif device.has_location:
+        where = f" (last known location {timezone.localtime(device.location_at):%H:%M})"
+    # Pressed again after someone acknowledged the last one: that's a new emergency.
+    Alert.objects.filter(device=device, kind=AlertKind.SOS, resolved_at=None,
+                         acknowledged_at__isnull=False).update(resolved_at=now)  # fmt: skip
+    device_rules.open_alert(device, AlertKind.SOS, f"SOS from {who}{where}", Severity.CRITICAL)

@@ -128,9 +128,12 @@ def _link(alert) -> str:
     base = settings.DASHBOARD_URL.rstrip("/")
     if not base:
         return ""
+    from django.urls import reverse
+
     if alert.monitor_id:
         return f"{base}/apps/{alert.monitor_id}/"
-    from django.urls import reverse
+    if alert.device_id:
+        return base + reverse("devices:detail", args=[alert.device_id])
 
     return base + reverse("fleet:server_detail", args=[alert.server_id])
 
@@ -142,6 +145,27 @@ def compose(alert: Alert, event: str, note: str = "") -> Message:
         where = f"{alert.server.name} · {alert.server.get_environment_display()}"
     elif alert.monitor_id:
         where = f"{alert.monitor.name} · {alert.monitor.where}"
+    elif alert.device_id:
+        device = alert.device
+        where = device.name + (f" · {device.person.name}" if device.person_id else "")
+    if alert.is_event:
+        icon = {"place": "📍", "tamper": "⚠️"}.get(alert.kind, "ℹ️")
+        title = alert.message
+        head = f"{icon} {title}"
+        tail = f"at {timezone.localtime(alert.opened_at):%H:%M %Z}"
+        link = _link(alert)
+        body = "\n".join(x for x in [where, tail] if x)
+        return Message(
+            title=title, body=body,
+            plain="\n".join(x for x in [head, body, link] if x),
+            html="\n".join(x for x in [f"<b>{html.escape(head)}</b>",
+                                         f"<i>{html.escape(where)}</i>" if where else "",
+                                         html.escape(tail),
+                                         f'<a href="{html.escape(link)}">Open in '
+                                         f'{html.escape(settings.SITE_NAME)}</a>' if link else ""]
+                            if x),
+            url=link, severity="info", event=event, key=f"server-monitor-{alert.pk}",
+        )  # fmt: skip
     if event == DeliveryEvent.RESOLVED:
         title = f"RESOLVED · {alert.get_kind_display()}"
         head = f"✅ {title}"
@@ -306,11 +330,13 @@ def process(now=None) -> int:
     cov = coverage(now)
     sent = 0
     open_alerts = list(
-        Alert.objects.filter(resolved_at__isnull=True).select_related("server", "monitor__server")
+        Alert.objects.filter(resolved_at__isnull=True).select_related(
+            "server", "monitor__server", "device__person"
+        )
     )
     recently_resolved = list(
         Alert.objects.filter(resolved_at__gte=now - timedelta(days=1)).select_related(
-            "server", "monitor__server"
+            "server", "monitor__server", "device__person"
         )
     )
     for channel in channels:
@@ -320,7 +346,8 @@ def process(now=None) -> int:
                 channel=channel, event__in=[DeliveryEvent.OPENED, DeliveryEvent.RESOLVED]
             ).filter(alert__in=[a.pk for a in open_alerts + recently_resolved])
         }
-        for alert in open_alerts:
+        events = [a for a in recently_resolved if a.is_event]
+        for alert in open_alerts + events:
             # Only alerts raised after the channel existed: adding a channel doesn't replay
             # history.
             if alert.opened_at < channel.created_at or not channel.matches(alert):
@@ -334,6 +361,8 @@ def process(now=None) -> int:
                 sent += _attempt(channel, alert, DeliveryEvent.OPENED, None, now, note)
             elif _retry_due(opened, now):
                 sent += _attempt(channel, alert, DeliveryEvent.OPENED, opened, now)
+            elif alert.is_event:
+                continue  # said once
             elif opened.ok and channel.repeat_minutes and alert.acknowledged_at is None:
                 last = (
                     Delivery.objects.filter(channel=channel, alert=alert, ok=True)
@@ -345,6 +374,8 @@ def process(now=None) -> int:
                     sent += _attempt(channel, alert, DeliveryEvent.REPEAT, None, now)
         if channel.notify_resolved:
             for alert in recently_resolved:
+                if alert.is_event:
+                    continue
                 opened = done.get((alert.pk, DeliveryEvent.OPENED))
                 if opened is None or not opened.ok:
                     continue  # never announced (or recovered during maintenance): stay quiet

@@ -150,6 +150,7 @@ Full reference: [docs/agent.md](docs/agent.md).
 
 | Guide | What's inside |
 |---|---|
+| [Features](docs/features.md) | Every feature, grouped by area: accounts, servers, monitors, alerts, computers, phones, API. |
 | [Deployment](docs/deployment.md) | `run.sh`, systemd and Raspberry Pi installs, HTTPS options, backups, upgrades, Redis cost |
 | [Devices](docs/devices.md) | Connecting Windows, Mac and Linux computers with one link, what gets installed, removing |
 | [Agent & smctl](docs/agent.md) | Installing on servers, the allowlist, every `smctl` command, upgrades, troubleshooting |
