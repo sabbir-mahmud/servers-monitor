@@ -54,6 +54,8 @@ def code_on(page: str) -> str:
 
 def api_pair(client, code, platform="android", **extra):
     body = {"code": code, "platform": platform, "model": "Pixel 9", "os_version": "Android 16"}
+    if platform in ("windows", "macos", "linux"):
+        body["client"] = "desktop-app"  # computers pair through the NexGuard app by default
     return client.post(reverse("device_api_pair"), json.dumps({**body, **extra}),
                        content_type="application/json")  # fmt: skip
 

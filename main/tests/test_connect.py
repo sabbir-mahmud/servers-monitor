@@ -1,4 +1,5 @@
-"""Connecting a computer with one link and one pasted line (apps/devices/connect.py)."""
+"""Connecting a computer with one link: through the NexGuard app by default, or with one
+pasted line where the account allows it (apps/devices/connect.py)."""
 
 import json
 import os
@@ -22,26 +23,51 @@ pytestmark = pytest.mark.django_db
 THIS_OS = {"darwin": "macos", "linux": "linux"}.get(sys.platform)
 
 
-def test_pair_page_for_a_computer_gives_a_link_to_open_there(client, parent, sara):
+def test_pair_page_for_a_computer_points_to_the_app_by_default(client, parent, sara):
     client.force_login(parent)
     device, code, page = add_device(client, sara, platform="windows", name="Family PC",
                                     with_page=True)  # fmt: skip
-    assert f"/d/{code}</code>" in page and "Copy link" in page
-    assert f"irm http://testserver/d/{code.replace('-', '')}/install.ps1 | iex" in page
-    assert "curl -fsSL" not in page  # only the Windows line for a Windows PC
+    assert f"/d/{code}</code>" in page and "Copy link" in page  # no ?via=command
+    assert "Install the NexGuard app" in page and "Download NexGuard" in page
+    assert f'id="pair-code">{code}</code>' in page and "http://testserver</code>" in page
+    assert "install.ps1" not in page and "curl -fsSL" not in page
+    assert "connects computers with the NexGuard app only" in page
+    assert "Allow the one-line command too" in page  # the parent owns the account
     assert "Scan the QR code" not in page and "python3" not in page
 
 
-def test_link_page_needs_no_sign_in_and_shows_every_system(client):
+def test_pair_page_offers_the_one_line_command_when_the_account_allows_it(
+    client, parent, sara, family
+):
+    family.computer_pairing = "app_or_command"
+    family.save()
+    client.force_login(parent)
+    device, code, page = add_device(client, sara, platform="windows", name="Family PC",
+                                    with_page=True)  # fmt: skip
+    assert f"/d/{code}?via=command</code>" in page and "Download NexGuard" in page
+    assert f"irm http://testserver/d/{code.replace('-', '')}/install.ps1 | iex" in page
+    assert "curl -fsSL" not in page  # only the Windows line for a Windows PC
+    assert "app only" not in page
+
+
+def test_link_page_needs_no_sign_in_and_opens_the_app(client):
     resp = client.get("/d/K7PQ-3MXA/")
     page = resp.content.decode()
     assert resp.status_code == 200 and "Connect this computer" in page
-    assert "irm http://testserver/d/K7PQ3MXA/install.ps1 | iex" in page
-    assert "curl -fsSL http://testserver/d/K7PQ3MXA/install.sh | sh" in page
-    assert "Open PowerShell" in page and "Open Terminal" in page
+    assert 'href="nexguard://pair?server=http%3A%2F%2Ftestserver&amp;code=K7PQ3MXA"' in page
+    assert "Download NexGuard" in page and "<code>K7PQ-3MXA</code>" in page
+    assert "K7PQ3MXA/install" not in page
     # The code is in the URL: not cached, not indexed, not sent on as a Referer.
     assert resp["Cache-Control"] == "no-store" and resp["Referrer-Policy"] == "no-referrer"
     assert "noindex" in resp["X-Robots-Tag"]
+
+
+def test_link_page_shows_every_systems_command_when_offered(client):
+    page = client.get("/d/K7PQ-3MXA/?via=command").content.decode()
+    assert "nexguard://pair?" in page  # the app still comes first
+    assert "irm http://testserver/d/K7PQ3MXA/install.ps1 | iex" in page
+    assert "curl -fsSL http://testserver/d/K7PQ3MXA/install.sh | sh" in page
+    assert "Open PowerShell" in page and "Open Terminal" in page
 
 
 def test_link_page_and_scripts_never_look_the_code_up(client, django_assert_num_queries):
@@ -101,7 +127,9 @@ def test_preview_shows_who_will_see_it_and_keeps_the_code(client, parent, sara):
     assert api_pair(client, code, platform="macos").status_code == 201
 
 
-def test_text_answers_for_the_shell_installer(client, parent, sara):
+def test_text_answers_for_the_shell_installer(client, parent, sara, family):
+    family.computer_pairing = "app_or_command"
+    family.save()
     client.force_login(parent)
     _, code = add_device(client, sara, platform="linux", name="Sara's laptop")
     body = json.dumps({"code": code, "platform": "linux"})
@@ -127,7 +155,9 @@ def test_the_installer_pairs_and_checks_in_for_real(live_server, settings, tmp_p
 
     settings.DASHBOARD_URL = live_server.url
     settings.DEVICE_AGENT_DIR = tmp_path / "no-builds"
-    account = Account.objects.create(name="The Rahmans", kind="family")
+    account = Account.objects.create(
+        name="The Rahmans", kind="family", computer_pairing="app_or_command"
+    )
     device = Device.objects.create(account=account, platform=THIS_OS, name="Test laptop")
     code = services.new_pairing_code(device).replace("-", "")
     home = tmp_path / "home"
@@ -207,7 +237,9 @@ def test_the_installer_installs_the_agent_as_the_user(
     settings.DASHBOARD_URL = live_server.url
     settings.DEVICE_AGENT_DIR = agent_builds
     settings.ADULT_BLOCKLIST_URL = ""
-    account = Account.objects.create(name="Solo Dev", kind="solo")
+    account = Account.objects.create(
+        name="Solo Dev", kind="solo", computer_pairing="app_or_command"
+    )
     device = Device.objects.create(account=account, platform=THIS_OS, name="My laptop")
     code = services.new_pairing_code(device).replace("-", "")
     home = tmp_path / "home"

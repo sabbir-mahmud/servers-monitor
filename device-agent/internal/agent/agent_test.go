@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/activity"
 	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/config"
+	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/logs"
 )
 
 // A dashboard that wants blocking at version v1, and counts blocklist downloads.
@@ -106,5 +108,30 @@ func TestForgetUndoesEverything(t *testing.T) {
 	}
 	if activity.CurrentControls().ScreenTime {
 		t.Error("activity state must be reset")
+	}
+}
+
+func TestCheckinIsLoggedForThePerson(t *testing.T) {
+	var fetches atomic.Int32
+	srv := dashboard(t, `{"screen_time":true,"web_activity":false,"blocking":""}`, &fetches)
+	defer srv.Close()
+	cfg := paired(t, srv.URL)
+	logs.Setup(nil)
+	defer slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	if err := CheckinOnce(cfg, "test"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(logs.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	for _, want := range []string{`"msg":"the dashboard switched screen time on"`, `"msg":"checked in"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("log is missing %s:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, cfg.Token) {
+		t.Fatal("the pairing token must never be logged")
 	}
 }

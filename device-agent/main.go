@@ -18,6 +18,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"runtime"
@@ -31,17 +32,23 @@ import (
 	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/block"
 	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/collect"
 	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/config"
+	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/logs"
 	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/svc"
 )
 
 // Version is set at build time: -ldflags "-X main.Version=1.0.0".
 var Version = "dev"
 
+// desktopAppClient is how the NexGuard desktop app identifies itself when pairing.
+const desktopAppClient = "desktop-app"
+
 const usage = `NexGuard agent %s: reports this computer's health to your NexGuard dashboard.
 
 Usage (as an administrator):
-  nexguard pair [--yes] <dashboard address> <pairing code>
+  nexguard pair [--yes] [--via app] <dashboard address> <pairing code>
   nexguard install      start the background service (after pairing)
+  nexguard --user --dir <folder> install
+                        run at sign-in as you instead (no administrator, no blocking)
   nexguard status       show whether it's paired and when it last checked in
   nexguard checkin      check in once now
   nexguard uninstall    stop the service and remove the agent's files
@@ -80,14 +87,20 @@ func main() {
 	var err error
 	switch cmd, args := os.Args[1], os.Args[2:]; cmd {
 	case "pair":
+		logs.Setup(nil) // the terminal shows its own messages; the log file gets the record
 		err = pair(args)
 	case "install":
-		err = svc.Install(Version)
+		if config.UserMode() {
+			err = svc.InstallUser(Version) // runs at sign-in as this person, no administrator
+		} else {
+			err = svc.Install(Version)
+		}
 	case "uninstall":
 		err = svc.Uninstall(agent.Forget)
 	case "status":
 		err = status()
 	case "checkin":
+		logs.Setup(nil)
 		err = checkin()
 	case "run":
 		if config.UserMode() {
@@ -116,9 +129,10 @@ func main() {
 func pair(args []string) error {
 	fs := flag.NewFlagSet("pair", flag.ExitOnError)
 	yes := fs.Bool("yes", false, "agree without asking (the person was told some other way)")
+	via := fs.String("via", "", `"app" when the NexGuard desktop app pairs (it showed the disclosure)`)
 	_ = fs.Parse(args)
 	if fs.NArg() != 2 {
-		return errors.New("usage: nexguard pair [--yes] <dashboard address> <pairing code>")
+		return errors.New("usage: nexguard pair [--yes] [--via app] <dashboard address> <pairing code>")
 	}
 	server, err := api.CheckServer(fs.Arg(0))
 	if err != nil {
@@ -127,6 +141,9 @@ func pair(args []string) error {
 	code := fs.Arg(1)
 	client := api.New(server, "nexguard-agent/"+Version)
 	info := collect.Info(Version)
+	if *via == "app" {
+		info["client"] = desktopAppClient // accounts can require pairing through the app
+	}
 
 	// Ask first: a preview doesn't use the code, so saying no changes nothing.
 	preview, err := client.Pair(code, info, true)
@@ -147,6 +164,7 @@ func pair(args []string) error {
 		return err
 	}
 	fmt.Printf("Paired as %q in %s.\n", result.Device.Name, result.Device.Account)
+	slog.Info("paired", "device", result.Device.Name, "account", result.Device.Account, "dashboard", server)
 	if err := agent.CheckinOnce(cfg, Version); err != nil {
 		fmt.Printf("The first check-in failed (%v); the service will retry.\n", err)
 	}
@@ -182,6 +200,7 @@ func status() error {
 	} else {
 		fmt.Println("Blocking: off")
 	}
+	fmt.Println("Log:", logs.Path())
 	if s, err := agent.ReadStatus(); err == nil {
 		if s.OK {
 			fmt.Printf("Last check-in: %s, OK\n", s.At.Local().Format("Mon 2 Jan 15:04"))
@@ -206,6 +225,13 @@ func checkin() error {
 
 // runInForeground runs the loop until the process is told to stop.
 func runInForeground() error {
+	// Under launchd, systemd or Task Scheduler stderr is a file or nothing: the log file is
+	// enough, and a second copy would grow forever.
+	var console io.Writer
+	if fi, err := os.Stderr.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
+		console = os.Stderr
+	}
+	logs.Setup(console)
 	stop := make(chan struct{})
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)

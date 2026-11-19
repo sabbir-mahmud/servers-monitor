@@ -1,0 +1,124 @@
+name: Desktop app
+
+# Builds the NexGuard desktop app installers on each system, each with the device agent
+# for its system inside. A tag desktop-vX.Y.Z (matching desktop-app/package.json)
+# publishes them as a GitHub Release.
+#
+# Optional signing secrets (unsigned builds work, but macOS Gatekeeper and Windows
+# SmartScreen warn on first open):
+#   MAC_CSC_LINK, MAC_CSC_KEY_PASSWORD             Developer ID Application .p12 (base64)
+#   APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID   notarisation
+#   WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD             Windows code-signing .pfx (base64)
+
+on:
+  push:
+    tags: ["desktop-v*"]
+  pull_request:
+    paths: ["desktop-app/**", "device-agent/**", ".github/workflows/desktop-app.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: desktop-app
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop-app/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: mac
+          - os: windows-latest
+            target: win
+          - os: ubuntu-latest
+            target: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop-app/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: device-agent/go.mod
+          cache-dependency-path: device-agent/go.sum
+      - name: Build the device agent for every system
+        shell: bash
+        working-directory: device-agent
+        run: ./build.sh
+      - name: Tag must match package.json
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        shell: bash
+        run: test "${GITHUB_REF_NAME#desktop-v}" = "$(node -p "require('./package.json').version")"
+      - run: npm ci
+      - name: Build installers
+        shell: bash
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          case "$RUNNER_OS" in
+            macOS)   export CSC_LINK="$MAC_CSC_LINK" CSC_KEY_PASSWORD="$MAC_CSC_KEY_PASSWORD" ;;
+            Windows) export CSC_LINK="$WIN_CSC_LINK" CSC_KEY_PASSWORD="$WIN_CSC_KEY_PASSWORD" ;;
+          esac
+          [ -n "${CSC_LINK:-}" ] || export CSC_IDENTITY_AUTO_DISCOVERY=false
+          node scripts/agent-bin.js --require ${{ matrix.target }}
+          npx electron-builder --${{ matrix.target }} --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            desktop-app/dist/*.dmg
+            desktop-app/dist/*.zip
+            desktop-app/dist/*.exe
+            desktop-app/dist/*.AppImage
+            desktop-app/dist/*.deb
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Checksums
+        run: cd out && sha256sum * > SHA256SUMS
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" out/* --repo "$GITHUB_REPOSITORY" \
+            --title "NexGuard desktop ${GITHUB_REF_NAME#desktop-v}" \
+            --notes "Installers for the NexGuard desktop app (Windows, macOS, Linux). See desktop-app/README.md."

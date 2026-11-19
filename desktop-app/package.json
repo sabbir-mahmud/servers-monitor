@@ -1,0 +1,115 @@
+{
+  "name": "nexguard-desktop",
+  "productName": "NexGuard",
+  "version": "1.0.0",
+  "description": "Connect this computer to a NexGuard dashboard, then see what its agent does: status and log, live.",
+  "license": "Apache-2.0",
+  "author": {
+    "name": "NexGuard"
+  },
+  "homepage": "https://github.com/sabbir-mahmud/servers-monitor",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"test/*.test.js\"",
+    "agent": "node scripts/agent-bin.js",
+    "dist": "node scripts/agent-bin.js && electron-builder --publish never",
+    "dist:mac": "node scripts/agent-bin.js --require mac && electron-builder --mac --publish never",
+    "dist:win": "node scripts/agent-bin.js --require win && electron-builder --win --publish never",
+    "dist:linux": "node scripts/agent-bin.js --require linux && electron-builder --linux --publish never"
+  },
+  "devDependencies": {
+    "electron": "45.3.4",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "io.nexguard.desktop",
+    "productName": "NexGuard",
+    "artifactName": "NexGuard-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.utilities",
+      "hardenedRuntime": true
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "NexGuard"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "Utility",
+      "maintainer": "NexGuard",
+      "synopsis": "Connect this computer to NexGuard and see its agent log",
+      "executableName": "nexguard-desktop"
+    },
+    "protocols": [
+      {
+        "name": "NexGuard pairing link",
+        "schemes": [
+          "nexguard"
+        ]
+      }
+    ],
+    "extraResources": [
+      {
+        "from": "agent-bin/${os}-${arch}",
+        "to": "agent",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
+  }
+}

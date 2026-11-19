@@ -85,7 +85,8 @@ class DevicePairView(StaffViewMixin, AccountScopedMixin, DetailView):
         is_computer = device.platform in COMPUTERS
         if is_computer and code:
             # The link to open on the computer, and the one line it shows (see connect.py).
-            ctx.update(connect.connect_context(server, code), only=device.platform)
+            command = not device.account.computers_need_app
+            ctx.update(connect.connect_context(server, code, command=command), only=device.platform)
         ctx.update(
             code=code,
             server_url=server,
@@ -94,6 +95,7 @@ class DevicePairView(StaffViewMixin, AccountScopedMixin, DetailView):
             # Paired before and a new code is out: it's being moved to a new/reset device.
             repairing=device.paired_at is not None and bool(device.pairing_code_hash),
             back_url=_back_to(device),
+            can_change_pairing=self.request.user.has_perm("tenants.change_account"),
         )
         return ctx
 

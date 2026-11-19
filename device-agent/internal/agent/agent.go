@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,6 +69,7 @@ func CheckinOnce(cfg *config.Config, version string) error {
 	res, err := client.Checkin(cfg.Token, report)
 	if errors.Is(err, api.ErrUnpaired) {
 		Forget()
+		slog.Warn("this computer was removed on the dashboard: pairing, activity and blocking cleared")
 		writeStatus(Status{At: time.Now(), Error: "removed on the dashboard; pair again to resume"})
 		return err
 	}
@@ -82,13 +83,18 @@ func CheckinOnce(cfg *config.Config, version string) error {
 	if res.CheckinSeconds >= 60 && res.CheckinSeconds != cfg.Interval {
 		cfg.Interval = res.CheckinSeconds
 		if err := config.Save(cfg); err != nil {
-			log.Printf("couldn't save the new interval: %v", err)
+			slog.Warn("couldn't save the new check-in interval", "error", err.Error())
 		}
 	}
 	if err := applyControls(client, cfg.Token, res.Controls); err != nil {
-		log.Printf("controls: %v", err)
+		slog.Error("couldn't apply the dashboard's settings", "error", err.Error())
 	}
 	writeStatus(Status{At: time.Now(), OK: true, Interval: cfg.Interval})
+	attrs := []any{"dashboard", cfg.Server, "next_in", (time.Duration(cfg.Interval) * time.Second).String()}
+	if batch != nil {
+		attrs = append(attrs, "activity_batch", batch.ID)
+	}
+	slog.Info("checked in", attrs...)
 	return nil
 }
 
@@ -101,7 +107,7 @@ func Forget() {
 		return // never had the rights to block
 	}
 	if err := block.Remove(); err != nil {
-		log.Printf("couldn't remove blocking from %s: %v", block.Path(), err)
+		slog.Error("couldn't remove blocking", "file", block.Path(), "error", err.Error())
 	}
 }
 
@@ -113,6 +119,7 @@ func applyControls(client *api.Client, token string, c *api.Controls) error {
 	if c == nil {
 		c = &api.Controls{}
 	}
+	logChanges(activity.CurrentControls(), activity.Controls(*c))
 	if err := activity.SetControls(activity.Controls(*c)); err != nil {
 		return err
 	}
@@ -145,9 +152,34 @@ func applyControls(client *api.Client, token string, c *api.Controls) error {
 		if _, err := block.Apply(lines); err != nil {
 			return fmt.Errorf("couldn't update %s: %w", block.Path(), err)
 		}
-		log.Printf("blocking: %d names in %s", block.Count(), block.Path())
+		slog.Info("blocklist updated", "sites", block.Count(), "file", block.Path())
 	}
 	return activity.SetApplied(c.Blocking)
+}
+
+// logChanges notes each collection setting the dashboard switched on or off, so the person
+// using the computer can see when it started or stopped.
+func logChanges(was, now activity.Controls) {
+	for _, x := range []struct {
+		name     string
+		was, now bool
+	}{
+		{"screen time", was.ScreenTime, now.ScreenTime},
+		{"websites visited", was.WebActivity, now.WebActivity},
+		{"location", was.Location, now.Location},
+		{"website blocking", was.Blocking != "", now.Blocking != "" && !config.UserMode()},
+	} {
+		if x.was != x.now {
+			slog.Info("the dashboard switched "+x.name+" "+onOff(x.now), "setting", x.name, "on", x.now)
+		}
+	}
+}
+
+func onOff(on bool) string {
+	if on {
+		return "on"
+	}
+	return "off"
 }
 
 func readLines(path string) []string {
@@ -179,7 +211,7 @@ func locateLoop(stop <-chan struct{}) {
 			lastErr = ""
 		case errors.Is(err, activity.ErrNoLocationService):
 		case err.Error() != lastErr:
-			log.Printf("location: %v", err)
+			slog.Warn("location unavailable", "error", err.Error())
 			lastErr = err.Error()
 		}
 		select {
@@ -212,7 +244,7 @@ func sampleLoop(stop <-chan struct{}) {
 	// Read once now: the first read only notes where each history ends, so sites start
 	// counting from here rather than one interval later.
 	if err := activity.ReadWebOnce(); err != nil {
-		log.Printf("websites: %v", err)
+		slog.Warn("couldn't read browser history", "error", err.Error())
 	}
 	lastWeb := time.Now()
 	for {
@@ -224,7 +256,7 @@ func sampleLoop(stop <-chan struct{}) {
 			if now.Sub(lastWeb) >= activity.WebEvery {
 				lastWeb = now
 				if err := activity.ReadWebOnce(); err != nil {
-					log.Printf("websites: %v", err)
+					slog.Warn("couldn't read browser history", "error", err.Error())
 				}
 			}
 		}
@@ -234,6 +266,8 @@ func sampleLoop(stop <-chan struct{}) {
 // Run checks in until stop is closed: at the dashboard's interval, backing off on errors,
 // and waiting quietly while not paired.
 func Run(version string, stop <-chan struct{}) {
+	slog.Info("agent started", "version", version, "mode", config.Mode())
+	defer slog.Info("agent stopped")
 	go sampleLoop(stop)
 	go accessLoop(stop)
 	go locateLoop(stop)
@@ -242,13 +276,13 @@ func Run(version string, stop <-chan struct{}) {
 		wait := notPairedWait
 		if cfg, err := config.Load(); err != nil {
 			if !errors.Is(err, config.ErrNotPaired) {
-				log.Printf("config: %v", err)
+				slog.Error("couldn't read the pairing", "error", err.Error())
 			}
 		} else if err := CheckinOnce(cfg, version); err != nil {
-			log.Printf("check-in failed: %v", err)
 			if !errors.Is(err, api.ErrUnpaired) {
 				backoff = min(max(2*backoff, time.Duration(cfg.Interval)*time.Second), maxBackoff)
 				wait = backoff
+				slog.Warn("check-in failed", "error", err.Error(), "retry_in", wait.String())
 			}
 		} else {
 			backoff = 0

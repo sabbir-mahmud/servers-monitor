@@ -254,7 +254,7 @@ class Device(Machine):
         if not self.controls_owner_ok:
             return "Only for a child's or a staff member's computer."
         if not self.app_version.startswith(AGENT_APP):
-            return "Needs the NexGuard agent: pair this computer again with the one-line command."
+            return "Needs the NexGuard agent: pair this computer again with the NexGuard app."
         return ""
 
     @property

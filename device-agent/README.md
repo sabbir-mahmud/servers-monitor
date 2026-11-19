@@ -5,7 +5,8 @@ runs as a system service (a Windows service, a macOS LaunchDaemon or a systemd u
 starts with the computer, and reports health to the dashboard: CPU, memory, GPU,
 battery, storage, network (Wi-Fi or wired, and the Wi-Fi name where the system allows)
 and system version. The person using the computer can't stop or remove it without
-administrator rights. It is one static file with no dependencies.
+administrator rights. It is one static file with no dependencies. The [NexGuard desktop app](../desktop-app/README.md)
+carries it and runs these commands for the person, so they never need a terminal.
 
 ```sh
 sudo nexguard pair https://monitor.example.com K7PQ-3MXA   # shows who will see it, asks y/n
@@ -46,11 +47,22 @@ dashboard; see [docs/devices.md](../docs/devices.md)):
 - Unsent activity waits in `activity.json` (admin only) and goes as a numbered batch, so a
   lost answer doesn't count anything twice.
 
-**Without administrator rights** (`--user`): the dashboard's one-line connect command
-installs this same program in the person's own folder and runs it as them with
-`nexguard --user --dir <folder> run` (login item, systemd user service, or sign-in task).
+**Without administrator rights** (`--user`): `nexguard --user --dir <folder> install`
+copies this program into that folder and runs it as the person with
+`nexguard --user --dir <folder> run`: a LaunchAgent (`com.nexguard.agent`), a systemd user
+service (`nexguard-agent`, or an autostart entry without systemd) or a sign-in task
+(*NexGuard agent*). The desktop app and the dashboard's one-line command set up the same
+thing, so either can replace the other.
+
+**Pairing through the app**: `pair --via app` tells the dashboard the desktop app showed the
+disclosure. Accounts set to *app only* (the default) refuse computers that pair without it.
 It does health, screen time and websites for that person only, and never touches the
 hosts file. Serve the builds from the dashboard by running `./build.sh` (into `dist/`).
+
+**Log**: `logs/nexguard.log` next to the config, one JSON object per line (start, stop,
+each check-in, settings the dashboard switched on or off, errors), readable without
+administrator rights and rotated at 1 MB into `nexguard.log.1`. It never holds the token,
+website names or app names. The [NexGuard desktop app](../desktop-app/README.md) shows it live. The service also still logs to the Windows event log, syslog or the journal.
 
 **Develop**
 ```sh

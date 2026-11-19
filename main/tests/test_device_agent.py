@@ -62,7 +62,9 @@ def new_device(person_kind=None):
 
 def test_agent_pairs_checks_in_and_reports_health(live_server, agent_binary, tmp_path):
     device, code = new_device()
-    result = run(agent_binary, "pair", "--yes", live_server.url, code, config_dir=tmp_path)
+    result = run(
+        agent_binary, "pair", "--yes", "--via", "app", live_server.url, code, config_dir=tmp_path
+    )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "will see this device's last online time, CPU, memory, GPU" in result.stdout
     assert 'Paired as "Sara\'s laptop" in The Rahmans' in result.stdout
@@ -87,7 +89,16 @@ def test_agent_pairs_checks_in_and_reports_health(live_server, agent_binary, tmp
 
 def test_saying_no_keeps_the_code_and_saves_nothing(live_server, agent_binary, tmp_path):
     device, code = new_device()
-    result = run(agent_binary, "pair", live_server.url, code, config_dir=tmp_path, stdin="n\n")
+    result = run(
+        agent_binary,
+        "pair",
+        "--via",
+        "app",
+        live_server.url,
+        code,
+        config_dir=tmp_path,
+        stdin="n\n",
+    )
     assert result.returncode == 1 and "you said no" in result.stderr
     assert not (tmp_path / "config.json").exists()
     device.refresh_from_db()
@@ -99,7 +110,16 @@ def test_removed_on_the_dashboard_the_agent_forgets_the_pairing(
 ):
     device, code = new_device()
     assert (
-        run(agent_binary, "pair", "--yes", live_server.url, code, config_dir=tmp_path).returncode
+        run(
+            agent_binary,
+            "pair",
+            "--yes",
+            "--via",
+            "app",
+            live_server.url,
+            code,
+            config_dir=tmp_path,
+        ).returncode
         == 0
     )
     device.delete()
@@ -110,7 +130,16 @@ def test_removed_on_the_dashboard_the_agent_forgets_the_pairing(
 
 
 def test_a_wrong_code_shows_the_dashboards_words(live_server, agent_binary, tmp_path):
-    result = run(agent_binary, "pair", "--yes", live_server.url, "K7PQ-3MXA", config_dir=tmp_path)
+    result = run(
+        agent_binary,
+        "pair",
+        "--yes",
+        "--via",
+        "app",
+        live_server.url,
+        "K7PQ-3MXA",
+        config_dir=tmp_path,
+    )
     assert result.returncode == 1 and "isn't valid" in result.stderr
 
 
@@ -122,7 +151,7 @@ def test_a_childs_computer_gets_blocking_in_its_hosts_file(
     hosts = tmp_path / "hosts"
     hosts.write_text("127.0.0.1 localhost\n")
     config = tmp_path / "config"
-    result = run(agent_binary, "pair", "--yes", live_server.url, code, config_dir=config,
+    result = run(agent_binary, "pair", "--yes", "--via", "app", live_server.url, code, config_dir=config,
                  hosts=hosts)  # fmt: skip
     assert result.returncode == 0, result.stderr
     assert "screen time" in result.stdout  # the consent names it for a child's computer

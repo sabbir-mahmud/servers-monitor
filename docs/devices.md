@@ -7,36 +7,60 @@ they run the [agent](agent.md).
 
 ## Add a computer (Windows, Mac or Linux)
 
-Nothing to install first, no administrator rights, no Python.
+Computers connect with the **NexGuard desktop app** ([desktop-app/](../desktop-app/README.md))
+by default. The app shows the person exactly what the account will see before anything is
+shared, installs the agent without a terminal, and afterwards keeps the agent's status and
+log in view on that computer.
 
 **On the dashboard** (the parent or admin):
 
 1. **Devices → Add device** (or on a person's page), pick Windows, Mac or Linux, give it a
    name.
-2. The next page shows a link like `https://monitor.example.com/d/K7PQ-3MXA`. Copy it
-   and send it to the computer: email, chat, or type it into its browser.
+2. The next page shows a link like `https://monitor.example.com/d/K7PQ-3MXA`, plus the code
+   and the dashboard address. Send the link to the computer: email, chat, or type it into its
+   browser.
 
 **On the computer** (anyone can do this):
 
-1. Open the link. It recognises the system and shows three steps.
-2. Open **PowerShell** (Windows) or **Terminal** (Mac, Linux), as the page explains, and
-   paste the one line it shows:
+1. Install the NexGuard app (the page links to it: `DESKTOP_APP_URL`).
+2. Open the link and choose **Open in NexGuard**. It fills in the dashboard and the code
+   (a `nexguard://pair` link, the same one the phone app's QR code holds). Or open the app
+   and type them in.
+3. Read what it shows, then choose **Allow and connect**. With **Protected install** on
+   (the default) the computer asks for an administrator password once. The agent then runs
+   as a system service that only an administrator can stop, and can block websites. With it
+   off, the agent runs as that person while they're signed in, with no blocking.
 
-   | System | Line |
-   |---|---|
-   | Windows | `irm https://monitor.example.com/d/K7PQ3MXA/install.ps1 \| iex` |
-   | Mac, Linux | `curl -fsSL https://monitor.example.com/d/K7PQ3MXA/install.sh \| sh` |
+The dashboard's pair page turns to **Paired** within seconds.
 
-3. It says who will see the computer and asks **Allow this?** Type `y` and press Enter.
+### Pairing setting: app only, or the one-line command too
 
-The dashboard's pair page turns to **Paired** within seconds. At the computer yourself?
-The pair page has the same steps under *Do it from here*.
+**Account settings → Pairing** (owners) picks how computers may connect:
 
-Phones use the NexGuard app instead: the pair page shows a QR code to scan.
+| Setting | |
+|---|---|
+| **With the NexGuard app** (default, also for accounts created before 3.0) | The pairing API turns away computers that don't pair through the app: a pasted install command stops before it asks anything, saying to use the app. |
+| **With the NexGuard app or a one-line command** | The pair page and the link also offer the line to paste into **PowerShell** (Windows) or **Terminal** (Mac, Linux), with nothing to install first: |
+
+| System | Line |
+|---|---|
+| Windows | `irm https://monitor.example.com/d/K7PQ3MXA/install.ps1 \| iex` |
+| Mac, Linux | `curl -fsSL https://monitor.example.com/d/K7PQ3MXA/install.sh \| sh` |
+
+It says who will see the computer and asks **Allow this?** (type `y`). Computers that are
+already paired keep working whichever you choose. The app identifies itself with
+`"client": "desktop-app"` when it pairs. That's a way of steering people to the app, not a
+security boundary: the disclosure and on-device consent are the same either way.
+
+Phones use the NexGuard phone app: the pair page shows a QR code to scan.
 
 ## What gets installed
 
-A check-in that runs **as the signed-in user** every 5 minutes and reports as often as the
+The app, and the agent it sets up: a protected service (administrator) or a program that
+runs **as the signed-in user** (`com.nexguard.agent` LaunchAgent on a Mac, the
+`nexguard-agent` systemd user service on Linux, the *NexGuard agent* sign-in task on
+Windows). The one-line command installs the same agent, or, where the dashboard has no
+agent builds, a check-in that runs every 5 minutes and reports as often as the
 dashboard asks. It sends CPU, memory and GPU use, battery, free and total storage, system
 version, model and computer name. It doesn't read files, see the screen or record
 keystrokes.
@@ -148,6 +172,10 @@ Limits worth knowing:
 | *Can't reach …* | The computer can't open the dashboard address. Set `DASHBOARD_URL` to an address it can reach (not `127.0.0.1` unless it's the same machine). |
 | *Too many tries* | 10 attempts per 10 minutes per network. Wait, then try again. |
 | Paired, but stays offline | Look at the `error` file in the folder above. On Linux without systemd or cron, nothing can schedule the check-in. |
+
+**See what the agent is doing on the computer itself.** Open the NexGuard app. It shows
+whether the agent is connected, its last check-in and its log (`logs/nexguard.log` in the
+agent's folder) as it's written. `nexguard status` prints the log's path.
 
 ## How it works (and why it's safe)
 

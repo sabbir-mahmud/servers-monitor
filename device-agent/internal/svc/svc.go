@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,6 +14,7 @@ import (
 	"github.com/kardianos/service"
 
 	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/config"
+	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/logs"
 )
 
 const name = "nexguard"
@@ -89,12 +89,14 @@ func Run(version string, loop func(string, <-chan struct{})) error {
 	if err != nil {
 		return err
 	}
+	var console io.Writer = os.Stderr
 	if !service.Interactive() {
+		console = nil
 		if l, err := s.Logger(nil); err == nil {
-			log.SetOutput(loggerWriter{l})
-			log.SetFlags(0)
+			console = loggerWriter{l} // the Windows event log, syslog or the journal
 		}
 	}
+	logs.Setup(console)
 	return s.Run()
 }
 
@@ -168,6 +170,7 @@ func Uninstall(forget func()) error {
 		return fmt.Errorf("couldn't remove the service: %w", err)
 	}
 	_ = os.Remove(filepath.Join(config.Dir(), "status.json"))
+	_ = os.RemoveAll(logs.Dir())
 	forget()
 	removeBinary(InstalledPath())
 	_ = os.Remove(config.Dir()) // only if empty

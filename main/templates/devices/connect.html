@@ -10,8 +10,24 @@
   <div class="connect-card card">
     <div class="card-body">
       <h1 class="connect-title">Connect this computer</h1>
-      <p class="connect-lead">Three steps, about a minute. You don't need to install anything first or be an administrator.</p>
-      {% include "devices/_connect_steps.html" with suffix="" %}
+      <p class="connect-lead">With the NexGuard app. About a minute.</p>
+      <ol class="connect-steps">
+        <li><strong>Install the NexGuard app.</strong> <span>For Windows, Mac and Linux. Skip this if it's already installed.</span>
+          <div class="mt-2"><a class="btn btn-outline-secondary btn-sm" href="{{ app_url }}" target="_blank" rel="noopener">{% icon "download" 14 %} Download NexGuard</a></div>
+        </li>
+        <li><strong>Open it here.</strong> <span>This button fills in the dashboard and the code.</span>
+          <div class="mt-2"><a class="btn btn-primary" id="open-app" href="{{ app_link }}">{% icon "link" 15 %} Open in NexGuard</a></div>
+          <p class="small text-body-secondary mt-2 mb-0">Nothing happens? Open the app and type: dashboard <code>{{ server_url }}</code>, code <code>{{ display_code }}</code>.</p>
+        </li>
+        <li><strong>Read what it shows, then choose Allow.</strong> <span>It says who will see this computer. Nothing is shared until you agree.</span></li>
+      </ol>
+      {% if allow_command %}
+      <details class="connect-direct mt-3">
+        <summary>No app? Paste one line instead</summary>
+        <p class="small text-body-secondary">You don't need to install anything first or be an administrator.</p>
+        {% include "devices/_connect_steps.html" with suffix="" %}
+      </details>
+      {% endif %}
       {% if is_plain_http %}<p class="small text-body-secondary mt-3 mb-0">{% icon "alert" 13 %} This dashboard uses a plain http:// address, so only do this on a network you trust.</p>{% endif %}
     </div>
   </div>
@@ -19,11 +35,11 @@
   <div class="connect-notes">
     <details>
       <summary>What does it install?</summary>
-      <p>A small check-in that runs as you every 5 minutes and sends how busy the CPU, memory and graphics are, the battery level, free storage, the system version, and whether it's on Wi-Fi or wired (with the Wi-Fi name where the system allows). It doesn't read your files, see your screen or record keystrokes. You can see it in Task Scheduler on Windows, in <code>~/Library/LaunchAgents</code> on a Mac, or as a user timer on Linux.</p>
+      <p>The NexGuard app, and the small agent it sets up: it runs in the background and sends how busy the CPU, memory and graphics are, the battery level, free storage, the system version, and whether it's on Wi-Fi or wired (with the Wi-Fi name where the system allows). It doesn't read your files, see your screen or record keystrokes. You can see it in Task Scheduler on Windows, in <code>~/Library/LaunchAgents</code> on a Mac, or as a user service on Linux. The app shows its status and log.
     </details>
     <details>
       <summary>How do I remove it?</summary>
-      <p>Paste this the same way:</p>
+      <p>Paste this into PowerShell (Windows) or Terminal (Mac, Linux), then uninstall the app as usual:</p>
       <p><strong>Windows</strong> <code class="d-block mt-1">{{ uninstall.windows }}</code></p>
       <p class="mb-0"><strong>Mac or Linux</strong> <code class="d-block mt-1">{{ uninstall.unix }}</code></p>
     </details>

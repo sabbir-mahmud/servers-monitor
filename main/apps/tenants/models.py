@@ -24,12 +24,28 @@ class AccountQuerySet(models.QuerySet):
         return self.filter(memberships__user=user)
 
 
+class ComputerPairing(models.TextChoices):
+    """How a Windows, Mac or Linux computer may pair with this account."""
+
+    APP = "app", "With the NexGuard app"
+    APP_OR_COMMAND = "app_or_command", "With the NexGuard app or a one-line command"
+
+
+# What the desktop app sends as "client" when it pairs (desktop-app/, `nexguard pair --via app`).
+DESKTOP_APP_CLIENT = "desktop-app"
+
+
 class Account(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
     name = models.CharField(max_length=100)
     # Stable handle for settings (OIDC_ACCOUNT) and, later, URLs. Never shown as a secret.
     slug = models.SlugField(max_length=60, unique=True)
     kind = models.CharField(max_length=10, choices=Kind.choices)
+    # The app by default: it shows the person what's shared, keeps the agent's log in view
+    # and installs without a terminal. The one-line command is the opt-in alternative.
+    computer_pairing = models.CharField(
+        max_length=20, choices=ComputerPairing.choices, default=ComputerPairing.APP
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
@@ -47,6 +63,10 @@ class Account(models.Model):
         if not self.slug:
             self.slug = unique_slug(self.name)
         super().save(*args, **kwargs)
+
+    @property
+    def computers_need_app(self) -> bool:
+        return self.computer_pairing == ComputerPairing.APP
 
     def has(self, feature: str) -> bool:
         return has_feature(self.kind, feature)

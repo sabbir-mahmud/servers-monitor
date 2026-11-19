@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NexGuard</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="titlebar">
+    <div class="brand">
+      <img src="icon.svg" alt="" width="22" height="22">
+      <span>NexGuard</span>
+    </div>
+    <select id="source" class="source" aria-label="Which agent" hidden></select>
+    <div class="spacer"></div>
+    <button type="button" id="pair-open" class="btn btn-quiet" hidden>Connect…</button>
+    <div id="pill" class="pill" data-tone="neutral"><span class="dot"></span><span id="pill-text">Looking for the agent…</span></div>
+  </header>
+
+  <section id="summary" class="summary" hidden>
+    <div class="fact"><span class="label">Last check-in</span><span id="f-checkin" class="value">—</span></div>
+    <div class="fact"><span class="label">Checks in</span><span id="f-interval" class="value">—</span></div>
+    <div class="fact wide"><span class="label">Agent folder</span><span id="f-dir" class="value mono" title=""></span></div>
+    <div id="f-error" class="callout" hidden></div>
+  </section>
+
+  <section id="toolbar" class="toolbar" hidden>
+    <label class="search">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg>
+      <input id="search" type="search" placeholder="Filter messages" autocomplete="off" spellcheck="false">
+    </label>
+    <div class="segments" role="radiogroup" aria-label="Level">
+      <button type="button" role="radio" data-level="all" aria-checked="true">All <span class="count" id="c-all">0</span></button>
+      <button type="button" role="radio" data-level="INFO" aria-checked="false">Info <span class="count" id="c-info">0</span></button>
+      <button type="button" role="radio" data-level="WARN" aria-checked="false">Warnings <span class="count" id="c-warn">0</span></button>
+      <button type="button" role="radio" data-level="ERROR" aria-checked="false">Errors <span class="count" id="c-error">0</span></button>
+    </div>
+    <div class="spacer"></div>
+    <button type="button" id="follow" class="btn toggle" aria-pressed="true" title="Keep the newest line in view">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v11M5 10.5 10 15.5l5-5"/></svg>Follow
+    </button>
+    <button type="button" id="reveal" class="btn" title="Show the log file">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6.5V15a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-6L8.5 5H4a1 1 0 0 0-1 1.5Z"/></svg>Show file
+    </button>
+    <button type="button" id="export" class="btn" title="Save the lines shown to a text file">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9M6 8.5l4 4 4-4M4 15.5h12"/></svg>Save
+    </button>
+  </section>
+
+  <main id="main">
+    <div id="log" class="log" role="log" aria-live="polite" tabindex="0"></div>
+    <section id="pair" class="pair" hidden aria-labelledby="pair-title">
+      <div class="pair-card">
+        <h1 id="pair-title">Connect this computer</h1>
+        <p class="pair-lead">Use the dashboard address and pairing code from whoever manages NexGuard for you. Got a link? Open it and choose <strong>Open in NexGuard</strong>: it fills this in.</p>
+
+        <form id="pair-form" novalidate>
+          <label class="field">
+            <span>Dashboard address</span>
+            <input id="pair-server" type="url" inputmode="url" placeholder="https://monitor.example.com" autocomplete="url" spellcheck="false" required>
+          </label>
+          <label class="field">
+            <span>Pairing code</span>
+            <input id="pair-code" class="code-input" placeholder="K7PQ-3MXA" autocomplete="off" spellcheck="false" maxlength="11" required>
+          </label>
+          <label class="check">
+            <input id="pair-protected" type="checkbox" checked>
+            <span><strong>Protected install</strong><br><span class="muted">Runs as a system service that only an administrator can stop, and can block websites. Asks for an administrator password once. Off: runs only while you’re signed in, with no blocking.</span></span>
+          </label>
+          <p id="pair-error" class="callout" role="alert" hidden></p>
+          <div class="pair-actions">
+            <button type="button" id="pair-cancel" class="btn" hidden>Cancel</button>
+            <button type="submit" id="pair-next" class="btn btn-primary">Continue</button>
+          </div>
+        </form>
+
+        <div id="pair-confirm" hidden>
+          <div class="who">
+            <div class="who-label">Pairing <strong id="confirm-device"></strong> with</div>
+            <div class="who-account" id="confirm-account"></div>
+          </div>
+          <p class="disclosure" id="confirm-disclosure"></p>
+          <p class="muted small" id="confirm-mode"></p>
+          <p id="confirm-error" class="callout" role="alert" hidden></p>
+          <div class="pair-actions">
+            <button type="button" id="confirm-back" class="btn">Back</button>
+            <button type="button" id="confirm-allow" class="btn btn-primary">Allow and connect</button>
+          </div>
+        </div>
+
+        <div id="pair-working" class="working" hidden>
+          <span class="spinner" aria-hidden="true"></span>
+          <div><strong>Connecting…</strong><div class="muted" id="working-text"></div></div>
+        </div>
+      </div>
+    </section>
+
+    <div id="empty" class="empty" hidden>
+      <div class="empty-card">
+        <h1 id="empty-title"></h1>
+        <p id="empty-text"></p>
+      </div>
+    </div>
+  </main>
+
+  <footer class="statusbar">
+    <span id="footer-count"></span>
+    <span class="spacer"></span>
+    <span id="footer-live"></span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

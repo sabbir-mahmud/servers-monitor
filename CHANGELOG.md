@@ -83,6 +83,24 @@ names); upgrading gets the relay backlog fixes below.
   using the code, and `Accept: text/plain` answers as `key=value` lines for shell clients.
 - Sign-up (`ALLOW_SIGNUP`) asks for the account kind and makes the person its owner.
 - `OIDC_ACCOUNT`: which company account SSO users join.
+- **NexGuard desktop app** for Windows, macOS and Linux (`desktop-app/`, Electron), with the
+  device agent inside. It pairs the computer: type the dashboard and code, or open the
+  dashboard's link and choose *Open in NexGuard* (`nexguard://pair`). It shows the
+  dashboard's disclosure, then on *Allow* installs the agent as a protected service (one
+  administrator password, can block websites) or for that person only. Afterwards it shows
+  whether the agent is connected, its last check-in and its log, live, with level filters,
+  search and save. Installers are built by the *Desktop app* workflow on `desktop-v*` tags.
+- **Account settings → Pairing**: computers pair **with the NexGuard app** (the default, also
+  for existing accounts) or with the app or the one-line command. With the app only, the
+  pairing API refuses other clients for computers with a message saying to use the app, and
+  the pair page and the `/d/<code>` link page show the app steps alone. `DESKTOP_APP_URL`
+  sets where they link to download it.
+- Device agent 0.2.0 keeps its own log in `logs/nexguard.log` next to its config: one JSON
+  line per event (started, paired, checked in, settings switched on or off by the dashboard,
+  errors), readable by everyone, rotated at 1 MB. No token, website or app names.
+  `nexguard status` prints where it is. New: `pair --via app` (how the app pairs) and
+  `nexguard --user --dir <folder> install`, which sets the agent to run at sign-in as that
+  person (the same LaunchAgent, systemd user service or sign-in task the connect scripts use).
 
 ### Changed
 - Roles are per account memberships, not Django groups. `manage.py sync_roles` is gone.

@@ -9,6 +9,8 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from apps.tenants.models import DESKTOP_APP_CLIENT
+
 from . import pairing
 from .models import (
     AGENT_APP,
@@ -59,6 +61,14 @@ def _device_for_code(code: str, info: dict, *, lock: bool) -> Device:
         expected = Platform(device.platform).label
         raise PairingError(f"This code is for {_article(expected)} {expected}. Use it on that "
                            "device, or add this one separately.", 409)  # fmt: skip
+    if (
+        device.platform in COMPUTERS
+        and device.account.computers_need_app
+        and info.get("client") != DESKTOP_APP_CLIENT
+    ):
+        # Checked on previews too, so a terminal install stops before it asks anything.
+        raise PairingError(f"{device.account.name} connects computers with the NexGuard app. "
+                           "Install it, open it and enter this code there.", 403)  # fmt: skip
     return device
 
 
