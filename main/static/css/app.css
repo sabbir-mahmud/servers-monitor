@@ -1940,3 +1940,15 @@ kbd { font-family: var(--font-mono); font-size: .85em; padding: .05rem .4rem; bo
   .srow-device .srow-span2 { grid-column: 1 / -1; }
   .srow-pair { flex-direction: column; align-items: stretch; }
 }
+
+/* Metric cells: the bar sits on the row's centre line in every column; a note under it
+   (free space, "Charging", a disk forecast) hangs below without pushing the bar up. */
+@media (min-width: 1200px) {
+  .srow-metric { position: relative; }
+  .srow-metric > .prow-sub, .srow-metric > .srow-warn {
+    position: absolute; left: 0; right: 0; top: calc(50% + .7rem);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2;
+  }
+  .srow:has(.srow-metric > .prow-sub, .srow-metric > .srow-warn) { padding-bottom: 1.15rem; }
+}
+.srow-metric > .prow-sub { font-size: .72rem; color: var(--muted); }

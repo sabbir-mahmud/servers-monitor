@@ -8,8 +8,10 @@
     <p class="page-sub">{% if kind == "server" %}Live health across your servers.{% elif kind == "device" %}Your own computers and phones.{% elif with_devices %}Your servers, computers and phones in one place.{% else %}Live health across your fleet.{% endif %} <span class="live-badge ms-1"><span class="dot"></span>Live</span></p>
   </div>
   <div class="page-actions">
-    {% if perms.operations.add_job and overview.servers %}<a class="btn btn-outline-secondary" href="{% url 'operations:job_create' %}">{% icon "play" %} Run on servers</a>{% endif %}
-    {% if with_devices and perms.devices.add_device %}
+    {% if perms.operations.add_job and overview.servers and kind != "device" %}<a class="btn btn-outline-secondary" href="{% url 'operations:job_create' %}">{% icon "play" %} Run on servers</a>{% endif %}
+    {% if kind == "device" %}{% if perms.devices.add_device %}<a class="btn btn-primary" href="{% url 'devices:create' %}">{% icon "plus" %} Add device</a>{% endif %}
+    {% elif kind == "server" %}{% if perms.fleet.add_server %}<a class="btn btn-primary" href="{% url 'fleet:server_create' %}">{% icon "plus" %} Add server</a>{% endif %}
+    {% elif with_devices and perms.devices.add_device %}
     <div class="dropdown">
       <button class="btn btn-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">{% icon "plus" %} Add device</button>
       <div class="dropdown-menu dropdown-menu-end add-menu add-menu-wide">
@@ -46,7 +48,7 @@
 </section>
 {% endpartialdef %}
 
-{% if overview.total or filtering %}
+{% if rows or filtering %}
 <form class="fleet-toolbar" method="get" role="search" hx-get="{% url 'fleet:dashboard' %}" hx-target="#fleet" hx-swap="outerHTML" hx-push-url="true" hx-trigger="change, keyup changed delay:300ms from:input[name=q]">
   {% if kind %}<input type="hidden" name="kind" value="{{ kind }}">{% endif %}
   <div class="plist-search">
@@ -84,11 +86,11 @@
   {% else %}
   <div class="fleet-empty">
     <span class="fleet-empty-mark" aria-hidden="true">{% icon "server" 22 %}</span>
-    <div class="empty-title">{% if with_devices %}Nothing connected yet{% else %}No servers connected yet{% endif %}</div>
-    <p>{% if with_devices %}Add a Linux server to watch its health and run commands, or your own laptop or phone to see it's online, its battery and storage.{% else %}Install the agent on a server to see its health here.{% endif %}</p>
+    <div class="empty-title">{% if kind == "device" %}No computers or phones yet{% elif kind == "server" %}No servers yet{% elif with_devices %}Nothing connected yet{% else %}No servers connected yet{% endif %}</div>
+    <p>{% if kind == "device" %}Connect your laptop with one link, or install the NexGuard app on your phone, to see it's online, its battery and storage.{% elif kind == "server" %}Install the agent on a Linux server to watch its health, services and logs, and run commands.{% elif with_devices %}Add a Linux server to watch its health and run commands, or your own laptop or phone to see it's online, its battery and storage.{% else %}Install the agent on a server to see its health here.{% endif %}</p>
     <div class="d-flex flex-wrap justify-content-center gap-2">
-      {% if perms.fleet.add_server %}<a class="btn btn-primary" href="{% url 'fleet:server_create' %}">{% icon "server" %} Add a server</a>{% endif %}
-      {% if with_devices and perms.devices.add_device %}<a class="btn btn-outline-secondary" href="{% url 'devices:create' %}">{% icon "laptop" %} Add a computer or phone</a>{% endif %}
+      {% if perms.fleet.add_server and kind != "device" %}<a class="btn btn-primary" href="{% url 'fleet:server_create' %}">{% icon "server" %} Add a server</a>{% endif %}
+      {% if with_devices and perms.devices.add_device and kind != "server" %}<a class="btn {% if kind == 'device' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="{% url 'devices:create' %}">{% icon "laptop" %} Add a computer or phone</a>{% endif %}
     </div>
   </div>
   {% endif %}

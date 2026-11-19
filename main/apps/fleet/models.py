@@ -146,6 +146,24 @@ class Server(Machine):
         return Health.OFFLINE
 
     @property
+    def memory_used(self) -> int | None:
+        """Bytes in use, from the percentage and the total the agent reported."""
+        if self.memory_total and self.memory_percent is not None:
+            return round(self.memory_total * self.memory_percent / 100)
+        return None
+
+    @property
+    def fullest_disk_free(self) -> int | None:
+        """Free bytes on the fullest mount (the one disk_percent is about)."""
+        disks = [d for d in self.disks or [] if isinstance(d, dict) and d.get("total")]
+        if not disks:
+            return None
+        d = max(disks, key=lambda d: d.get("percent") or 0)
+        return (
+            max(0, int(d["total"]) - int(d.get("used") or 0)) if d.get("used") is not None else None
+        )
+
+    @property
     def health(self) -> str:
         return self.health_at(timezone.now())
 

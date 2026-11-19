@@ -10,9 +10,9 @@
     </div>
   </div>
   <div class="srow-health">{% health_badge r.status %}</div>
-  <div class="srow-metric"><span class="drow-label">CPU</span>{% meter r.cpu_percent "CPU" %}</div>
-  <div class="srow-metric"><span class="drow-label">Memory</span>{% meter r.memory_percent "Memory" %}</div>
-  <div class="srow-metric"><span class="drow-label">Disk</span>{% meter r.disk_percent "Disk" %}{% with f=r.disk_full_at|fills_in %}{% if f %}<div class="srow-warn" title="Forecast from the last week's growth">{{ f }}</div>{% endif %}{% endwith %}</div>
+  <div class="srow-metric"><span class="drow-label">CPU</span>{% meter r.cpu_percent "CPU" %}{% if r.load_1 is not None %}<div class="prow-sub">Load {{ r.load_1|floatformat:2 }}{% if r.cpu_count %} · {{ r.cpu_count }} core{{ r.cpu_count|pluralize }}{% endif %}</div>{% endif %}</div>
+  <div class="srow-metric"><span class="drow-label">Memory</span>{% meter r.memory_percent "Memory" %}{% if r.memory_used is not None %}<div class="prow-sub">{{ r.memory_used|filesizeformat }} of {{ r.memory_total|filesizeformat }}</div>{% endif %}</div>
+  <div class="srow-metric"><span class="drow-label">Disk</span>{% meter r.disk_percent "Disk" %}{% with f=r.disk_full_at|fills_in %}{% if f %}<div class="srow-warn" title="Forecast from the last week's growth">{{ f }}</div>{% elif r.fullest_disk_free is not None %}<div class="prow-sub">{{ r.fullest_disk_free|filesizeformat }} free</div>{% endif %}{% endwith %}</div>
   {% if mixed %}<div class="srow-metric srow-na"><span class="drow-label">Battery</span><span class="empty-val">—</span></div>{% endif %}
   <div class="srow-num"><span class="drow-label">Last seen</span><span {% if r.last_seen_at %}title="{{ r.last_seen_at }}"{% endif %}>{{ r.last_seen_at|ago }}</span></div>
   <span class="prow-chevron" aria-hidden="true">{% icon "chevron" 16 %}</span>
