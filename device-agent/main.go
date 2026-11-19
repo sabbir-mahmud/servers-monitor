@@ -39,13 +39,10 @@ import (
 // Version is set at build time: -ldflags "-X main.Version=1.0.0".
 var Version = "dev"
 
-// desktopAppClient is how the NexGuard desktop app identifies itself when pairing.
-const desktopAppClient = "desktop-app"
-
 const usage = `NexGuard agent %s: reports this computer's health to your NexGuard dashboard.
 
 Usage (as an administrator):
-  nexguard pair [--yes] [--via app] <dashboard address> <pairing code>
+  nexguard pair [--yes] <dashboard address> <pairing code>
   nexguard install      start the background service (after pairing)
   nexguard --user --dir <folder> install
                         run at sign-in as you instead (no administrator, no blocking)
@@ -129,10 +126,9 @@ func main() {
 func pair(args []string) error {
 	fs := flag.NewFlagSet("pair", flag.ExitOnError)
 	yes := fs.Bool("yes", false, "agree without asking (the person was told some other way)")
-	via := fs.String("via", "", `"app" when the NexGuard desktop app pairs (it showed the disclosure)`)
 	_ = fs.Parse(args)
 	if fs.NArg() != 2 {
-		return errors.New("usage: nexguard pair [--yes] [--via app] <dashboard address> <pairing code>")
+		return errors.New("usage: nexguard pair [--yes] <dashboard address> <pairing code>")
 	}
 	server, err := api.CheckServer(fs.Arg(0))
 	if err != nil {
@@ -141,9 +137,6 @@ func pair(args []string) error {
 	code := fs.Arg(1)
 	client := api.New(server, "nexguard-agent/"+Version)
 	info := collect.Info(Version)
-	if *via == "app" {
-		info["client"] = desktopAppClient // accounts can require pairing through the app
-	}
 
 	// Ask first: a preview doesn't use the code, so saying no changes nothing.
 	preview, err := client.Pair(code, info, true)

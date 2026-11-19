@@ -1,8 +1,8 @@
 """Devices people carry or use: Windows, macOS and Linux computers, Android and iOS phones.
 
-Unlike servers (which talk to the relay), devices check in over HTTPS: the desktop app
-every few minutes, the phone app every 15 minutes or so (the OS decides). Each check-in
-carries battery, storage, network and, when the person allowed it, the location.
+Unlike servers (which talk to the relay), devices check in over HTTPS: the agent on a
+computer every few minutes, the phone app every 15 minutes or so (the OS decides). Each
+check-in carries battery, storage, network and, when the person allowed it, the location.
 """
 
 import uuid
@@ -254,7 +254,7 @@ class Device(Machine):
         if not self.controls_owner_ok:
             return "Only for a child's or a staff member's computer."
         if not self.app_version.startswith(AGENT_APP):
-            return "Needs the NexGuard agent: pair this computer again with the NexGuard app."
+            return "Needs the NexGuard agent: pair this computer again with the one-line command."
         return ""
 
     @property

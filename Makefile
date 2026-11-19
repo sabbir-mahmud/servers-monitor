@@ -2,7 +2,7 @@
 PY := $(CURDIR)/venv/bin/python
 MANAGE := cd main && $(PY) manage.py
 
-.PHONY: help install run relay dev test lint format check migrate superuser agent-dev device-agent desktop-app desktop-app-dist
+.PHONY: help install run relay dev test lint format check migrate superuser agent-dev device-agent
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -35,14 +35,6 @@ test: ## Run main + agent tests
 
 device-agent: ## Test the Go device agent and build it for every system into device-agent/dist/
 	cd device-agent && go vet ./... && go test ./... && ./build.sh
-
-desktop-app: ## Run the NexGuard desktop app with this checkout's agent (installs npm packages the first time)
-	cd device-agent && ./build.sh >/dev/null
-	cd desktop-app && ([ -d node_modules ] || npm install) && npm test && npm start
-
-desktop-app-dist: ## Build NexGuard desktop installers for this system, agent inside, into desktop-app/dist/
-	cd device-agent && ./build.sh
-	cd desktop-app && npm ci && npm test && npm run dist
 
 lint: ## Lint and check formatting
 	venv/bin/ruff check .

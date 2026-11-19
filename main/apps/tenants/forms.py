@@ -29,16 +29,6 @@ class AccountSettingsForm(forms.ModelForm):
         _style(self)
 
 
-class PairingSettingsForm(forms.ModelForm):
-    """How computers pair: the NexGuard app only (the default), or the one-line command too."""
-
-    class Meta:
-        model = Account
-        fields = ["computer_pairing"]
-        labels = {"computer_pairing": "How computers connect"}
-        widgets = {"computer_pairing": forms.RadioSelect}
-
-
 class PersonForm(AccountFormMixin, forms.ModelForm):
     class Meta:
         model = Person

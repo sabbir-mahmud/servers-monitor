@@ -5,7 +5,7 @@
 <a class="back-link" href="{{ back_url }}">{% icon "arrow-left" 15 %} {% if device.person %}{{ device.person.name }}{% elif ACCOUNT.kind == "solo" %}Devices{% else %}{{ ACCOUNT.people_label }}{% endif %}</a>
 <div class="page-head"><div>
   <h1 class="page-title">{% if repairing %}Pair {{ device.name }} again{% else %}Pair {{ device.name }}{% endif %}</h1>
-  <p class="page-sub">{% if repairing %}For a device that was reset, or a replacement. Once the new pairing is done, the old one stops reporting.{% else %}Do this on the {{ device.get_platform_display }} itself, with the NexGuard app. It takes a minute.{% endif %}</p>
+  <p class="page-sub">{% if repairing %}For a device that was reset, or a replacement. Once the new pairing is done, the old one stops reporting.{% else %}Do this on the {{ device.get_platform_display }} itself. It takes a minute.{% endif %}</p>
 </div></div>
 
 {% partialdef status inline %}
@@ -32,36 +32,24 @@
 
 <div class="card mb-3"><div class="card-body p-4">
   {% if code and is_computer %}
-  <div class="steps">
-    <div class="step"><span class="step-num"></span><div>
-      <h2>Install the NexGuard app on the {{ device.get_platform_display }}</h2>
-      <p>Free, for Windows, Mac and Linux. It shows {{ device.person.name|default:"them" }} what {{ ACCOUNT.name }} will see before anything is shared, and keeps the agent's status and log in view afterwards.</p>
-      <a class="btn btn-outline-secondary btn-sm" href="{{ app_url }}" target="_blank" rel="noopener">{% icon "download" 14 %} Download NexGuard</a>
-    </div></div>
-    <div class="step"><span class="step-num"></span><div>
-      <h2>Open this link on the {{ device.get_platform_display }}</h2>
-      <p>Send it by email or chat, or type it into the browser there. Its <strong>Open in NexGuard</strong> button fills in the app.</p>
-      <div class="connect-cmd connect-link">
-        <code id="connect-link">{{ connect_link }}</code>
-        <button type="button" class="btn btn-primary btn-sm" data-copy="#connect-link">{% icon "copy" 14 %} <span data-copy-label>Copy link</span></button>
+  <div class="connect-share">
+    <div class="connect-share-head">
+      <span class="connect-share-icon">{% icon "link" 18 %}</span>
+      <div>
+        <h2>Open this link on the {{ device.get_platform_display }}</h2>
+        <p>Send it by email or chat, or type it into the browser there. The page walks them through it: open {% if device.platform == "windows" %}PowerShell{% else %}Terminal{% endif %}, paste one line, say yes.</p>
       </div>
-      <p class="small text-body-secondary mb-0">Or type it into the app: code <code class="pair-code-inline" id="pair-code">{{ display_code }}</code> and dashboard <code id="pair-server">{{ server_url }}</code>
-        <button type="button" class="btn btn-sm btn-link p-0 ms-1" data-copy="#pair-server">{% icon "copy" 13 %} <span data-copy-label>Copy</span></button></p>
-    </div></div>
-    <div class="step"><span class="step-num"></span><div>
-      <h2>Check what the app says, then choose Allow</h2>
-      <p class="mb-0">It names exactly what {{ ACCOUNT.name }} will see. For website blocking, keep <em>Protected install</em> on: it asks for an administrator password once.</p>
-    </div></div>
+    </div>
+    <div class="connect-cmd connect-link">
+      <code id="connect-link">{{ connect_link }}</code>
+      <button type="button" class="btn btn-primary btn-sm" data-copy="#connect-link">{% icon "copy" 14 %} <span data-copy-label>Copy link</span></button>
+    </div>
+    <p class="small text-body-secondary mb-0">Works once. Lost it? Make a new code below; this one stops working.</p>
   </div>
-  <p class="small text-body-secondary mt-3 mb-0">The code works once. Lost it? Make a new code below; this one stops working.</p>
-  {% if allow_command %}
   <details class="connect-direct">
-    <summary>No app? At the {{ device.get_platform_display }} yourself, paste one line instead</summary>
+    <summary>At the {{ device.get_platform_display }} yourself? Do it from here</summary>
     {% include "devices/_connect_steps.html" with suffix="-direct" %}
   </details>
-  {% else %}
-  <p class="small text-body-secondary mt-2 mb-0">{% icon "info" 13 %} {{ ACCOUNT.name }} connects computers with the NexGuard app only.{% if can_change_pairing %} <a href="{% url 'tenants:settings' %}#pairing">Allow the one-line command too</a>{% endif %}</p>
-  {% endif %}
   {% elif code %}
   <div class="pair-grid">
     <div>

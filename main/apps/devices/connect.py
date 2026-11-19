@@ -1,15 +1,11 @@
-"""Connecting a computer: one link to open on it.
+"""Connecting a computer without installing anything first: one link, one line to paste.
 
 The dashboard shows a link like https://monitor.example.com/d/K7PQ-3MXA. Opened on the
-computer, it says how to get the NexGuard desktop app, and has an "Open in NexGuard"
-button (a nexguard://pair link, the same one the phone app's QR code holds) that fills in
-the dashboard address and code. The app shows who will see what and pairs only on a yes.
-
-Accounts that allow it (Account settings > Pairing) get `?via=command` on the link: the
-page then also offers the one line to paste into PowerShell or Terminal. It downloads a
-short script from this dashboard with the code filled in, which shows the same disclosure,
-pairs on a yes and installs the agent. Pairing refuses that route for accounts that need
-the app, so the query string is only about what the page shows.
+computer, it shows the one command for that computer's system (Windows PowerShell, or
+Terminal on a Mac or Linux) with a Copy button. The command downloads a short script from
+this dashboard with the code already filled in. The script shows who will see what, pairs
+only if the person says yes, and installs a check-in that runs as that user every few
+minutes (no administrator rights, nothing to keep open).
 
 These pages need no sign-in and never look the code up: a well-formed code is all they
 check, so they can't be used to test whether a code is valid. Pairing itself (POST
@@ -18,7 +14,7 @@ check, so they can't be used to test whether a code is valid. Pairing itself (PO
 
 import re
 from pathlib import Path
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.http import FileResponse, Http404, HttpResponse
@@ -79,25 +75,15 @@ def commands(server: str, code: str) -> dict:
     }
 
 
-def link(server: str, code: str, *, command: bool = False) -> str:
-    return f"{server}/d/{code[:4]}-{code[4:]}" + ("?via=command" if command else "")
+def link(server: str, code: str) -> str:
+    return f"{server}/d/{code[:4]}-{code[4:]}"
 
 
-def app_link(server: str, code: str) -> str:
-    """Opens the desktop app (or the phone app) at its pair screen, filled in."""
-    return "nexguard://pair?" + urlencode({"server": server, "code": code})
-
-
-def connect_context(server: str, code: str, *, command: bool = False) -> dict:
+def connect_context(server: str, code: str) -> dict:
     code = pairing.normalize_code(code)
     cmds = commands(server, code)
     return {
-        "connect_link": link(server, code, command=command),
-        "allow_command": command,
-        "app_link": app_link(server, code),
-        "app_url": settings.DESKTOP_APP_URL,
-        "display_code": f"{code[:4]}-{code[4:]}",
-        "server_url": server,
+        "connect_link": link(server, code),
         "systems": [{"key": key, "command": cmds[key], **info} for key, info in SYSTEMS.items()],
         "uninstall": {
             "windows": f"irm {server}/d/uninstall.ps1 | iex",
@@ -117,7 +103,7 @@ def _private(response: HttpResponse) -> HttpResponse:
 
 def page(request, code):
     code = clean_code(code)
-    ctx = connect_context(server_url(request), code, command=request.GET.get("via") == "command")
+    ctx = connect_context(server_url(request), code)
     ctx["AUTH_PAGE"] = True  # no sidebar, even for a signed-in parent testing the link
     return _private(render(request, "devices/connect.html", ctx))
 

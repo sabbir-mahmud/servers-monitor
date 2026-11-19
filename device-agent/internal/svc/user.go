@@ -19,7 +19,7 @@ const (
 )
 
 // UserBinary is where a per-person install keeps its copy of the agent: in its own folder,
-// so the program that installed it (the desktop app, a download) can move or update.
+// so whatever installed it can move or update it.
 func UserBinary() string {
 	name := "nexguard"
 	if runtime.GOOS == "windows" {

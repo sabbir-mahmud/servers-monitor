@@ -14,7 +14,7 @@ from apps.core.mixins import StaffViewMixin
 from apps.users import accounts
 
 from . import services
-from .forms import AccountSettingsForm, PairingSettingsForm, PersonForm
+from .forms import AccountSettingsForm, PersonForm
 from .models import Membership, Person
 from .roles import KIND_HELP, Kind
 from .scoping import AccountScopedMixin
@@ -96,16 +96,12 @@ class AccountSettingsView(LoginRequiredMixin, View):
 
     template_name = "tenants/settings.html"
 
-    def _context(self, request, form=None, pairing_form=None):
+    def _context(self, request, form=None):
         account = request.account
         can_edit = request.user.has_perm("tenants.change_account")
-        has_devices = account.has("devices")
         return {
             "account": account,
             "form": form or (AccountSettingsForm(instance=account) if can_edit else None),
-            "has_devices": has_devices,
-            "pairing_form": pairing_form
-            or (PairingSettingsForm(instance=account) if can_edit and has_devices else None),
             "can_edit": can_edit,
             "owners": accounts.owners(account).select_related("user"),
             "kind_help": KIND_HELP.get(account.kind, ""),
@@ -130,8 +126,6 @@ class AccountSettingsView(LoginRequiredMixin, View):
             return redirect("home")
         if not request.user.has_perm("tenants.change_account"):
             raise Http404
-        if action == "pairing":
-            return self._save_pairing(request)
         form = AccountSettingsForm(request.POST, instance=request.account)
         if not form.is_valid():
             return render(request, self.template_name, self._context(request, form))
@@ -139,18 +133,6 @@ class AccountSettingsView(LoginRequiredMixin, View):
         record(request, "account.update", target=request.account.name, fields=form.changed_data)
         messages.success(request, "Account saved.")
         return redirect("tenants:settings")
-
-    def _save_pairing(self, request):
-        if not request.account.has("devices"):
-            raise Http404
-        form = PairingSettingsForm(request.POST, instance=request.account)
-        if not form.is_valid():
-            return render(request, self.template_name, self._context(request, pairing_form=form))
-        account = form.save()
-        record(request, "account.pairing", target=account.name,
-               computer_pairing=account.computer_pairing)  # fmt: skip
-        messages.success(request, "Pairing saved. It applies to the next computer that pairs.")
-        return redirect(f"{reverse('tenants:settings')}#pairing")
 
 
 # --------------------------------------------------------------------------- people

@@ -1,5 +1,5 @@
 // Package logs keeps the agent's own log as a small file next to its config, one JSON
-// object per line, so the person using the computer (and the NexGuard desktop app) can see
+// object per line, so the person using the computer can see
 // what it does: check-ins, settings the dashboard switched on or off, and errors. It holds
 // no secrets: never the pairing token, never a website or an app name.
 //

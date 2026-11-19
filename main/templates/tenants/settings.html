@@ -42,7 +42,6 @@
   <div class="acct-layout">
     <nav class="acct-nav" aria-label="Settings sections">
       <a href="#details">{% icon "edit" 16 %}<span>Details</span></a>
-      {% if has_devices %}<a href="#pairing">{% icon "link" 16 %}<span>Pairing</span></a>{% endif %}
       <a href="#owners">{% icon "user" 16 %}<span>Owners</span></a>
       <a href="#accounts">{% icon "switch" 16 %}<span>Your accounts</span></a>
       <a href="#leave">{% icon "logout" 16 %}<span>Leave</span></a>
@@ -79,48 +78,6 @@
         </div>
         {% endif %}
       </section>
-
-      {# -------------------------------------------------------------- pairing #}
-      {% if has_devices %}
-      <section class="acct-section" id="pairing" aria-labelledby="pairing-title">
-        <div class="acct-section-head">
-          <h2 class="acct-section-title" id="pairing-title">Pairing</h2>
-          <p class="acct-section-sub">How a Windows, Mac or Linux computer connects to {{ account.name }}. Phones always use the phone app.</p>
-        </div>
-        {% if pairing_form %}
-        <form class="card" method="post" action="{% url 'tenants:settings' %}#pairing" novalidate>{% csrf_token %}<input type="hidden" name="action" value="pairing">
-          <div class="card-body form-section">
-            <fieldset>
-              <legend class="form-label">{{ pairing_form.computer_pairing.label }}</legend>
-              <div class="kind-grid">
-                {% for radio in pairing_form.computer_pairing %}
-                <label class="kind-card">{{ radio.tag }}
-                  <span class="kind-title">{{ radio.choice_label }}{% if radio.data.value == "app" %} <span class="chip">Recommended</span>{% endif %}</span>
-                  <span class="kind-help">{% if radio.data.value == "app" %}The person installs the NexGuard app and enters the code there. The app shows what you'll see before anything is shared, then keeps the agent's status and log in view on that computer.{% else %}Also allow pasting one line into Terminal or PowerShell, with nothing to install first. The pair page then shows both ways.{% endif %}</span>
-                </label>
-                {% endfor %}
-              </div>
-              {% for e in pairing_form.computer_pairing.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
-            </fieldset>
-          </div>
-          <div class="acct-card-foot">
-            <span class="acct-foot-note">{% icon "info" 14 %} Computers already paired keep working either way.</span>
-            <button class="btn btn-primary">Save pairing</button>
-          </div>
-        </form>
-        {% else %}
-        <div class="card acct-list">
-          <div class="acct-row">
-            <span class="acct-row-icon">{% icon "link" 18 %}</span>
-            <div class="acct-row-text">
-              <div class="acct-row-title">{{ account.get_computer_pairing_display }}</div>
-              <div class="acct-row-sub">Only an owner can change how computers connect.</div>
-            </div>
-          </div>
-        </div>
-        {% endif %}
-      </section>
-      {% endif %}
 
       {# --------------------------------------------------------------- owners #}
       <section class="acct-section" id="owners" aria-labelledby="owners-title">
