@@ -1,0 +1,30 @@
+{% load monitor %}<li class="srow srow-device is-{{ r.status }}{% if r.battery_low and r.status == 'online' %} is-late{% endif %}{% if not r.is_paired %} is-waiting{% endif %}">
+  <div class="srow-name">
+    <span class="srow-mark tone-{{ r.status|health_tone }}" aria-hidden="true">{% icon r|device_icon 17 %}</span>
+    <div class="min-w-0">
+      <a class="prow-link" href="{% if r.is_paired %}{% url 'devices:detail' r.pk %}{% else %}{% url 'devices:pair' r.pk %}{% endif %}">{{ r.name }}</a>
+      <div class="srow-tags">
+        <span class="group-tag">{{ r.get_platform_display }}</span>
+        {% if r.summary %}<span class="prow-note text-truncate" title="{{ r.summary }}">{{ r.summary }}</span>{% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="srow-health">{% device_badge r.state %}</div>
+  {% if not r.is_paired %}
+  <div class="srow-pair">
+    <span class="text-body-secondary small">Open NexGuard on the {% if r.is_phone %}phone{% else %}computer{% endif %} and pair it with a code.</span>
+    {% if perms.devices.add_device %}<a class="btn btn-sm btn-outline-secondary" href="{% url 'devices:pair' r.pk %}">{% icon "qr" 14 %} Finish pairing</a>{% endif %}
+  </div>
+  {% else %}
+  {% if r.is_phone %}
+  <div class="srow-metric srow-span2"><span class="drow-label">Network</span>{% if r.network %}<span class="srow-net-chip">{% icon "network" 13 %} {% if r.network == "wifi" %}Wi-Fi{% if r.network_name %} · {{ r.network_name }}{% endif %}{% elif r.network == "cellular" %}Mobile data{% elif r.network == "ethernet" %}Wired{% else %}Offline{% endif %}</span>{% else %}<span class="empty-val">—</span>{% endif %}{% if r.has_location %}<div class="prow-sub">{% icon "map-pin" 11 %} Location {{ r.location_at|ago }}</div>{% endif %}</div>
+  {% else %}
+  <div class="srow-metric"><span class="drow-label">CPU</span>{% meter r.cpu_percent "CPU" %}</div>
+  <div class="srow-metric"><span class="drow-label">Memory</span>{% meter r.memory_used_percent "Memory" %}</div>
+  {% endif %}
+  <div class="srow-metric"><span class="drow-label">Storage</span>{% meter r.storage_used_percent "Storage used" %}{% if r.storage_free is not None %}<div class="prow-sub">{{ r.storage_free|filesizeformat }} free</div>{% endif %}</div>
+  <div class="srow-metric"><span class="drow-label">Battery</span>{% if r.battery_percent is not None %}<span class="batt {% if r.battery_low %}is-low{% elif r.charging %}is-charging{% endif %}"><span class="batt-body" aria-hidden="true"><span class="batt-fill" style="width: {{ r.battery_percent }}%"></span></span><span class="batt-text">{% if r.charging %}<span class="batt-bolt">{% icon "bolt" 11 %}</span>{% endif %}{{ r.battery_percent }}%</span></span>{% if r.charging %}<div class="prow-sub">Charging</div>{% endif %}{% else %}<span class="empty-val">No battery</span>{% endif %}</div>
+  {% endif %}
+  <div class="srow-num"><span class="drow-label">Last seen</span><span {% if r.last_seen_at %}title="{{ r.last_seen_at }}"{% endif %}>{% if not r.is_paired %}—{% else %}{{ r.last_seen_at|ago }}{% endif %}</span></div>
+  <span class="prow-chevron" aria-hidden="true">{% icon "chevron" 16 %}</span>
+</li>

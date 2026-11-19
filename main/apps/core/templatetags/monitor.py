@@ -174,6 +174,15 @@ def device_icon(device_or_platform):
 
 
 @register.filter
+def status_counts(rows) -> dict:
+    """{status: how many} for a list of dashboard rows (each has .status)."""
+    counts = {}
+    for r in rows:
+        counts[r.status] = counts.get(r.status, 0) + 1
+    return counts
+
+
+@register.filter
 def health_tone(health):
     return HEALTH_BADGES.get(health, ("muted",))[0]
 

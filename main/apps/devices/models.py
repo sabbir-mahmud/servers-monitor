@@ -236,6 +236,17 @@ class Device(Machine):
         return round(100 * (self.storage_total - self.storage_free) / self.storage_total)
 
     @property
+    def summary(self) -> str:
+        """ "Apple M1 · macOS 27.2.1": the hardware and system, without repeating the
+        platform name the agent puts in front of the model."""
+        model = self.model
+        for prefix in (self.get_platform_display() + " · ", "Mac · "):
+            model = model.removeprefix(prefix)
+        if model == self.get_platform_display() or model in ("arm64", "amd64", "x86_64"):
+            model = ""
+        return " · ".join(x for x in (model, self.os_version) if x)
+
+    @property
     def memory_used_percent(self) -> int | None:
         if not self.memory_total or self.memory_used is None:
             return None

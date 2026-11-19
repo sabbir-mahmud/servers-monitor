@@ -1914,3 +1914,29 @@ kbd { font-family: var(--font-mono); font-size: .85em; padding: .05rem .4rem; bo
 .status-incident:last-child { border-bottom: 0; }
 .status-foot { font-size: .78rem; color: var(--muted); text-align: center; margin-top: 1.5rem; }
 @media (max-width: 575px) { .status-public .ubar-tall > i:nth-child(-n+60) { display: none; } .status-row-foot span:first-child { visibility: hidden; } }
+
+/* Devices page: type tabs, a section per kind, device rows */
+.srow-device { grid-template-columns: minmax(180px, 1.6fr) 120px repeat(4, minmax(72px, 1fr)) 92px 20px; }
+.srow-device .srow-tags { flex-wrap: nowrap; min-width: 0; }
+.srow-device .srow-tags .group-tag { flex: none; }
+.srow-span2 { grid-column: span 2; }
+.srow-pair { grid-column: 3 / 7; display: flex; align-items: center; justify-content: space-between; gap: .75rem;
+  padding: .45rem .75rem; border: 1px dashed var(--line-strong, var(--line)); border-radius: var(--radius-sm); }
+.srow.is-waiting .srow-mark { background: transparent; border: 1px dashed var(--line-strong, var(--line)); }
+.srow-net-chip { display: inline-flex; align-items: center; gap: .35rem; font-size: .84rem; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.srow-tags .prow-note { margin: 0; min-width: 0; display: block; }
+.srow .empty-val { font-size: .82rem; color: var(--muted); }
+.fleet-empty { padding: 2.5rem 1rem; text-align: center; color: var(--muted); }
+.fleet-empty p { max-width: 30rem; margin: .35rem auto 1.1rem; font-size: .9rem; }
+.fleet-empty-mark { display: inline-grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; background: var(--surface-3); margin-bottom: .6rem; }
+.srow-pair { min-width: 0; }
+@media (max-width: 1199.98px) {
+  .srow-device { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .srow-pair { grid-column: 1 / -1; }
+  .srow.is-waiting .srow-num { display: none; }
+}
+@media (max-width: 575.98px) {
+  .srow-device { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .srow-device .srow-span2 { grid-column: 1 / -1; }
+  .srow-pair { flex-direction: column; align-items: stretch; }
+}

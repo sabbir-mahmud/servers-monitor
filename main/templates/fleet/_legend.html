@@ -1,0 +1,6 @@
+{% load monitor %}<div class="fleet-legend" aria-label="Status counts">{% with s=rows|status_counts %}
+  {% if s.online %}<span><span class="dot dot-good"></span>{{ s.online }} online</span>{% endif %}
+  {% if s.late %}<span><span class="dot dot-warning"></span>{{ s.late }} late</span>{% endif %}
+  {% if s.offline %}<span><span class="dot dot-critical"></span>{{ s.offline }} offline</span>{% endif %}
+  {% if s.pending %}<span><span class="dot"></span>{{ s.pending }} waiting</span>{% endif %}
+{% endwith %}</div>

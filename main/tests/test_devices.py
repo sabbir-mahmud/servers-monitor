@@ -304,7 +304,7 @@ def solo_dev(client, django_user_model):
 
 def test_solo_devices_page_offers_a_server_or_a_computer_or_phone(client, solo_dev):
     page = client.get(reverse("fleet:dashboard")).content.decode()
-    assert "No servers or devices connected yet." in page
+    assert "Nothing connected yet" in page
     assert reverse("fleet:server_create") in page and reverse("devices:create") in page
 
 

@@ -1,0 +1,19 @@
+{% load monitor %}<li class="srow{% if mixed %} srow-device{% endif %} is-{{ r.status }}">
+  <div class="srow-name">
+    <span class="srow-mark tone-{{ r.status|health_tone }}" aria-hidden="true">{% icon "server" 17 %}</span>
+    <div class="min-w-0">
+      <a class="prow-link" href="{% url 'fleet:server_detail' r.pk %}">{{ r.name }}</a>
+      <div class="srow-tags">
+        <span class="env-tag env-{{ r.environment }}"><span class="env-dot" aria-hidden="true"></span>{{ r.get_environment_display }}</span>
+        {% for g in r.groups.all %}<span class="group-tag">{{ g.name }}</span>{% endfor %}
+      </div>
+    </div>
+  </div>
+  <div class="srow-health">{% health_badge r.status %}</div>
+  <div class="srow-metric"><span class="drow-label">CPU</span>{% meter r.cpu_percent "CPU" %}</div>
+  <div class="srow-metric"><span class="drow-label">Memory</span>{% meter r.memory_percent "Memory" %}</div>
+  <div class="srow-metric"><span class="drow-label">Disk</span>{% meter r.disk_percent "Disk" %}{% with f=r.disk_full_at|fills_in %}{% if f %}<div class="srow-warn" title="Forecast from the last week's growth">{{ f }}</div>{% endif %}{% endwith %}</div>
+  {% if mixed %}<div class="srow-metric srow-na"><span class="drow-label">Battery</span><span class="empty-val">—</span></div>{% endif %}
+  <div class="srow-num"><span class="drow-label">Last seen</span><span {% if r.last_seen_at %}title="{{ r.last_seen_at }}"{% endif %}>{{ r.last_seen_at|ago }}</span></div>
+  <span class="prow-chevron" aria-hidden="true">{% icon "chevron" 16 %}</span>
+</li>

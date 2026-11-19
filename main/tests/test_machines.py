@@ -69,7 +69,8 @@ def test_solo_page_is_one_table_in_a_fixed_number_of_queries(client, solo):
     assert page_queries() == before  # no query per row
 
     page = client.get(reverse("fleet:dashboard")).content.decode()
-    assert page.count('class="srow srow-mixed') == 12  # one row each, one table
+    assert page.count('<li class="srow srow-device') == 12  # one row each, one table
+    assert "6 servers · 5 computers · 1 phone" in page
     servers_only = client.get(reverse("fleet:dashboard"), {"kind": "server"}).content.decode()
     assert ">web-01</a>" in servers_only and ">Phone</a>" not in servers_only
 

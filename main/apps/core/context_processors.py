@@ -94,6 +94,8 @@ def _nav_counts(user, account) -> dict:
             "person_id", "platform", "token_hash", "last_seen_at", "battery_percent", "charging"
         )
         counts["people_attention"] = len({d.person_id for d in devices if d.attention})
+        if account.kind == "solo":  # their own computers and phones: a sidebar link of its own
+            counts["devices"] = Device.objects.filter(account=account).count()
     if user.is_superuser:
         # A dot on System when nobody would be told the dashboard died.
         counts["system_problem"] = not settings.WATCHDOG_URL

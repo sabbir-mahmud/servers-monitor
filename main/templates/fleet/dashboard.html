@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% load monitor %}
-{% block title %}{{ MACHINES|capfirst }}{% endblock %}
+{% block title %}{% if kind == "server" %}Servers{% elif kind == "device" %}Devices{% else %}{{ MACHINES|capfirst }}{% endif %}{% endblock %}
 {% block content %}
 <div class="page-head">
   <div>
-    <h1 class="page-title">{{ MACHINES|capfirst }}</h1>
-    <p class="page-sub">{% if with_devices %}Your servers, computers and phones in one place.{% else %}Live health across your fleet.{% endif %} <span class="live-badge ms-1"><span class="dot"></span>Live</span></p>
+    <h1 class="page-title">{% if kind == "server" %}Servers{% elif kind == "device" %}Devices{% else %}{{ MACHINES|capfirst }}{% endif %}</h1>
+    <p class="page-sub">{% if kind == "server" %}Live health across your servers.{% elif kind == "device" %}Your own computers and phones.{% elif with_devices %}Your servers, computers and phones in one place.{% else %}Live health across your fleet.{% endif %} <span class="live-badge ms-1"><span class="dot"></span>Live</span></p>
   </div>
   <div class="page-actions">
     {% if perms.operations.add_job and overview.servers %}<a class="btn btn-outline-secondary" href="{% url 'operations:job_create' %}">{% icon "play" %} Run on servers</a>{% endif %}
@@ -26,7 +26,7 @@
   <div class="statbar-item">
     <span class="statbar-label">Online</span>
     <span class="statbar-value {% if overview.total and overview.online == overview.total %}text-good{% endif %}">{{ overview.online }}<span class="statbar-of"> / {{ overview.total }}</span></span>
-    <span class="statbar-sub">{% if with_devices %}servers, computers and phones{% else %}servers reporting{% endif %}</span>
+    <span class="statbar-sub text-truncate">{% if with_devices %}{{ mix.servers }} server{{ mix.servers|pluralize }} · {{ mix.computers }} computer{{ mix.computers|pluralize }} · {{ mix.phones }} phone{{ mix.phones|pluralize }}{% else %}servers reporting{% endif %}</span>
   </div>
   <div class="statbar-item">
     <span class="statbar-label">Need a look</span>
@@ -48,17 +48,13 @@
 
 {% if overview.total or filtering %}
 <form class="fleet-toolbar" method="get" role="search" hx-get="{% url 'fleet:dashboard' %}" hx-target="#fleet" hx-swap="outerHTML" hx-push-url="true" hx-trigger="change, keyup changed delay:300ms from:input[name=q]">
+  {% if kind %}<input type="hidden" name="kind" value="{{ kind }}">{% endif %}
   <div class="plist-search">
     <span class="plist-search-icon" aria-hidden="true">{% icon "search" 15 %}</span>
-    <input class="form-control form-control-sm" type="search" name="q" placeholder="Search {{ MACHINES }}" value="{{ filters.q|default:'' }}" aria-label="Search {{ MACHINES }}">
+    <input class="form-control form-control-sm" type="search" name="q" placeholder="Search {% if kind == "server" %}servers{% elif kind == "device" %}devices{% else %}{{ MACHINES }}{% endif %}" value="{{ filters.q|default:'' }}" aria-label="Search {{ MACHINES }}">
   </div>
   <div class="fleet-filters">
-    {% if with_devices %}
-    <select class="form-select form-select-sm" name="kind" aria-label="Type">
-      <option value="">All types</option>
-      {% for value, label in kinds %}<option value="{{ value }}" {% if filters.kind == value %}selected{% endif %}>{% if value == "server" %}Servers{% else %}Computers &amp; phones{% endif %}</option>{% endfor %}
-    </select>
-    {% endif %}
+    {% if kind != "device" %}
     <select class="form-select form-select-sm" name="environment" aria-label="Environment">
       <option value="">All environments</option>
       {% for value, label in environments %}<option value="{{ value }}" {% if filters.environment == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
@@ -68,6 +64,7 @@
       <option value="">All groups</option>
       {% for g in groups %}<option value="{{ g.name }}" {% if filters.group == g.name %}selected{% endif %}>{{ g.name }}</option>{% endfor %}
     </select>
+    {% endif %}
     {% endif %}
     <select class="form-select form-select-sm" name="health" aria-label="Status">
       <option value="">Any status</option>
@@ -81,62 +78,35 @@
 <div id="fleet" hx-get="{{ request.get_full_path }}" hx-trigger="every 10s" hx-swap="outerHTML">
 {% if request.htmx %}{% partial stats %}{% endif %}
 
-<section class="card fleet-card" aria-labelledby="machines-title">
-  <div class="dlist-head">
-    <h2 class="card-title-lg mb-0" id="machines-title">{% if with_devices %}All devices{% else %}Servers{% endif %} <span class="count-pill">{{ rows|length }}</span></h2>
-    {% if overview.total %}
-    <div class="fleet-legend" aria-label="Status counts">
-      <span><span class="dot dot-good"></span>{{ overview.online }} online</span>
-      {% if overview.late %}<span><span class="dot dot-warning"></span>{{ overview.late }} late</span>{% endif %}
-      {% if overview.offline %}<span><span class="dot dot-critical"></span>{{ overview.offline }} offline</span>{% endif %}
-      {% if overview.pending %}<span><span class="dot"></span>{{ overview.pending }} waiting</span>{% endif %}
-    </div>
-    {% endif %}
-  </div>
-
-  <div class="srow srow-head {% if with_devices %}srow-mixed{% endif %}" aria-hidden="true">
-    <span>{% if with_devices %}Device{% else %}Server{% endif %}</span><span>Status</span><span>CPU</span><span>Memory</span><span>Disk</span>{% if with_devices %}<span>Battery</span>{% endif %}<span class="num">Last seen</span><span></span>
-  </div>
-  {% if rows %}
-  <ul class="plist-rows" role="list">
-    {% for r in rows %}
-    <li class="srow {% if with_devices %}srow-mixed{% endif %} is-{{ r.status }}{% if r.kind == 'device' and r.battery_low and r.status == 'online' %} is-late{% endif %}">
-      <div class="srow-name">
-        <span class="srow-mark tone-{{ r.status|health_tone }}" aria-hidden="true">{% if r.kind == "server" %}{% icon "server" 17 %}{% else %}{% icon r|device_icon 17 %}{% endif %}</span>
-        <div class="min-w-0">
-          {% if r.kind == "server" %}
-          <a class="prow-link" href="{% url 'fleet:server_detail' r.pk %}">{{ r.name }}</a>
-          <div class="srow-tags">
-            <span class="env-tag env-{{ r.environment }}"><span class="env-dot" aria-hidden="true"></span>{{ r.get_environment_display }}</span>
-            {% for g in r.groups.all %}<span class="group-tag">{{ g.name }}</span>{% endfor %}
-          </div>
-          {% else %}
-          <a class="prow-link" href="{% if r.is_paired %}{% url 'devices:detail' r.pk %}{% else %}{% url 'devices:pair' r.pk %}{% endif %}">{{ r.name }}</a>
-          <div class="prow-note text-truncate">{{ r.model|default:r.get_platform_display }}{% if r.os_version %} · {{ r.os_version }}{% endif %}</div>
-          {% endif %}
-        </div>
-      </div>
-      <div class="srow-health">{% if r.kind == "server" %}{% health_badge r.status %}{% else %}{% device_badge r.state %}{% endif %}</div>
-      {% if r.kind == "server" %}
-      <div class="srow-metric"><span class="drow-label">CPU</span>{% meter r.cpu_percent "CPU" %}</div>
-      <div class="srow-metric"><span class="drow-label">Memory</span>{% meter r.memory_percent "Memory" %}</div>
-      <div class="srow-metric"><span class="drow-label">Disk</span>{% meter r.disk_percent "Disk" %}{% with f=r.disk_full_at|fills_in %}{% if f %}<div class="srow-warn" title="Forecast from the last week's growth">{{ f }}</div>{% endif %}{% endwith %}</div>
-      {% if with_devices %}<div class="srow-metric srow-na"><span class="drow-label">Battery</span><span class="empty-val">—</span></div>{% endif %}
-      {% else %}
-      <div class="srow-metric srow-na"><span class="drow-label">CPU</span><span class="empty-val">—</span></div>
-      <div class="srow-metric srow-na"><span class="drow-label">Memory</span><span class="empty-val">—</span></div>
-      <div class="srow-metric"><span class="drow-label">Disk</span>{% meter r.storage_used_percent "Storage used" %}{% if r.storage_free is not None %}<div class="prow-sub">{{ r.storage_free|filesizeformat }} free</div>{% endif %}</div>
-      <div class="srow-metric"><span class="drow-label">Battery</span>{% if r.battery_percent is not None %}<span class="batt {% if r.battery_low %}is-low{% elif r.charging %}is-charging{% endif %}"><span class="batt-body" aria-hidden="true"><span class="batt-fill" style="width: {{ r.battery_percent }}%"></span></span><span class="batt-text">{% if r.charging %}<span class="batt-bolt">{% icon "bolt" 11 %}</span>{% endif %}{{ r.battery_percent }}%</span></span>{% else %}<span class="empty-val">—</span>{% endif %}</div>
-      {% endif %}
-      <div class="srow-num"><span class="drow-label">Last seen</span><span {% if r.last_seen_at %}title="{{ r.last_seen_at }}"{% endif %}>{% if r.kind == "device" and not r.is_paired %}Not paired{% else %}{{ r.last_seen_at|ago }}{% endif %}</span></div>
-      <span class="prow-chevron" aria-hidden="true">{% icon "chevron" 16 %}</span>
-    </li>
-    {% endfor %}
-  </ul>
+{% if not rows %}
+<section class="card fleet-card">
+  {% if filtering %}<div class="table-empty">Nothing matches. <a href="{% url 'fleet:dashboard' %}">Clear filters</a></div>
   {% else %}
-  <div class="table-empty">{% if filtering %}Nothing matches. <a href="{% url 'fleet:dashboard' %}">Clear filters</a>{% elif with_devices %}No servers or devices connected yet.{% else %}No servers connected yet.{% endif %}</div>
+  <div class="fleet-empty">
+    <span class="fleet-empty-mark" aria-hidden="true">{% icon "server" 22 %}</span>
+    <div class="empty-title">{% if with_devices %}Nothing connected yet{% else %}No servers connected yet{% endif %}</div>
+    <p>{% if with_devices %}Add a Linux server to watch its health and run commands, or your own laptop or phone to see it's online, its battery and storage.{% else %}Install the agent on a server to see its health here.{% endif %}</p>
+    <div class="d-flex flex-wrap justify-content-center gap-2">
+      {% if perms.fleet.add_server %}<a class="btn btn-primary" href="{% url 'fleet:server_create' %}">{% icon "server" %} Add a server</a>{% endif %}
+      {% if with_devices and perms.devices.add_device %}<a class="btn btn-outline-secondary" href="{% url 'devices:create' %}">{% icon "laptop" %} Add a computer or phone</a>{% endif %}
+    </div>
+  </div>
   {% endif %}
 </section>
+{% endif %}
+
+{% if rows %}
+<section class="card fleet-card" aria-labelledby="machines-title">
+  <div class="dlist-head">
+    <h2 class="card-title-lg mb-0" id="machines-title">{% if kind == "server" %}Servers{% elif kind == "device" %}Computers &amp; phones{% else %}All devices{% endif %} <span class="count-pill">{{ rows|length }}</span></h2>
+    {% include "fleet/_legend.html" %}
+  </div>
+  <div class="srow srow-head {% if kind != 'server' %}srow-device{% endif %}" aria-hidden="true">
+    <span>{% if kind == "server" %}Server{% else %}Device{% endif %}</span><span>Status</span><span>CPU</span><span>Memory</span><span>{% if kind == "device" %}Storage{% else %}Disk{% endif %}</span>{% if kind != "server" %}<span>Battery</span>{% endif %}<span class="num">Last seen</span><span></span>
+  </div>
+  <ul class="plist-rows" role="list">{% for r in rows %}{% if r.kind == "server" %}{% if kind %}{% include "fleet/_server_row.html" %}{% else %}{% include "fleet/_server_row.html" with mixed=True %}{% endif %}{% else %}{% include "fleet/_device_row.html" %}{% endif %}{% endfor %}</ul>
+</section>
+{% endif %}
 </div>
 {% endpartialdef %}
 {% endblock %}

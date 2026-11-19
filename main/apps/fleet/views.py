@@ -95,8 +95,24 @@ class DashboardView(StaffViewMixin, AccountScopedMixin, HtmxTemplateMixin, ListV
         # already-fetched rows rather than as SQL.
         if health := self.request.GET.get("health"):
             rows = [r for r in rows if r.status == health]
+        all_servers = all_computers = all_phones = 0
+        if self.with_devices:  # tab counts: the whole account, whatever is filtered
+            from django.db.models import Count, Q
+
+            from apps.devices.models import PHONES
+
+            c = scoped(self.request, Machine).aggregate(
+                servers=Count("pk", filter=Q(kind=MachineKind.SERVER)),
+                devices=Count("pk", filter=Q(kind=MachineKind.DEVICE)),
+                phones=Count("pk", filter=Q(device__platform__in=PHONES)),
+            )
+            all_servers, all_phones = c["servers"], c["phones"]
+            all_computers = c["devices"] - c["phones"]
+        kind = self.request.GET.get("kind", "") if self.with_devices else MachineKind.SERVER
         ctx.update(
             rows=rows,
+            mix={"servers": all_servers, "computers": all_computers, "phones": all_phones},
+            kind=kind if kind in MachineKind.values else "",
             overview=overview,
             with_devices=self.with_devices,
             filtering=any(
