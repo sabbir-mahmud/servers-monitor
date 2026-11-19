@@ -95,6 +95,10 @@ class Server(Machine):
     memory_total = models.BigIntegerField(null=True, blank=True)
     uptime_seconds = models.BigIntegerField(null=True, blank=True)
     remote_addr = models.GenericIPAddressField(null=True, blank=True)
+    # Browser SSH terminal: what to fill in next time (never a password or key).
+    ssh_host = models.CharField(max_length=255, blank=True)
+    ssh_port = models.PositiveIntegerField(default=22)
+    ssh_user = models.CharField(max_length=64, blank=True)
     capabilities = models.JSONField(default=dict, blank=True)
     services = models.JSONField(default=list, blank=True)
     disks = models.JSONField(default=list, blank=True)

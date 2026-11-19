@@ -349,6 +349,13 @@ MONITOR_COMMAND_OUTPUT_LIMIT = config("MONITOR_COMMAND_OUTPUT_LIMIT", default=25
 # Health checks and webhooks may not reach private/loopback addresses unless you allow it
 # (e.g. to monitor services on your LAN). Cloud metadata (link-local) is always blocked.
 MONITOR_ALLOW_PRIVATE_TARGETS = config("MONITOR_ALLOW_PRIVATE_TARGETS", default=False, cast=bool)
+
+# Browser SSH terminal (apps/operations/ssh.py). Private and loopback addresses only when
+# allowed (SSH to your own LAN); cloud metadata never.
+SSH_ALLOW_PRIVATE_TARGETS = config("SSH_ALLOW_PRIVATE_TARGETS", default=False, cast=bool)
+SSH_IDLE_MINUTES = config("SSH_IDLE_MINUTES", default=30, cast=int)
+SSH_MAX_SESSIONS = config("SSH_MAX_SESSIONS", default=6, cast=int)  # each holds a web thread
+SSH_MAX_SESSIONS_PER_USER = 3
 # Application health checks run concurrently from the relay process.
 MONITOR_CHECK_WORKERS = config("MONITOR_CHECK_WORKERS", default=8, cast=int)
 MONITOR_SWEEP_SECONDS = 15  # offline detection + command expiry, run by the relay bridge

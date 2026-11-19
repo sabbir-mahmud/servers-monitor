@@ -38,6 +38,11 @@ credentials and run `sudo smctl connect` to upgrade them.
 - The agent runs as the unprivileged `server-monitor` user.
 - It runs only actions declared in `agent.toml`, as argv lists with no shell. Arguments from
   the dashboard never change them. Logs can only be tailed if they're declared.
+- The **browser SSH terminal** makes the dashboard an SSH client for Owners and Admins.
+  Passwords and keys pass through once and are never stored or logged, the dashboard's own
+  keys and agent are never offered, host keys are pinned per account on first use, and
+  private addresses need `SSH_ALLOW_PRIVATE_TARGETS`. Serve the dashboard over HTTPS so the
+  password isn't sent in clear between the browser and the dashboard.
 - Free-form shell is off by default, needs `[shell] enabled = true` on the server **and** the
   Admin role in the dashboard, and is audited.
 - **Uptime probes** are off by default (`sudo smctl probes on`). With them on, the dashboard

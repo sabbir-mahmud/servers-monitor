@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% load monitor static %}
+{% block title %}Terminal{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{% static 'vendor/xterm/xterm.css' %}">
+{% if server %}<a class="back-link" href="{% url 'fleet:server_detail' server.pk %}">{% icon "arrow-left" 15 %} {{ server.name }}</a>{% endif %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Terminal</h1>
+    <p class="page-sub">SSH to a server from your browser. This dashboard makes the connection; your password or key is used once and never saved.</p>
+  </div>
+</div>
+
+<div id="ssh-app" data-open="{% url 'operations:ssh_open' %}" data-base="{% url 'operations:ssh' %}">
+  <form id="ssh-form" class="card ssh-form" autocomplete="off" novalidate>
+    <div class="card-body">
+      {% if insecure %}<div class="alert alert-warning small" role="alert">{% icon "alert" %}<div>This page isn't using HTTPS, so your password crosses the network unencrypted between your browser and the dashboard. Use a key, or open the dashboard over HTTPS.</div></div>{% endif %}
+      {% if servers %}
+      <div class="mb-3">
+        <label class="form-label" for="ssh-server">Server</label>
+        <select class="form-select" id="ssh-server" name="server" data-pick>
+          <option value="">Any address…</option>
+          {% for s in servers %}<option value="{{ s.pk }}" data-host="{{ s.ssh_host|default:s.remote_addr|default:'' }}" data-port="{{ s.ssh_port }}" data-user="{{ s.ssh_user }}" {% if server and s.pk == server.pk %}selected{% endif %}>{{ s.name }}{% if s.ssh_host or s.remote_addr %} · {{ s.ssh_host|default:s.remote_addr }}{% endif %}</option>{% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      <div class="row g-3">
+        <div class="col-sm-4"><label class="form-label" for="ssh-user">User</label><input class="form-control mono" id="ssh-user" name="username" value="{{ username }}" placeholder="root" required spellcheck="false" autocapitalize="off"></div>
+        <div class="col-sm-5"><label class="form-label" for="ssh-host">IP or hostname</label><input class="form-control mono" id="ssh-host" name="host" value="{{ host }}" placeholder="203.0.113.10" required spellcheck="false" autocapitalize="off"></div>
+        <div class="col-sm-3"><label class="form-label" for="ssh-port">Port</label><input class="form-control mono" id="ssh-port" name="port" type="number" min="1" max="65535" value="{{ port }}"></div>
+      </div>
+      <div class="segmented mt-3" role="tablist" aria-label="Sign in with">
+        <button type="button" class="active" data-auth="password" aria-pressed="true">Password</button>
+        <button type="button" data-auth="key" aria-pressed="false">Private key</button>
+      </div>
+      <div class="mt-3" data-auth-panel="password">
+        <label class="form-label" for="ssh-password">Password</label>
+        <input class="form-control" id="ssh-password" name="password" type="password" autocomplete="off">
+      </div>
+      <div class="mt-3" data-auth-panel="key" hidden>
+        <label class="form-label" for="ssh-key">Private key</label>
+        <textarea class="form-control mono ssh-key" id="ssh-key" name="private_key" rows="5" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" spellcheck="false"></textarea>
+        <div class="form-text">Paste it or <label class="link-like" for="ssh-key-file">choose the file</label><input id="ssh-key-file" type="file" hidden>. It stays in this page and is sent only to open the connection.</div>
+        <label class="form-label mt-2" for="ssh-passphrase">Passphrase <span class="muted small">(if the key has one)</span></label>
+        <input class="form-control" id="ssh-passphrase" name="passphrase" type="password" autocomplete="off">
+      </div>
+      <div id="ssh-error" class="alert alert-danger mt-3 mb-0" role="alert" hidden></div>
+      <div class="d-flex align-items-center gap-2 mt-3">
+        <button class="btn btn-primary" type="submit" id="ssh-connect">{% icon "terminal" %} Connect</button>
+        <span class="muted small">Closes after {{ idle_minutes }} minutes without typing, or when you leave this page.</span>
+      </div>
+    </div>
+  </form>
+
+  <section id="ssh-session" class="card ssh-session" hidden aria-label="Terminal">
+    <div class="ssh-bar">
+      <span class="ssh-dot" aria-hidden="true"></span>
+      <span class="mono fw-semibold" id="ssh-label"></span>
+      <span class="muted small" id="ssh-state">Connected</span>
+      <div class="ms-auto d-flex gap-2">
+        <button class="btn btn-sm btn-outline-secondary" type="button" id="ssh-full" title="Full screen">{% icon "monitor" 14 %} Full screen</button>
+        <button class="btn btn-sm btn-outline-secondary" type="button" id="ssh-close">{% icon "logout" 14 %} Disconnect</button>
+      </div>
+    </div>
+    <div id="ssh-term" class="ssh-term"></div>
+  </section>
+</div>
+
+{% if host_keys %}
+<details class="card mt-3 ssh-keys">
+  <summary class="card-body py-3">{% icon "key" 15 %} Saved host keys <span class="count-pill">{{ host_keys|length }}</span></summary>
+  <div class="table-responsive"><table class="table align-middle mb-0">
+    <thead><tr><th>Server</th><th>Fingerprint</th><th>Saved</th><th></th></tr></thead>
+    <tbody>{% for k in host_keys %}
+      <tr><td class="mono">{{ k.host }}:{{ k.port }}</td><td class="mono small">{{ k.key_type }} {{ k.fingerprint }}</td><td class="small">{{ k.created_at|date:"M j, Y" }}</td>
+      <td class="text-end"><form method="post" action="{% url 'operations:ssh_forget_key' k.pk %}">{% csrf_token %}<button class="btn btn-sm btn-outline-secondary" title="After reinstalling the server: accept its new key on the next connection">Forget</button></form></td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+</details>
+{% endif %}
+
+<script src="{% static 'vendor/xterm/xterm.js' %}"></script>
+<script src="{% static 'vendor/xterm/addon-fit.js' %}"></script>
+<script src="{% static 'js/ssh.js' %}"></script>
+{% endblock %}

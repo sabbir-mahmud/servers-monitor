@@ -196,3 +196,23 @@ class Schedule(models.Model):
             .distinct()
             .order_by("name")
         )
+
+
+class SshHostKey(models.Model):
+    """A server's SSH host key, saved the first time anyone in the account connects to it
+    from the browser terminal. Later connections must present the same key."""
+
+    account = models.ForeignKey("tenants.Account", on_delete=models.CASCADE, related_name="+")
+    host = models.CharField(max_length=255)
+    port = models.PositiveIntegerField(default=22)
+    key_type = models.CharField(max_length=40)
+    fingerprint = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["account", "host", "port"], name="ssh_host_key_unique"),
+        ]
+
+    def __str__(self):
+        return f"{self.host}:{self.port} {self.fingerprint}"

@@ -74,6 +74,12 @@ See [agent.md](agent.md).
 - **Service control:** restart services; tail or **follow logs live** (files and systemd
   journals).
 - **Optional shell:** audited.
+- **SSH terminal in the browser** (Owner and Admin): type the user, IP and port, sign in
+  with a password or private key, and get a full interactive terminal (`top`, `vim`,
+  `sudo`). The dashboard is the SSH client, so the server's SSH port must be reachable from
+  the dashboard. Passwords and keys are used once and never saved; host keys are saved on
+  first connection and must match afterwards; opening and closing are audited; idle
+  sessions close.
 - **Safe delivery:**
   - jobs run at most once and never re-send;
   - a job expires if it can't be delivered within 5 minutes, so an offline server never

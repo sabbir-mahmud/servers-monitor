@@ -28,6 +28,7 @@
     <div class="hero-actions">
       {% include "alerts/_mute_menu.html" with target=server target_field="server" %}
     {% if can_admin %}
+      {% if can_shell %}<a class="btn btn-outline-secondary btn-sm" href="{% url 'operations:ssh' %}?server={{ server.pk }}">{% icon "terminal" %} SSH</a>{% endif %}
       <a class="btn btn-outline-secondary btn-sm" href="{% url 'fleet:server_update' server.pk %}">{% icon "edit" %} Edit</a>
       <div class="dropdown">
         <button class="btn btn-outline-secondary btn-sm btn-icon" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="More actions">{% icon "more" %}</button>

@@ -27,7 +27,7 @@ class BlockedAddress(OSError):
     """The destination is an internal address this dashboard may not contact."""
 
 
-def is_allowed(ip: str) -> bool:
+def is_allowed(ip: str, allow_private: bool | None = None) -> bool:
     addr = ipaddress.ip_address(ip)
     if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
         addr = addr.ipv4_mapped
@@ -35,7 +35,9 @@ def is_allowed(ip: str) -> bool:
         return False  # never: cloud metadata (169.254.169.254) and other oddities
     if addr.is_global:
         return True
-    return bool(settings.MONITOR_ALLOW_PRIVATE_TARGETS)
+    if allow_private is None:
+        allow_private = settings.MONITOR_ALLOW_PRIVATE_TARGETS
+    return bool(allow_private)
 
 
 def describe_block(ip: str) -> str:
@@ -48,7 +50,12 @@ def describe_block(ip: str) -> str:
 
 
 def create_connection(
-    address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None, *args, **kwargs
+    address,
+    timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
+    source_address=None,
+    *args,
+    allow_private: bool | None = None,
+    **kwargs,
 ):
     """socket.create_connection, but internal addresses are refused before any connection
     is attempted (so "refused" vs "blocked" can't map which internal ports are open), and
@@ -57,7 +64,7 @@ def create_connection(
     blocked, last_error = None, None
     for *_, sockaddr in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM):
         ip = sockaddr[0]
-        if not is_allowed(ip):
+        if not (is_allowed(ip) if allow_private is None else is_allowed(ip, allow_private)):
             blocked = ip
             continue
         try:

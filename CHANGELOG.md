@@ -12,6 +12,13 @@ working without an upgrade (`server-monitor-agent`, `smctl` and the relay keys k
 names); upgrading gets the relay backlog fixes below.
 
 ### Added
+
+- **SSH terminal in the browser** (Terminal in the sidebar, or SSH on a server's page):
+  user, IP, port and a password or private key open an interactive terminal (xterm.js).
+  Owner and Admin only; credentials never stored; host keys trusted on first use per
+  account; audited (`ssh.open`, `ssh.close`, `ssh.failed`); idle and abandoned sessions
+  close. New dependency: `paramiko`. New settings: `SSH_ALLOW_PRIVATE_TARGETS`,
+  `SSH_IDLE_MINUTES`, `SSH_MAX_SESSIONS`.
 - **Device alerts**: a computer or phone not reporting for `DEVICE_OFFLINE_ALERT_HOURS`
   (4), and battery low and not charging (15 %, critical at 5 %). Channels get a "Device
   alerts" switch, on by default.

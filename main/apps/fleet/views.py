@@ -115,9 +115,7 @@ class DashboardView(StaffViewMixin, AccountScopedMixin, HtmxTemplateMixin, ListV
             kind=kind if kind in MachineKind.values else "",
             overview=overview,
             with_devices=self.with_devices,
-            filtering=any(
-                self.request.GET.get(k) for k in ("q", "environment", "group", "health")
-            ),
+            filtering=any(self.request.GET.get(k) for k in ("q", "environment", "group", "health")),
             open_alerts=scoped(self.request, Alert).filter(resolved_at__isnull=True).count(),
             environments=Environment.choices,
             groups=scoped(self.request, ServerGroup),

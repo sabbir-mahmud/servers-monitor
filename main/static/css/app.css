@@ -1952,3 +1952,21 @@ kbd { font-family: var(--font-mono); font-size: .85em; padding: .05rem .4rem; bo
   .srow:has(.srow-metric > .prow-sub, .srow-metric > .srow-warn) { padding-bottom: 1.15rem; }
 }
 .srow-metric > .prow-sub { font-size: .72rem; color: var(--muted); }
+
+/* Browser SSH terminal */
+.ssh-form { max-width: 46rem; }
+.ssh-key { font-size: .78rem; }
+.link-like { color: var(--accent-ink); text-decoration: underline; cursor: pointer; }
+.ssh-session { overflow: hidden; background: #0d0f12; border-color: #23262d; }
+.ssh-bar { display: flex; align-items: center; gap: .6rem; padding: .55rem .8rem; background: #15181d; border-bottom: 1px solid #23262d; color: #e6e6e6; }
+.ssh-bar .muted { color: #9aa1ab; }
+.ssh-bar .btn-outline-secondary { color: #d6d9de; border-color: #3a3f48; }
+.ssh-bar .btn-outline-secondary:hover { background: #262a31; color: #fff; }
+.ssh-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 25%, transparent); }
+.ssh-session.is-closed .ssh-dot { background: #6b7280; box-shadow: none; }
+.ssh-term { height: min(70vh, 640px); padding: .5rem .25rem .25rem .6rem; }
+.ssh-session.is-full { position: fixed; inset: 0; z-index: 1080; border-radius: 0; margin: 0; display: flex; flex-direction: column; }
+.ssh-session.is-full .ssh-term { flex: 1; height: auto; }
+body.ssh-fullscreen { overflow: hidden; }
+.ssh-keys summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: .5rem; font-weight: 600; }
+@media (max-width: 575.98px) { .ssh-term { height: 60vh; } .ssh-bar #ssh-state { display: none; } }

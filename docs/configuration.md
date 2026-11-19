@@ -86,6 +86,9 @@ the defaults when a variable is unset.
 | `MONITOR_COMMAND_DELIVERY_SECONDS` | `300` | Queued jobs not picked up within this window expire instead of running late. |
 | `MONITOR_COMMAND_OUTPUT_LIMIT` | `262144` | Bytes of output kept per command (the tail is kept). |
 | `MONITOR_CHECK_WORKERS` | `8` | Application health checks run in parallel. |
+| `SSH_ALLOW_PRIVATE_TARGETS` | `False` | Let the browser terminal SSH to private/loopback addresses (servers on your own network). Cloud metadata stays blocked. |
+| `SSH_IDLE_MINUTES` | `30` | Close a browser terminal after this long without typing. |
+| `SSH_MAX_SESSIONS` | `6` | Browser terminals open at once on the dashboard. Each holds a web thread, so keep it below gunicorn's `--threads`. |
 | `MONITOR_ALLOW_PRIVATE_TARGETS` | `False` | Let health checks and webhooks reach private/loopback addresses (to monitor LAN services). Cloud metadata stays blocked. |
 
 ## Alert thresholds
