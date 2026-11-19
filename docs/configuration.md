@@ -76,6 +76,8 @@ the defaults when a variable is unset.
 | `DEVICE_ACTIVITY_DAYS` | `30` | Screen time and websites of children's and staff computers kept this long. Deleted with the device. |
 | `DEVICE_GEOIP_URL` | DB-IP City Lite, `{month}` filled in | Free city-level IP database for computers with Location on that can't report a precise position. The relay fetches it about monthly (~60 MB download) and looks addresses up locally; no address is sent anywhere. Empty turns it off. |
 | `DEVICE_AGENT_DIR` | `device-agent/dist` | Agent builds (`device-agent/build.sh`) the one-line connect command installs. Without them it installs the health-only check-in script. |
+| `PHONE_APP_DIR` | `phone-app/dist` | The phone app's Android build (`make phone-app-apk`). The Android pair page offers the newest `.apk` there as a direct download at `/d/app/NexGuard.apk`, with a QR code for the phone's camera. |
+| `IOS_APP_URL` | empty | NexGuard's TestFlight public link or App Store page. iPhones can't install an app from a download, so the iPhone pair page links here (with a QR code). |
 | `ADULT_BLOCKLIST_URL` | StevenBlack `porn-only` hosts list | Adult-site list for blocking (hosts format, about 2 MB). The relay process fetches it at most daily and keeps the last good copy next to the database. Empty turns adult-site blocking off. |
 | `DEVICE_LOCATION_DAYS` | `30` | Location history of family and staff devices is kept this long (the last location is always kept). Deleted with the device. |
 | `MAP_TILE_URL` | `https://tile.openstreetmap.org/{z}/{x}/{y}.png` | Map tiles for device locations. The viewer's browser loads them (the tile server sees which area, not who). Use another tile provider for heavy use, or empty to show coordinates and map links only. |

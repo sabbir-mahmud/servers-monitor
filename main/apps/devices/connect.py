@@ -145,6 +145,31 @@ def agent_file(request, name):
     return response
 
 
+def android_apk() -> Path | None:
+    """The newest Android build of the phone app in PHONE_APP_DIR, or None."""
+    folder = Path(settings.PHONE_APP_DIR)
+    if not folder.is_dir():
+        return None
+    found = [p for p in folder.glob("*.apk") if p.is_file()]
+    return max(found, key=lambda p: p.stat().st_mtime, default=None)
+
+
+def android_app(request):
+    """The NexGuard phone app for Android, straight to the phone. Public, like the agent: it
+    holds no secret, and pairing needs a code."""
+    path = android_apk()
+    if path is None:
+        raise Http404("This dashboard has no Android build of NexGuard yet.")
+    response = FileResponse(
+        path.open("rb"),
+        as_attachment=True,
+        filename="NexGuard.apk",
+        content_type="application/vnd.android.package-archive",
+    )
+    response["Cache-Control"] = "no-cache"  # a new build replaces it under the same link
+    return response
+
+
 def uninstall_script(request, kind):
     template = {"sh": "devices/install/uninstall.sh", "ps1": "devices/install/uninstall.ps1"}[kind]
     body = render_to_string(template, {"site_name": settings.SITE_NAME})

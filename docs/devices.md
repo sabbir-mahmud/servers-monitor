@@ -34,13 +34,21 @@ The pair page has the same steps under *Do it from here*.
 
 ## Add a phone (Android or iPhone)
 
-Phones use the NexGuard phone app ([phone-app/](../phone-app/README.md), Expo SDK 58).
+Phones use the NexGuard phone app ([phone-app/](../phone-app/README.md), Expo SDK 58,
+built with EAS).
 
-1. **Devices → Add device**, pick Android or iPhone, give it a name. The pair page shows a
-   QR code (`nexguard://pair?server=…&code=…`) and the code.
-2. On the phone, open NexGuard and choose **Scan the QR code**, or type the dashboard
-   address and the code.
-3. It shows what the account will see (last online time, battery, storage, network and
+1. **Devices → Add device**, pick Android or iPhone, give it a name. The pair page shows
+   two QR codes: one for the phone's camera to install the app, and one for the app to
+   pair (`nexguard://pair?server=…&code=…`), with the code.
+2. Install the app:
+   - **Android:** the dashboard serves the app itself at `/d/app/NexGuard.apk`, the newest
+     `.apk` in `PHONE_APP_DIR`. Run `make phone-app-apk` to fill it. Android asks once to
+     allow installing from the browser.
+   - **iPhone:** Apple doesn't allow installing from a download. The pair page links to
+     `IOS_APP_URL`, NexGuard's TestFlight public link or App Store page.
+3. Open NexGuard and choose **Scan the QR code**, or type the dashboard address and the
+   code.
+4. It shows what the account will see (last online time, battery, storage, network and
    location) and pairs only on **Allow**. Then it asks once for location; without it,
    everything else is still shared.
 
@@ -49,9 +57,9 @@ The phone must be able to reach the dashboard's address. If the dashboard runs o
 network address, or set `DASHBOARD_URL`.
 
 **When it reports.** It reports when it opens, every 15 minutes while open (or at the
-dashboard's interval), and each time it comes back to the front. In **Expo Go** that's
-all: Expo Go runs nothing in the background, on Android or iOS. A development or store
-build also checks in from the background (`expo-background-task`). The system runs that at
+dashboard's interval), and each time it comes back to the front. The EAS builds also
+check in from the background (`expo-background-task`). When you run the app in **Expo Go**
+during development, it skips that: Expo Go runs nothing in the background. The system runs that at
 most every 15 minutes, and less often when it's saving battery. Location comes from the
 check-in itself (while in use), never from continuous background tracking.
 

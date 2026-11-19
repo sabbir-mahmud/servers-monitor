@@ -500,3 +500,29 @@ def test_adding_or_editing_a_person_lands_on_their_page(client, parent):
     resp = client.post(reverse("tenants:person_update", args=[mira.pk]),
                        {"kind": "child", "name": "Mira K"})  # fmt: skip
     assert resp["Location"] == reverse("tenants:person_detail", args=[mira.pk])
+
+
+def test_android_pair_page_offers_the_app_from_this_dashboard(
+    client, parent, sara, settings, tmp_path
+):
+    settings.PHONE_APP_DIR = tmp_path
+    client.force_login(parent)
+    page = add_device(client, sara, with_page=True)[2]
+    assert "no Android build of NexGuard yet" in page and "/d/app/NexGuard.apk" not in page
+    (tmp_path / "NexGuard-1.0.0-3.apk").write_bytes(b"apk")
+    page = add_device(client, sara, name="Sara's tablet", with_page=True)[2]
+    assert 'href="http://testserver/d/app/NexGuard.apk"' in page and "own camera" in page
+    client.logout()  # no sign-in: the phone opens the link
+    resp = client.get("/d/app/NexGuard.apk")
+    assert resp.status_code == 200 and b"".join(resp.streaming_content) == b"apk"
+    assert resp["Content-Type"] == "application/vnd.android.package-archive"
+    assert resp["Content-Disposition"] == 'attachment; filename="NexGuard.apk"'
+
+
+def test_iphone_pair_page_links_to_testflight_when_set(client, parent, sara, settings):
+    client.force_login(parent)
+    page = add_device(client, sara, platform="ios", name="Sara's iPhone", with_page=True)[2]
+    assert "Set <code>IOS_APP_URL</code>" in page
+    settings.IOS_APP_URL = "https://testflight.apple.com/join/AbCd1234"
+    page = add_device(client, sara, platform="ios", name="Sara's iPad", with_page=True)[2]
+    assert 'href="https://testflight.apple.com/join/AbCd1234"' in page and "TestFlight" in page

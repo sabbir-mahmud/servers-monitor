@@ -87,8 +87,12 @@ names); upgrading gets the relay backlog fixes below.
   scan the pair page's QR code or type the code, read what the account will see, and pair
   on *Allow*. It reports battery, storage, network and (if allowed) location while open
   and each time it's opened, and from the background in a development or store build.
-  `make phone-app` starts it. The phone pair page warns when the dashboard's address is
-  `127.0.0.1`, which a phone can't reach.
+  Built with EAS (`phone-app/eas.json`). `make phone-app-apk` builds the Android `.apk`,
+  which the dashboard serves at `/d/app/NexGuard.apk` (`PHONE_APP_DIR`). The Android pair
+  page shows a QR code for the phone's camera to download it. iPhones get `IOS_APP_URL`
+  (TestFlight or the App Store). `make phone-app` runs it in Expo Go for development. The
+  phone pair page warns when the dashboard's address is `127.0.0.1`, which a phone can't
+  reach.
 - Device agent 0.2.0 keeps its own log in `logs/nexguard.log` next to its config: one JSON
   line per event (started, paired, checked in, settings switched on or off by the dashboard,
   errors), readable by everyone, rotated at 1 MB. No token, website or app names.

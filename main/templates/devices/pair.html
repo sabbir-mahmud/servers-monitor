@@ -56,7 +56,20 @@
       <div class="steps">
         <div class="step"><span class="step-num"></span><div>
           <h2>Install NexGuard on the {{ device.get_platform_display }}</h2>
-          <p>Open the NexGuard app on it. It reports while it's open and each time it's opened again, and in the background where the phone allows. When it asks for location, allow it so you can see where the phone is.</p>
+          {% if app_install_url %}
+          <div class="app-install">
+            <div class="app-install-qr" aria-hidden="true">{{ app_install_qr|safe }}</div>
+            <div>
+              <p class="mb-2">Scan this with the {{ device.get_platform_display }}'s own camera{% if device.platform == "android" %} to download NexGuard. Android asks once to allow installing from the browser: allow it, then tap <strong>Install</strong>.{% else %} to get NexGuard{% if "testflight" in app_install_url %} through TestFlight (install TestFlight first if asked){% endif %}.{% endif %}</p>
+              <p class="small text-body-secondary mb-0">Or open <a href="{{ app_install_url }}" class="text-break">{{ app_install_url }}</a> on it.</p>
+            </div>
+          </div>
+          {% elif device.platform == "android" %}
+          <p class="text-body-secondary">This dashboard has no Android build of NexGuard yet. Build one with <code>make phone-app-apk</code>.</p>
+          {% else %}
+          <p class="text-body-secondary">Set <code>IOS_APP_URL</code> to NexGuard's TestFlight or App Store link to show it here.</p>
+          {% endif %}
+          <p class="small text-body-secondary mt-2 mb-0">When it asks for location, allow it so you can see where the phone is.</p>
         </div></div>
         <div class="step"><span class="step-num"></span><div>
           <h2>Scan the QR code, or enter the code</h2>

@@ -330,6 +330,12 @@ DEVICE_GEOIP_URL = config(
 DEVICE_AGENT_DIR = Path(
     config("DEVICE_AGENT_DIR", default=str(BASE_DIR.parent / "device-agent" / "dist"))
 )
+# The NexGuard phone app's Android build (an EAS .apk; `make phone-app-apk` puts it here).
+# The phone pair page offers it as a direct download, newest file first.
+PHONE_APP_DIR = Path(config("PHONE_APP_DIR", default=str(BASE_DIR.parent / "phone-app" / "dist")))
+# iPhones can't install from a download: the TestFlight public link or the App Store page
+# for NexGuard. Empty: the iPhone pair page has no install link.
+IOS_APP_URL = config("IOS_APP_URL", default="")
 # Map tiles for device locations ({z}/{x}/{y}). Empty: no maps, just coordinates and links.
 MAP_TILE_URL = config("MAP_TILE_URL", default="https://tile.openstreetmap.org/{z}/{x}/{y}.png")
 MAP_ATTRIBUTION = config("MAP_ATTRIBUTION", default="© OpenStreetMap contributors")

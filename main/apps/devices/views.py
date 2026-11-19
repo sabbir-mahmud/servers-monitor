@@ -91,6 +91,7 @@ class DevicePairView(StaffViewMixin, AccountScopedMixin, DetailView):
             code=code,
             server_url=server,
             qr=_qr(server, code) if code and not is_computer else "",
+            **(_install_link(server, device.platform) if code and not is_computer else {}),
             # The phone app can't reach the dashboard computer's own loopback address.
             server_is_loopback=urlsplit(server).hostname in ("localhost", "127.0.0.1", "::1"),
             is_computer=is_computer,
@@ -113,15 +114,32 @@ class DevicePairView(StaffViewMixin, AccountScopedMixin, DetailView):
         return redirect("devices:pair", pk=device.pk)
 
 
+def _qr_svg(data: str, scale: int = 5) -> str:
+    import segno
+
+    return segno.make(data, error="m").svg_inline(scale=scale, border=2, dark="#1d1d1f",
+                                                  light="#ffffff")  # fmt: skip
+
+
 def _qr(server: str, code: str) -> str:
     """What the NexGuard phone app scans: where to pair and with which code."""
     from urllib.parse import urlencode
 
-    import segno
+    return _qr_svg(
+        "nexguard://pair?" + urlencode({"server": server, "code": code.replace("-", "")})
+    )
 
-    uri = "nexguard://pair?" + urlencode({"server": server, "code": code.replace("-", "")})
-    return segno.make(uri, error="m").svg_inline(scale=5, border=2, dark="#1d1d1f",
-                                                 light="#ffffff")  # fmt: skip
+
+def _install_link(server: str, platform: str) -> dict:
+    """Where the phone gets the app: the Android build straight from this dashboard, or the
+    iPhone link (TestFlight or the App Store). A QR code for the phone's own camera."""
+    if platform == "android" and connect.android_apk():
+        url = server + reverse("phone_app_android")
+    elif platform == "ios" and settings.IOS_APP_URL:
+        url = settings.IOS_APP_URL
+    else:
+        return {"app_install_url": ""}
+    return {"app_install_url": url, "app_install_qr": _qr_svg(url, scale=3)}
 
 
 class DeviceDetailView(StaffViewMixin, AccountScopedMixin, DetailView):

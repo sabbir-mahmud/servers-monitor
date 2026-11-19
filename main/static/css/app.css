@@ -1683,6 +1683,10 @@ kbd { font-family: var(--font-mono); font-size: .85em; padding: .05rem .4rem; bo
 .connect-direct { margin-top: 1.25rem; border-top: 1px solid var(--line); padding-top: 1rem; }
 .connect-direct > summary { cursor: pointer; font-weight: 500; font-size: .9rem; color: var(--ink-2); margin-bottom: 1rem; }
 .connect-direct[open] > summary { color: var(--ink); }
+.app-install { display: flex; gap: 1rem; align-items: flex-start; }
+.app-install-qr { flex: none; width: 112px; line-height: 0; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
+.app-install-qr svg { width: 100%; height: auto; }
+@media (max-width: 575.98px) { .app-install { flex-direction: column; } }
 @media (max-width: 575.98px) { .connect-cmd { flex-wrap: wrap; } .connect-card > .card-body { padding: 1.25rem; } }
 .health-card { margin-bottom: 1rem; }
 

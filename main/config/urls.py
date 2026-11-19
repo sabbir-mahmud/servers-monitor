@@ -74,6 +74,7 @@ urlpatterns = [
         name="device_uninstall_ps1",
     ),
     path("d/agent/<str:name>", device_connect.agent_file, name="device_agent_file"),
+    path("d/app/NexGuard.apk", device_connect.android_app, name="phone_app_android"),
     path("d/<str:code>/", device_connect.page, name="device_connect"),
     path(
         "d/<str:code>/install.sh",
