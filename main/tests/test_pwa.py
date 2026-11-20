@@ -157,7 +157,7 @@ def test_manifest_service_worker_and_offline_page(client, admin_user):
     assert 'addEventListener("push"' in body and "/offline/" in body
     assert "Offline" in client.get("/offline/").content.decode()  # works signed out
     client.force_login(admin_user)
-    page = client.get(reverse("fleet:dashboard")).content.decode()
+    page = client.get(reverse("fleet:dashboard"), {"kind": "server"}).content.decode()
     assert 'rel="manifest"' in page and "data-install-app" in page
 
 

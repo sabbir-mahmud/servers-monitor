@@ -1,8 +1,10 @@
 from django.conf import settings
 from django.contrib import messages
+from django.http import Http404
 from django.shortcuts import redirect
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
+from django.utils.text import format_lazy
 from django.views import View
 from django.views.generic import DeleteView, DetailView, ListView, TemplateView, UpdateView
 from django.views.generic.edit import CreateView
@@ -36,6 +38,15 @@ class DashboardView(StaffViewMixin, AccountScopedMixin, HtmxTemplateMixin, ListV
     context_object_name = "machines"
     model = Machine
 
+    def get(self, request, *args, **kwargs):
+        # The page is always one list: /devices/?kind=server or ?kind=device. A bare
+        # /devices/ (or any other kind) is not a route. Runs after the login,
+        # permission and account checks in dispatch().
+        allowed = {MachineKind.SERVER} | ({MachineKind.DEVICE} if self.with_devices else set())
+        if request.GET.get("kind") not in allowed:
+            raise Http404("Pick ?kind=server or ?kind=device.")
+        return super().get(request, *args, **kwargs)
+
     @property
     def with_devices(self) -> bool:
         # A family or company sees computers and phones under People instead.
@@ -51,9 +62,7 @@ class DashboardView(StaffViewMixin, AccountScopedMixin, HtmxTemplateMixin, ListV
             .prefetch_related("server__groups")
         )
         g = self.request.GET
-        kind = g.get("kind") if self.with_devices else MachineKind.SERVER
-        if kind in MachineKind.values:
-            qs = qs.filter(kind=kind)
+        qs = qs.filter(kind=g["kind"])
         # Environment and group are server settings: picking one narrows to servers.
         if env := g.get("environment"):
             qs = qs.filter(server__environment=env)
@@ -108,11 +117,11 @@ class DashboardView(StaffViewMixin, AccountScopedMixin, HtmxTemplateMixin, ListV
             )
             all_servers, all_phones = c["servers"], c["phones"]
             all_computers = c["devices"] - c["phones"]
-        kind = self.request.GET.get("kind", "") if self.with_devices else MachineKind.SERVER
+        kind = self.request.GET["kind"]
         ctx.update(
             rows=rows,
             mix={"servers": all_servers, "computers": all_computers, "phones": all_phones},
-            kind=kind if kind in MachineKind.values else "",
+            kind=kind,
             overview=overview,
             with_devices=self.with_devices,
             filtering=any(self.request.GET.get(k) for k in ("q", "environment", "group", "health")),
@@ -255,7 +264,7 @@ class ServerDeleteView(StaffViewMixin, AccountScopedMixin, DeleteView):
     permission_required = "fleet.delete_server"
     template_name = "confirm_delete.html"
     model = Server
-    success_url = reverse_lazy("fleet:dashboard")
+    success_url = format_lazy("{}?kind=server", reverse_lazy("fleet:dashboard"))
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(
@@ -312,7 +321,9 @@ class AgentUpgradeView(StaffViewMixin, View):
             messages.error(request, str(exc))
             if pk is not None:
                 return redirect("fleet:server_detail", pk=pk)
-            return redirect("system" if request.POST.get("back") == "system" else "fleet:dashboard")
+            if request.POST.get("back") == "system":
+                return redirect("system")
+            return redirect(reverse("fleet:dashboard") + "?kind=server")
         for server, reason in skipped:
             messages.warning(request, f"Skipped {server.name}: {reason}")
         messages.success(

@@ -3,7 +3,7 @@
 {% block title %}{% if object %}Edit {{ object }}{% else %}Add a server{% endif %}{% endblock %}
 {% block content %}
 {% if object %}{% url 'fleet:server_detail' object.pk as back %}{% else %}{% url 'fleet:dashboard' as back %}{% endif %}
-<a class="back-link" href="{{ back }}">{% icon "arrow-left" 15 %} {% if object %}{{ object }}{% else %}{{ MACHINES|capfirst }}{% endif %}</a>
+<a class="back-link" href="{{ back }}{% if not object %}?kind=server{% endif %}">{% icon "arrow-left" 15 %} {% if object %}{{ object }}{% else %}{{ MACHINES|capfirst }}{% endif %}</a>
 <div class="page-head"><div>
   <h1 class="page-title">{% if object %}Edit server{% else %}Add a Linux server{% endif %}</h1>
   <p class="page-sub">{% if object %}Changes reach the agent at its next heartbeat. Its history, token and commands stay as they are.{% else %}Name it now; next you get a one-line install command for the server. No SSH and no open ports.{% endif %}</p>

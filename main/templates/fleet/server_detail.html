@@ -2,7 +2,7 @@
 {% load monitor %}
 {% block title %}{{ server }}{% endblock %}
 {% block content %}
-<a class="back-link" href="{% url 'fleet:dashboard' %}">{% icon "arrow-left" 15 %} {{ MACHINES|capfirst }}</a>
+<a class="back-link" href="{% url 'fleet:dashboard' %}?kind=server">{% icon "arrow-left" 15 %} {{ MACHINES|capfirst }}</a>
 
 {# ---------- Identity: who it is, is it OK, how fresh is that ---------- #}
 <header class="card hero hero-compact mb-3">
@@ -13,7 +13,7 @@
         <h1 class="page-title">{{ server.name }}</h1>
         <span id="hero-health">{% health_badge server.health %}</span>
         <span class="chip chip-env">{{ server.get_environment_display }}</span>
-        {% for g in server.groups.all %}<a class="chip" href="{% url 'fleet:dashboard' %}?group={{ g.name }}">{{ g.name }}</a>{% endfor %}
+        {% for g in server.groups.all %}<a class="chip" href="{% url 'fleet:dashboard' %}?kind=server&group={{ g.name }}">{{ g.name }}</a>{% endfor %}
       </div>
       <div class="hero-sub">
         {% if server.hostname %}

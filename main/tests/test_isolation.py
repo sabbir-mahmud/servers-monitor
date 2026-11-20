@@ -156,7 +156,8 @@ LIST_PAGES = [
 def test_lists_and_forms_never_show_another_account(client, admin_user, globex, url_name, secret):
     make_server("acme-web")
     client.force_login(admin_user)
-    resp = client.get(reverse(url_name))
+    query = {"kind": "server"} if url_name == "fleet:dashboard" else {}
+    resp = client.get(reverse(url_name), query)
     assert resp.status_code == 200
     assert secret not in resp.content.decode()
 
@@ -261,16 +262,16 @@ def test_switching_needs_a_membership(client, admin_user, globex):
     session = client.session
     session["account_id"] = str(globex["account"].pk)
     session.save()
-    assert b"globex-db" not in client.get(reverse("fleet:dashboard")).content
+    assert b"globex-db" not in client.get(reverse("fleet:dashboard"), {"kind": "server"}).content
 
 
 def test_a_user_in_two_accounts_sees_each_separately(client, admin_user, globex):
     add_member(admin_user, "viewer", globex["account"])
     make_server("acme-web")
     client.force_login(admin_user)
-    assert b"acme-web" in client.get(reverse("fleet:dashboard")).content
+    assert b"acme-web" in client.get(reverse("fleet:dashboard"), {"kind": "server"}).content
     client.post(reverse("tenants:switch"), {"account": str(globex["account"].pk)})
-    page = client.get(reverse("fleet:dashboard")).content
+    page = client.get(reverse("fleet:dashboard"), {"kind": "server"}).content
     assert b"globex-db" in page and b"acme-web" not in page
     # A viewer there, whatever they are at Acme.
     assert client.get(reverse("operations:job_create")).status_code == 403
@@ -337,7 +338,7 @@ def test_solo_accounts_have_no_team_or_people(client, django_user_model, setting
     assert twofactor.is_required(dev)  # can deploy to servers: 2FA as for admins
     settings.REQUIRE_2FA_FOR_ADMINS = False
     client.force_login(dev)
-    assert client.get(reverse("fleet:dashboard")).status_code == 200
+    assert client.get(reverse("fleet:dashboard"), {"kind": "server"}).status_code == 200
     assert client.get(reverse("api_tokens")).status_code == 200
     for name in ("users:list", "users:invite", "tenants:people"):
         assert client.get(reverse(name)).status_code == 403
@@ -357,7 +358,7 @@ def test_new_account_needs_signup_or_superuser(client, admin_user, settings):
 def test_login_without_an_account_is_sent_to_create_one(client, django_user_model):
     user = django_user_model.objects.create_user("lost", "lost@example.com", "pw-x-1234567")
     client.force_login(user)
-    assert client.get(reverse("fleet:dashboard"))["Location"] == reverse("tenants:create")
+    assert client.get(reverse("fleet:dashboard"), {"kind": "server"})["Location"] == reverse("tenants:create")
     assert client.get(reverse("account")).status_code == 200  # own login still manageable
 
 
@@ -368,7 +369,7 @@ def test_solo_accounts_call_servers_devices_and_have_no_maintenance(client, djan
     dev = django_user_model.objects.create_user("dev", "dev@example.com", "pw-x-1234567")
     add_member(dev, "owner", account)
     client.force_login(dev)
-    page = client.get(reverse("fleet:dashboard")).content.decode()
+    page = client.get(reverse("fleet:dashboard"), {"kind": "device"}).content.decode()
     assert '<h1 class="page-title">Devices</h1>' in page and "Add device" in page
     assert '<span class="side-text">Devices</span>' in page
     assert '<span class="side-text">Applications</span>' in page
@@ -378,5 +379,5 @@ def test_solo_accounts_call_servers_devices_and_have_no_maintenance(client, djan
 
 def test_companies_still_say_servers_and_keep_maintenance(client, admin_user):
     client.force_login(admin_user)
-    page = client.get(reverse("fleet:dashboard")).content.decode()
+    page = client.get(reverse("fleet:dashboard"), {"kind": "server"}).content.decode()
     assert '<h1 class="page-title">Servers</h1>' in page and "Maintenance" in page

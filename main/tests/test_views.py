@@ -13,12 +13,12 @@ pytestmark = pytest.mark.django_db
 
 
 def test_anonymous_redirected_to_login(client):
-    resp = client.get(reverse("fleet:dashboard"))
+    resp = client.get(reverse("fleet:dashboard"), {"kind": "server"})
     assert resp.status_code == 302 and "/login/" in resp["Location"]
 
 
 def test_htmx_poll_with_expired_session_redirects_window(client):
-    resp = client.get(reverse("fleet:dashboard"), HTTP_HX_REQUEST="true")
+    resp = client.get(reverse("fleet:dashboard"), {"kind": "server"}, HTTP_HX_REQUEST="true")
     assert resp.status_code == 204 and resp["HX-Redirect"] == "/login/"
 
 
@@ -38,7 +38,8 @@ def test_htmx_poll_with_expired_session_redirects_window(client):
 )
 def test_role_matrix(client, request, url_name, role, expected):
     client.force_login(request.getfixturevalue(role))
-    assert client.get(reverse(url_name)).status_code == expected
+    query = {"kind": "server"} if url_name == "fleet:dashboard" else {}
+    assert client.get(reverse(url_name), query).status_code == expected
 
 
 def test_dashboard_query_budget(client, viewer, django_assert_max_num_queries):
@@ -48,7 +49,7 @@ def test_dashboard_query_budget(client, viewer, django_assert_max_num_queries):
     # Constant regardless of server count: session/user + membership + servers + groups
     # prefetch + groups + alerts.
     with django_assert_max_num_queries(9):
-        resp = client.get(reverse("fleet:dashboard"), HTTP_HX_REQUEST="true")
+        resp = client.get(reverse("fleet:dashboard"), {"kind": "server"}, HTTP_HX_REQUEST="true")
     assert resp.status_code == 200 and b"s19" in resp.content
     assert b"<html" not in resp.content  # partial only
 
@@ -156,9 +157,9 @@ def test_banner_warns_when_relay_process_is_not_running(client, viewer, settings
 
     settings.SQLITE_PATH = tmp_path / "db.sqlite3"
     client.force_login(viewer)
-    assert b"relay process isn" in client.get(reverse("fleet:dashboard")).content
+    assert b"relay process isn" in client.get(reverse("fleet:dashboard"), {"kind": "server"}).content
     relay.mark_alive()
-    assert b"relay process isn" not in client.get(reverse("fleet:dashboard")).content
+    assert b"relay process isn" not in client.get(reverse("fleet:dashboard"), {"kind": "server"}).content
 
 
 def test_sidebar_is_one_flat_list_with_problem_badges(client, admin_user, viewer):
@@ -171,14 +172,14 @@ def test_sidebar_is_one_flat_list_with_problem_badges(client, admin_user, viewer
         account=acme(), name="shop", url="https://shop.test/", status=MonitorStatus.DOWN
     )
     client.force_login(admin_user)
-    page = client.get(reverse("fleet:dashboard")).content.decode()
+    page = client.get(reverse("fleet:dashboard"), {"kind": "server"}).content.decode()
     assert "nav-group" not in page  # no collapsible categories any more
     for label in ("Servers", "Applications", "Jobs", "Alerts", "Members", "Settings"):
         assert f'<span class="side-text">{label}</span>' in page
     assert page.count('class="nav-badge is-critical"') == 2  # 1 server offline, 1 app down
     # Viewers don't see links to pages they can't open.
     client.force_login(viewer)
-    page = client.get(reverse("fleet:dashboard")).content.decode()
+    page = client.get(reverse("fleet:dashboard"), {"kind": "server"}).content.decode()
     assert '<span class="side-text">Servers</span>' in page
     assert reverse("users:list") not in page and reverse("audit:list") not in page
 
@@ -197,7 +198,7 @@ def test_old_server_urls_redirect_to_their_new_home(client, admin_user):
     assert reverse("fleet:dashboard") == "/devices/"
     assert reverse("fleet:server_detail", args=[server.pk]) == f"/devices/servers/{server.pk}/"
     resp = client.get("/servers/?health=offline")
-    assert resp.status_code == 301 and resp["Location"] == "/devices/?health=offline"
+    assert resp.status_code == 301 and resp["Location"] == "/devices/?kind=server&health=offline"
     resp = client.get(f"/servers/{server.pk}/edit/")
     assert resp["Location"] == f"/devices/servers/{server.pk}/edit/"
     assert client.get(resp["Location"]).status_code == 200
@@ -246,3 +247,12 @@ def test_history_defaults_to_a_day_and_says_when_recording_began(
     assert pressed == ["24h"]
     # A server enrolled minutes ago has no older data: say so instead of a blank chart.
     assert "Recording since" in html
+
+
+def test_devices_list_needs_a_kind(client, admin_user, django_user_model):
+    client.force_login(admin_user)  # a company: servers only
+    url = reverse("fleet:dashboard")
+    assert client.get(url).status_code == 404
+    assert client.get(url, {"kind": "nope"}).status_code == 404
+    assert client.get(url, {"kind": "device"}).status_code == 404
+    assert client.get(url, {"kind": "server"}).status_code == 200

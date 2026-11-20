@@ -64,7 +64,7 @@ def test_password_alone_does_not_sign_in(client, django_user_model, roles):
     resp = _login(client)
     assert resp.url == reverse("login_verify")
     assert "_auth_user_id" not in client.session
-    assert client.get(reverse("fleet:dashboard")).status_code == 302  # still signed out
+    assert client.get(reverse("fleet:dashboard"), {"kind": "server"}).status_code == 302  # still signed out
 
 
 def test_code_completes_sign_in(client, django_user_model, roles):
@@ -112,10 +112,10 @@ def test_recovery_codes_are_single_use(client, django_user_model, roles):
 def test_admins_are_forced_into_setup(client, admin_user, viewer, settings):
     settings.REQUIRE_2FA_FOR_ADMINS = True
     client.force_login(admin_user)
-    assert client.get(reverse("fleet:dashboard")).url == reverse("account_2fa")
+    assert client.get(reverse("fleet:dashboard"), {"kind": "server"}).url == reverse("account_2fa")
     assert client.get(reverse("account_2fa")).status_code == 200
     client.force_login(viewer)  # only Admins are forced
-    assert client.get(reverse("fleet:dashboard")).status_code == 200
+    assert client.get(reverse("fleet:dashboard"), {"kind": "server"}).status_code == 200
 
 
 def test_setup_then_disable_needs_password_and_code(client, django_user_model, roles):

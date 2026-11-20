@@ -75,7 +75,7 @@ def test_first_sign_in_creates_the_account_with_the_mapped_role(client, sso):
     user = get_user_model().objects.get(email="dana@example.com")
     assert user.username == "dana" and accounts.role_of(user, acme()) == "operator"
     assert not user.has_usable_password() and user.sso.subject == "idp|42"
-    assert client.get(reverse("fleet:dashboard")).status_code == 200
+    assert client.get(reverse("fleet:dashboard"), {"kind": "server"}).status_code == 200
     assert {"user.sso_create", "auth.sso_login"} <= set(
         AuditLog.objects.values_list("action", flat=True)
     )
@@ -129,10 +129,10 @@ def test_superusers_never_sign_in_through_sso(client, sso, django_user_model):
 def test_sso_admins_skip_local_2fa_but_local_admins_do_not(client, sso, settings, admin_user):
     settings.REQUIRE_2FA_FOR_ADMINS = True
     sign_in(client, sso, groups=["sre"])
-    assert client.get(reverse("fleet:dashboard")).status_code == 200  # the provider did MFA
+    assert client.get(reverse("fleet:dashboard"), {"kind": "server"}).status_code == 200  # the provider did MFA
     client.logout()
     client.force_login(admin_user)  # a local Admin
-    assert client.get(reverse("fleet:dashboard"))["Location"] == reverse("account_2fa")
+    assert client.get(reverse("fleet:dashboard"), {"kind": "server"})["Location"] == reverse("account_2fa")
 
 
 def test_new_accounts_can_be_invitation_only(client, sso, settings):

@@ -3,7 +3,7 @@
 {% block title %}{% if object %}Edit {{ object.name }}{% else %}Add a device{% endif %}{% endblock %}
 {% block content %}
 {% if object %}{% url 'devices:detail' object.pk as back %}{% elif form.initial.person %}{% url 'tenants:person_detail' form.initial.person.pk as back %}{% elif ACCOUNT.kind == "solo" %}{% url 'fleet:dashboard' as back %}{% else %}{% url 'tenants:people' as back %}{% endif %}
-<a class="back-link" href="{{ back }}">{% icon "arrow-left" 15 %} {% if object %}{{ object.name }}{% elif form.initial.person %}{{ form.initial.person.name }}{% elif ACCOUNT.kind == "solo" %}Devices{% else %}{{ ACCOUNT.people_label }}{% endif %}</a>
+<a class="back-link" href="{{ back }}{% if not object and not form.initial.person and ACCOUNT.kind == "solo" %}?kind=device{% endif %}">{% icon "arrow-left" 15 %} {% if object %}{{ object.name }}{% elif form.initial.person %}{{ form.initial.person.name }}{% elif ACCOUNT.kind == "solo" %}Devices{% else %}{{ ACCOUNT.people_label }}{% endif %}</a>
 <div class="page-head"><div>
   <h1 class="page-title">{% if object %}Edit device{% elif ACCOUNT.kind == "solo" %}Connect a computer or phone{% else %}Add a device{% endif %}</h1>
   <p class="page-sub">{% if object %}Rename it or change whose it is. Its history and pairing stay as they are.{% elif ACCOUNT.kind == "solo" %}Your own laptop, desktop or phone: last online, battery, storage and, on phones, location.{% else %}Three details now, then you'll pair it on the device itself.{% endif %}</p>

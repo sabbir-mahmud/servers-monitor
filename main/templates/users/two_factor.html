@@ -17,7 +17,7 @@
   <pre class="recovery-codes" id="recovery-codes">{% for c in codes %}{{ c }}
 {% endfor %}</pre>
   <button type="button" class="btn btn-sm btn-outline-secondary" data-copy="#recovery-codes">{% icon "copy" %} <span data-copy-label>Copy all</span></button>
-  <a class="btn btn-sm btn-primary ms-2" href="{% url 'fleet:dashboard' %}">I've saved them</a>
+  <a class="btn btn-sm btn-primary ms-2" href="{% url 'home' %}">I've saved them</a>
 </div></div>
 {% endif %}
 

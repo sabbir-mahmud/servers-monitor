@@ -82,7 +82,7 @@
 
 {% if not rows %}
 <section class="card fleet-card">
-  {% if filtering %}<div class="table-empty">Nothing matches. <a href="{% url 'fleet:dashboard' %}">Clear filters</a></div>
+  {% if filtering %}<div class="table-empty">Nothing matches. <a href="{% url 'fleet:dashboard' %}?kind={{ kind }}">Clear filters</a></div>
   {% else %}
   <div class="fleet-empty">
     <span class="fleet-empty-mark" aria-hidden="true">{% icon "server" 22 %}</span>

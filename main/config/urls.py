@@ -33,8 +33,11 @@ def legacy_server_url(request, rest):
     """/servers/ → /devices/, /servers/<id>/… → /devices/servers/<id>/… (query kept).
     Always a path on this site, so it can't be turned into an open redirect."""
     target = reverse("fleet:dashboard") + (f"servers/{rest}" if rest else "")
-    if request.META.get("QUERY_STRING"):
-        target += "?" + request.META["QUERY_STRING"]
+    query = request.META.get("QUERY_STRING", "")
+    if not rest and "kind=" not in query:  # the list itself needs a kind
+        query = "kind=server" + (f"&{query}" if query else "")
+    if query:
+        target += "?" + query
     return HttpResponsePermanentRedirect(target)
 
 

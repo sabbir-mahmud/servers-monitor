@@ -303,9 +303,10 @@ def solo_dev(client, django_user_model):
 
 
 def test_solo_devices_page_offers_a_server_or_a_computer_or_phone(client, solo_dev):
-    page = client.get(reverse("fleet:dashboard")).content.decode()
-    assert "Nothing connected yet" in page
-    assert reverse("fleet:server_create") in page and reverse("devices:create") in page
+    servers = client.get(reverse("fleet:dashboard"), {"kind": "server"}).content.decode()
+    assert "No servers yet" in servers and reverse("fleet:server_create") in servers
+    devices = client.get(reverse("fleet:dashboard"), {"kind": "device"}).content.decode()
+    assert "No computers or phones yet" in devices and reverse("devices:create") in devices
 
 
 def test_solo_developer_connects_their_own_laptop(client, solo_dev):
@@ -318,12 +319,13 @@ def test_solo_developer_connects_their_own_laptop(client, solo_dev):
     token = api_pair(client, code, platform="macos").json()["token"]
     api_checkin(client, token, {"battery": {"percent": 80}})
 
-    page = client.get(reverse("fleet:dashboard")).content.decode()
+    page = client.get(reverse("fleet:dashboard"), {"kind": "device"}).content.decode()
     assert ">My Mac</a>" in page and "80%" in page
+    devices_url = reverse("fleet:dashboard") + "?kind=device"
     detail = client.get(reverse("devices:detail", args=[device.pk])).content.decode()
-    assert f'href="{reverse("fleet:dashboard")}"' in detail and "Belongs to" not in detail
+    assert f'href="{devices_url}"' in detail and "Belongs to" not in detail
     resp = client.post(reverse("devices:delete", args=[device.pk]))
-    assert resp["Location"] == reverse("fleet:dashboard")
+    assert resp["Location"] == devices_url
 
 
 def test_another_familys_device_is_invisible(client, django_user_model, paired):
@@ -366,7 +368,7 @@ def test_parents_are_not_told_about_the_server_relay(client, parent, viewer):
     client.force_login(parent)
     assert "relay process" not in client.get(reverse("tenants:people")).content.decode()
     client.force_login(viewer)  # a company member who can see servers still is
-    assert "relay process" in client.get(reverse("fleet:dashboard")).content.decode()
+    assert "relay process" in client.get(reverse("fleet:dashboard"), {"kind": "server"}).content.decode()
 
 
 # --------------------------------------------------------------------------- maps and the redesigned pages

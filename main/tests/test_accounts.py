@@ -156,7 +156,7 @@ def test_invite_accept_creates_account_with_role(client, admin_user):
     assert resp["Location"] == reverse("home")
     user = User.objects.get(username="dev")
     assert user.email == "dev@example.com" and accounts.role_of(user, acme()) == "operator"
-    assert client.get(reverse("fleet:dashboard")).status_code == 200  # signed in
+    assert client.get(reverse("fleet:dashboard"), {"kind": "server"}).status_code == 200  # signed in
     client.logout()
     assert client.get(path).status_code == 404  # single use
 
@@ -241,7 +241,7 @@ def test_signup_creates_an_account_of_the_chosen_kind(client, admin_user, settin
     # Signed in, in the new account, and Acme's server is nowhere to be seen.
     assert client.get(reverse("fleet:server_detail", args=[server.pk])).status_code in (403, 404)
     if kind != "family":
-        assert b"acme-db" not in client.get(reverse("fleet:dashboard")).content
+        assert b"acme-db" not in client.get(reverse("fleet:dashboard"), {"kind": "server"}).content
 
 
 # ---------------------------------------------------------------- management guards
@@ -262,12 +262,12 @@ def test_role_change_and_deactivation_sign_out(client, admin_user, roles):
     victim = make_user("ops", role="Operator", email="ops@example.com")
     other = client.__class__()
     other.force_login(victim)
-    assert other.get(reverse("fleet:dashboard")).status_code == 200
+    assert other.get(reverse("fleet:dashboard"), {"kind": "server"}).status_code == 200
     client.force_login(admin_user)
     client.post(reverse("users:detail", args=[victim.pk]), {"action": "role", "role": "viewer"})
     assert accounts.role_of(victim, acme()) == "viewer"
     client.post(reverse("users:detail", args=[victim.pk]), {"action": "deactivate"})
-    assert other.get(reverse("fleet:dashboard")).status_code == 302  # session dead
+    assert other.get(reverse("fleet:dashboard"), {"kind": "server"}).status_code == 302  # session dead
     assert AuditLog.objects.filter(action="user.deactivate", target="ops").exists()
 
 
@@ -313,7 +313,7 @@ def test_change_own_password_keeps_this_session_only(client, roles):
                                             "new_password1": "another-good-pass-7", "new_password2": "another-good-pass-7"})  # fmt: skip
     assert resp.status_code == 302
     assert client.get(reverse("account")).status_code == 200
-    assert elsewhere.get(reverse("fleet:dashboard")).status_code == 302
+    assert elsewhere.get(reverse("fleet:dashboard"), {"kind": "server"}).status_code == 302
 
 
 def test_profile_email_must_be_unique(client, roles):

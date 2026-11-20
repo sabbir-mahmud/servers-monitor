@@ -56,7 +56,8 @@ def test_a_heartbeat_style_update_reaches_both_tables(solo):
 def test_solo_page_is_one_table_in_a_fixed_number_of_queries(client, solo):
     def page_queries():
         with CaptureQueriesContext(connection) as ctx:
-            assert client.get(reverse("fleet:dashboard")).status_code == 200
+            for kind in ("server", "device"):
+                assert client.get(reverse("fleet:dashboard"), {"kind": kind}).status_code == 200
         return len(ctx)
 
     make_server("web-01", account=solo)
@@ -68,11 +69,13 @@ def test_solo_page_is_one_table_in_a_fixed_number_of_queries(client, solo):
         Device.objects.create(account=solo, platform="macos", name=f"Mac {i}", token_hash=f"m{i}")
     assert page_queries() == before  # no query per row
 
-    page = client.get(reverse("fleet:dashboard")).content.decode()
-    assert page.count('<li class="srow srow-device') == 12  # one row each, one table
-    assert "6 servers · 5 computers · 1 phone" in page
-    servers_only = client.get(reverse("fleet:dashboard"), {"kind": "server"}).content.decode()
-    assert ">web-01</a>" in servers_only and ">Phone</a>" not in servers_only
+    servers = client.get(reverse("fleet:dashboard"), {"kind": "server"}).content.decode()
+    assert servers.count('<li class="srow ') == 6
+    assert "6 servers · 5 computers · 1 phone" in servers
+    assert ">web-01</a>" in servers and ">Phone</a>" not in servers
+    devices = client.get(reverse("fleet:dashboard"), {"kind": "device"}).content.decode()
+    assert devices.count('<li class="srow srow-device') == 6
+    assert ">Phone</a>" in devices and ">web-01</a>" not in devices
 
 
 def test_a_company_sees_only_servers_here(client, admin_user):
@@ -80,5 +83,5 @@ def test_a_company_sees_only_servers_here(client, admin_user):
     client.force_login(admin_user)
     acme = Server.objects.get(name="web-01").account
     Device.objects.create(account=acme, platform="macos", name="Reception Mac")
-    page = client.get(reverse("fleet:dashboard")).content.decode()
+    page = client.get(reverse("fleet:dashboard"), {"kind": "server"}).content.decode()
     assert ">web-01</a>" in page and "Reception Mac" not in page

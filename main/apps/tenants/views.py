@@ -26,7 +26,7 @@ class HomeView(LoginRequiredMixin, View):
     def get(self, request):
         account = request.account
         if account.has("servers") and request.user.has_perm("fleet.view_server"):
-            return redirect("fleet:dashboard")
+            return redirect(reverse("fleet:dashboard") + "?kind=server")
         if account.has("people") and request.user.has_perm("tenants.view_person"):
             return redirect("tenants:people")
         return redirect("tenants:settings")
