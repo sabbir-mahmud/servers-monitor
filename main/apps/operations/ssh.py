@@ -8,7 +8,8 @@ process's memory, so the web server must be one process (it is: gunicorn --worke
 
 Safety:
 - Only the person who opened a session can read from or type into it.
-- The password or private key is used for that one connection and never stored or logged.
+- The password or private key is used for that one connection and never logged. It is
+  stored only when its owner saves the login, encrypted (see ssh_logins.py).
 - The dashboard's own keys and SSH agent are never offered (look_for_keys/allow_agent off).
 - Host keys are trusted on first use, per account, and must match afterwards: a changed key
   refuses the connection until someone deliberately forgets the old one.
@@ -67,6 +68,7 @@ class Session:
     last_input: float = field(default_factory=time.monotonic)
     cond: threading.Condition = field(default_factory=threading.Condition)
     on_close: object = None  # called once with the reason (the audit entry)
+    key_fingerprint: str = ""  # of the client key used, if any (public; safe to show)
 
     @property
     def end(self) -> int:
@@ -195,7 +197,8 @@ def open_session(*, user, account, host: str, port: int, username: str, password
         client.close()
         raise SshError(f"{host} didn't open a shell: {exc}") from exc
     session = Session(id=secrets.token_urlsafe(18), user_id=user.pk, account_id=account.pk,
-                      label=f"{username}@{host}:{port}", client=client, channel=channel)  # fmt: skip
+                      label=f"{username}@{host}:{port}", client=client, channel=channel,
+                      key_fingerprint=_fingerprint(pkey) if pkey else "")  # fmt: skip
     with _lock:
         _sessions[session.id] = session
     threading.Thread(target=_pump, args=(session,), daemon=True,

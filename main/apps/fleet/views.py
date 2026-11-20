@@ -222,6 +222,12 @@ class ServerDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
             charts = services.chart_series(server, range_key)
         if part != "charts":
             trend = charts if range_key == "1h" and charts else services.chart_series(server, "1h")
+        can_shell = self.request.user.has_perm("operations.run_shell")
+        ssh_logins = []
+        if can_shell and not self.request.htmx:
+            from apps.operations.ssh_logins import mine
+
+            ssh_logins = list(mine(self.request).filter(server=server))
         ctx.update(
             range_key=range_key,
             ranges=list(services.CHART_RANGES),
@@ -230,7 +236,8 @@ class ServerDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
             open_alerts=server.alerts.filter(resolved_at__isnull=True),
             recent_commands=server.commands.select_related("job").order_by("-created_at")[:10],
             can_operate=self.request.user.has_perm("operations.add_job"),
-            can_shell=self.request.user.has_perm("operations.run_shell"),
+            can_shell=can_shell,
+            ssh_logins=ssh_logins,
             can_admin=self.request.user.has_perm("fleet.change_server"),
             maintenance_window=maintenance.coverage(account=server.account_id).window_for_server(
                 server.pk

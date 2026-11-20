@@ -216,3 +216,53 @@ class SshHostKey(models.Model):
 
     def __str__(self):
         return f"{self.host}:{self.port} {self.fingerprint}"
+
+
+class SshAuth(models.TextChoices):
+    PASSWORD = "password", "Password"
+    KEY = "key", "Private key"
+
+
+class SshLogin(models.Model):
+    """A saved way into a server for the browser terminal, so its owner doesn't retype a
+    password or paste a key every time.
+
+    Private to the person who saved it: nobody else in the account can see, use or
+    remove it (admins included). The password, private key and passphrase sit in `secret`,
+    encrypted (apps/core/crypto), and are decrypted only inside the request that opens an
+    SSH connection with them. They are never sent back to a browser, logged or audited.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    account = models.ForeignKey("tenants.Account", on_delete=models.CASCADE, related_name="+")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ssh_logins"
+    )
+    # Removing a server removes the ways into it.
+    server = models.ForeignKey(
+        "fleet.Server", null=True, blank=True, on_delete=models.CASCADE, related_name="ssh_logins"
+    )
+    name = models.CharField(max_length=80)
+    host = models.CharField(max_length=255)
+    port = models.PositiveIntegerField(default=22)
+    username = models.CharField(max_length=64)
+    auth = models.CharField(max_length=10, choices=SshAuth.choices)
+    key_fingerprint = models.CharField(max_length=100, blank=True)  # public half: safe to show
+    secret = models.TextField(editable=False)  # encrypted JSON; see apps/operations/ssh_logins
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["account", "user", "host", "port", "username"], name="ssh_login_unique"
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.username}@{self.host}:{self.port})"
+
+    @property
+    def target(self) -> str:
+        return f"{self.username}@{self.host}" + ("" if self.port == 22 else f":{self.port}")

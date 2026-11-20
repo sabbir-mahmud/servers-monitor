@@ -28,7 +28,17 @@
     <div class="hero-actions">
       {% include "alerts/_mute_menu.html" with target=server target_field="server" %}
     {% if can_admin %}
-      {% if can_shell %}<a class="btn btn-outline-secondary btn-sm" href="{% url 'operations:ssh' %}?server={{ server.pk }}">{% icon "terminal" %} SSH</a>{% endif %}
+      {% if can_shell %}{% if ssh_logins %}
+      <div class="dropdown">
+        <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">{% icon "terminal" %} SSH</button>
+        <div class="dropdown-menu dropdown-menu-end add-menu add-menu-wide">
+          <h6 class="dropdown-header">Your saved logins</h6>
+          {% for l in ssh_logins %}<a class="dropdown-item" href="{% url 'operations:ssh' %}?server={{ server.pk }}&login={{ l.pk }}">{% if l.auth == "key" %}{% icon "key" 16 %}{% else %}{% icon "lock" 16 %}{% endif %}<span><span class="d-block fw-semibold">{{ l.name }}</span>{% if l.name != l.target %}<small class="mono">{{ l.target }}</small>{% endif %}</span></a>{% endfor %}
+          <div class="dropdown-divider"></div>
+          <a class="dropdown-item" href="{% url 'operations:ssh' %}?server={{ server.pk }}">{% icon "plus" 16 %}<span><span class="d-block">New connection</span><small>Type a password or key</small></span></a>
+        </div>
+      </div>
+      {% else %}<a class="btn btn-outline-secondary btn-sm" href="{% url 'operations:ssh' %}?server={{ server.pk }}">{% icon "terminal" %} SSH</a>{% endif %}{% endif %}
       <a class="btn btn-outline-secondary btn-sm" href="{% url 'fleet:server_update' server.pk %}">{% icon "edit" %} Edit</a>
       <div class="dropdown">
         <button class="btn btn-outline-secondary btn-sm btn-icon" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="More actions">{% icon "more" %}</button>
