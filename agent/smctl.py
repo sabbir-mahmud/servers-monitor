@@ -16,6 +16,8 @@ it. The dashboard shows the result on the next heartbeat.
   sudo smctl log add api /var/www/api/logs/app.log
   sudo smctl action add deploy --sudo -- /opt/deploy/deploy.sh
   sudo smctl tasks on [updates upgrade cleanup reboot]   one-click server tasks
+  sudo smctl app add api --repo git@github.com:acme/api.git --branch main \
+       --path /var/www/api --user deploy --dashboard-steps   git deploys
   sudo smctl connect 'rediss://sm-...'      install rotated credentials
   sudo smctl upgrade | uninstall
 
@@ -53,7 +55,7 @@ NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 # read as syntax (`,` separates commands, spaces add arguments, `!` negates, `*` globs).
 UNIT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
 SERVICE_KINDS = ("systemd", "docker", "pm2", "process", "http")
-RESERVED = {"tail_log", "tail_follow", "restart_service", "shell", "_upgrade", "_task"}
+RESERVED = {"tail_log", "tail_follow", "restart_service", "shell", "_upgrade", "_task", "_deploy"}
 STATE_DIR = Path(os.environ.get("SMCTL_STATE", "/var/lib/server-monitor-agent"))
 UPGRADE_REQUEST = STATE_DIR / "upgrade-request.json"
 UPGRADE_UNITS = ("server-monitor-upgrade.path", "server-monitor-upgrade.service")
@@ -72,6 +74,12 @@ TASKS = {
     "reboot": "Reboot the server (one minute after it's asked)",
 }
 PACKAGE_MANAGERS = ("apt-get", "dnf", "yum", "zypper", "apk", "pacman")
+# One small JSON file per app, root-owned and world-readable, that `smctl deploy-run`
+# (running as the app's user, who can't read agent.toml) trusts for repo, branch and path.
+APPS_DIR = Path(os.environ.get("SMCTL_APPS", "/etc/server-monitor-agent/apps"))
+BRANCH_RE = re.compile(r"^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]{1,200}$")
+USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 HEADER = """\
 # Server Monitor agent: the allowlist for this server. Managed by `smctl`.
@@ -179,13 +187,13 @@ def dump_toml(data: dict) -> str:
     for section in ("main", "agent"):
         if section in data:
             table(section, data[section])
-    for section in ("services", "actions"):
+    for section in ("services", "actions", "apps"):
         for name, body in data.get(section, {}).items():
             table(f"{section}.{_key(name)}", body)
     table("logs", data.get("logs", {}))
     table("shell", data.get("shell", {"enabled": False}))
     for section, body in data.items():  # anything else a human added, kept verbatim
-        if section not in {"main", "agent", "services", "actions", "logs", "shell"}:
+        if section not in {"main", "agent", "services", "actions", "apps", "logs", "shell"}:
             table(section, body)
     return "\n".join(out) + "\n"
 
@@ -253,8 +261,9 @@ _SUDO_UNSAFE = re.compile(r"[\s,:=\\*?\[\]!#\"']")
 
 
 def sudo_rules(data: dict) -> list[str]:
-    """Exact-argv NOPASSWD rules for restartable systemd units and --sudo actions. Each
-    rule names one full command line, so the agent user gains nothing beyond it."""
+    """Exact-argv NOPASSWD rules ("(runas) NOPASSWD: command") for restartable systemd
+    units, --sudo actions, server tasks and app deploys. Each names one full command line,
+    so the agent user gains nothing beyond it."""
     systemctl = shutil.which("systemctl") or "/usr/bin/systemctl"
     cmds = []
     for name, svc in data.get("services", {}).items():
@@ -272,10 +281,38 @@ def sudo_rules(data: dict) -> list[str]:
             cmds.append(" ".join(argv[2:]))
     for task in enabled_tasks(data):  # names from TASKS only: nothing user-typed
         cmds.append(f"{SMCTL_BIN} task {task}")
-    return sorted(set(cmds))
+    rules = [f"(root) NOPASSWD: {c}" for c in sorted(set(cmds))]
+    for name, app in sorted(data.get("apps", {}).items()):
+        user = str(app.get("user") or "")
+        if user and user != AGENT_USER:
+            if not USER_RE.match(user) or not NAME_RE.match(name):
+                raise Fail(f"app {name}: user or name has characters that aren't allowed")
+            rules.append(f"({user}) NOPASSWD: {SMCTL_BIN} deploy-run {name}")
+    return rules
+
+
+def sync_app_specs(data: dict) -> None:
+    """Write APPS_DIR/<name>.json for each app (and remove stale ones)."""
+    apps = data.get("apps", {})
+    if not apps and not APPS_DIR.exists():
+        return
+    APPS_DIR.mkdir(mode=0o755, parents=True, exist_ok=True)
+    for name, app in apps.items():
+        spec = {"name": name, "repo": app["repo"], "branch": app.get("branch", "main"),
+                "path": app["path"], "script": app.get("script") or [],
+                "dashboard_steps": bool(app.get("dashboard_steps"))}  # fmt: skip
+        target = APPS_DIR / f"{name}.json"
+        tmp = target.with_suffix(".tmp")
+        tmp.write_text(json.dumps(spec, indent=2) + "\n")
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, target)
+    for stale in APPS_DIR.glob("*.json"):
+        if stale.stem not in apps:
+            stale.unlink()
 
 
 def sync_sudoers(data: dict) -> None:
+    sync_app_specs(data)
     rules = sudo_rules(data)
     if not rules:
         if SUDOERS.exists():
@@ -283,7 +320,7 @@ def sync_sudoers(data: dict) -> None:
         return
     body = (
         "# Managed by smctl: exact commands the Server Monitor agent may run as root.\n"
-        + "".join(f"{AGENT_USER} ALL=(root) NOPASSWD: {r}\n" for r in rules)
+        + "".join(f"{AGENT_USER} ALL={r}\n" for r in rules)
     )
     if SUDOERS.exists() and SUDOERS.read_text() == body:
         return
@@ -469,6 +506,156 @@ def cmd_tasks(opts) -> None:
     data["tasks"] = {"enabled": sorted(current)}
     save(data)
     ok(f"server tasks on: {', '.join(sorted(current)) or 'none'}")
+
+
+# --------------------------------------------------------------------------- git deploys
+
+
+def cmd_app(opts) -> None:
+    data = load()
+    apps = data.setdefault("apps", {})
+    if opts.op == "add":
+        name = check_name(opts.name, "app")
+        if name in apps and not opts.force:
+            raise Fail(f"app {name!r} exists (use --force to replace)")
+        if not BRANCH_RE.match(opts.branch):
+            raise Fail(f"{opts.branch!r} is not a valid branch name")
+        path = os.path.abspath(opts.path)
+        user = opts.user or ""
+        if user:
+            if not USER_RE.match(user):
+                raise Fail(f"{user!r} is not a valid user name")
+            if user == "root":
+                warn("deploys will run as root; a dedicated deploy user is safer")
+        if bool(opts.deploy) == bool(opts.dashboard_steps):
+            raise Fail("choose one: --deploy SCRIPT (kept on this server) or --dashboard-steps")
+        body: dict = {"repo": opts.repo, "branch": opts.branch, "path": path,
+                      "timeout": opts.timeout}  # fmt: skip
+        if user:
+            body["user"] = user
+        if opts.deploy:
+            body["script"] = shlex.split(opts.deploy)
+        else:
+            body["dashboard_steps"] = True
+            warn(f"dashboard Admins can now run any deploy steps in {path} as "
+                 f"{user or AGENT_USER}")  # fmt: skip
+        apps[name] = body
+        save(data)
+        ok(f"app {name} added; check repo access with: sudo smctl app test {name}")
+    elif opts.op == "rm":
+        if apps.pop(opts.name, None) is None:
+            raise Fail(f"no app named {opts.name!r}")
+        save(data)
+        ok(f"app {opts.name} removed (its folder is left as it is)")
+    elif opts.op == "test":
+        app = apps.get(opts.name)
+        if app is None:
+            raise Fail(f"no app named {opts.name!r}")
+        need_root()
+        user = app.get("user") or AGENT_USER
+        code, out = run(["git", "ls-remote", "--heads", app["repo"], app.get("branch", "main")],
+                        timeout=60, user=user)  # fmt: skip
+        if code == 0 and out.strip():
+            ok(f"{user} can read {app['repo']} ({out.split()[0][:12]} on {app.get('branch')})")
+        elif code == 0:
+            bad(f"{app['repo']} has no branch {app.get('branch')!r}")
+        else:
+            bad(f"{user} can't read {app['repo']}: {out.splitlines()[-1] if out else code}")
+            print(dim("  give that user a deploy key (ssh) or a token in the URL (https)"))
+
+
+def _git(path: Path, *args: str, check: bool = True, capture: bool = False):
+    argv = ["git", "-C", str(path), *args]
+    if capture:
+        p = subprocess.run(argv, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        if check and p.returncode != 0:
+            raise Fail(f"git {args[0]} failed: {(p.stderr or p.stdout).strip()}")
+        return p
+    _say(f"$ git {shlex.join(args)}")
+    code = subprocess.run(argv, stdin=subprocess.DEVNULL).returncode
+    if check and code != 0:
+        raise Fail(f"git {args[0]} failed (exit {code})")
+    return code
+
+
+def deploy_run(name: str, request: dict, apps_dir: Path | None = None) -> int:
+    """Check out a commit of app `name` and run its deploy. Runs as the app's user.
+    Trusts APPS_DIR for repo, branch, folder and script; from the request only the commit
+    (a full sha, which must be on the branch) and, if the app allows it, the steps."""
+    spec_file = (apps_dir or APPS_DIR) / f"{name}.json"
+    try:
+        spec = json.loads(spec_file.read_text())
+    except (OSError, ValueError):
+        raise Fail(f"no app {name!r} here ({spec_file})") from None
+    sha = str(request.get("sha") or "")
+    steps = request.get("steps") or ""
+    if sha and not SHA_RE.match(sha):
+        raise Fail("the commit must be a full 40-character sha")
+    if not isinstance(steps, str):
+        raise Fail("steps must be text")
+    if steps and not spec.get("dashboard_steps"):
+        raise Fail(f"app {name} runs its own deploy script; steps from the dashboard are off")
+    if spec.get("dashboard_steps") and not steps.strip():
+        raise Fail("no deploy steps were sent")
+    branch, path = spec["branch"], Path(spec["path"])
+    os.environ["GIT_TERMINAL_PROMPT"] = "0"  # never hang asking for a password
+
+    if not (path / ".git").exists():
+        if path.exists() and any(path.iterdir()):
+            raise Fail(f"{path} isn't a git checkout and isn't empty")
+        _say(f"== First deploy: cloning {spec['repo']} ({branch})")
+        _say(f"$ git clone --branch {branch} {spec['repo']} {path}")
+        code = subprocess.run(["git", "clone", "--branch", branch, spec["repo"], str(path)],
+                              stdin=subprocess.DEVNULL).returncode  # fmt: skip
+        if code != 0:
+            raise Fail(f"git clone failed (exit {code})")
+    previous = _git(path, "rev-parse", "HEAD", check=False, capture=True).stdout.strip()
+
+    _say(f"\n== Fetching {branch}")
+    _git(path, "fetch", "--prune", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
+    tip = _git(path, "rev-parse", f"refs/remotes/origin/{branch}", capture=True).stdout.strip()
+    target = sha or tip
+    if sha:
+        if _git(path, "cat-file", "-e", f"{sha}^{{commit}}", check=False, capture=True).returncode:
+            raise Fail(f"commit {sha[:12]} isn't in {spec['repo']}")
+        on_branch = _git(path, "merge-base", "--is-ancestor", sha, tip, check=False, capture=True)
+        if on_branch.returncode != 0:
+            raise Fail(f"commit {sha[:12]} isn't on {branch}: only commits on the branch deploy")
+    dirty = _git(path, "status", "--porcelain", "--untracked-files=no", capture=True).stdout
+    if dirty.strip():
+        raise Fail("files in the checkout were changed by hand; commit or undo them first:\n"
+                   + dirty.rstrip())  # fmt: skip
+    _say(f"\n== Checking out {target[:12]}" + (f" (was {previous[:12]})" if previous else ""))
+    _git(path, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", target)
+    summary = _git(path, "log", "-1", "--format=%h %s (%an)", target, capture=True).stdout
+    _say(summary.strip())
+
+    env = {**os.environ, "NEXGUARD_APP": name, "NEXGUARD_SHA": target,
+           "NEXGUARD_PREVIOUS_SHA": previous, "NEXGUARD_BRANCH": branch}  # fmt: skip
+    if steps:
+        shell = shutil.which("bash")
+        # -e: stop at the first failing step; pipefail: a failing pipe counts too.
+        argv = [shell, "-eo", "pipefail", "-c", steps] if shell else ["/bin/sh", "-ec", steps]
+        _say("\n== Deploy steps (from the dashboard)")
+    else:
+        argv = list(spec["script"])
+        if not argv[0].startswith("/"):
+            argv[0] = str(path / argv[0])
+        _say(f"\n== {shlex.join(argv)}")
+    code = subprocess.run(argv, cwd=path, env=env, stdin=subprocess.DEVNULL).returncode
+    _say(f"\n{'Deployed' if code == 0 else 'Deploy failed'}: {target[:12]} (exit {code})")
+    return code
+
+
+def cmd_deploy_run(opts) -> None:
+    raw = sys.stdin.read(64 * 1024)
+    try:
+        request = json.loads(raw or "{}")
+    except ValueError:
+        raise Fail("the deploy request isn't JSON") from None
+    code = deploy_run(opts.name, request if isinstance(request, dict) else {})
+    if code:
+        raise SystemExit(code)
 
 
 # --------------------------------------------------------------------------- detection
@@ -687,6 +874,13 @@ def cmd_list(opts) -> None:
         print(dim("  none: sudo smctl action add deploy -- /opt/deploy/deploy.sh"))
     shell = data.get("shell", {}).get("enabled", False)
     print(_c("1", "\nFree-form shell: ") + ("on" if shell else "off"))
+    head("\nApps (git deploys)")
+    for name, a in data.get("apps", {}).items():
+        how = "dashboard steps" if a.get("dashboard_steps") else shlex.join(a.get("script", []))
+        print(f"  {name:<22} {dim(a.get('repo', ''))} {a.get('branch', 'main')} -> {a.get('path')}"
+              f" {dim('as ' + (a.get('user') or AGENT_USER) + ', ' + how)}")  # fmt: skip
+    if not data.get("apps"):
+        print(dim("  none: sudo smctl app add <name> --repo URL --path DIR --dashboard-steps"))
     tasks = enabled_tasks(data)
     print(_c("1", "Server tasks: ") + (", ".join(tasks) if tasks else "off (sudo smctl tasks on)"))
 
@@ -1343,6 +1537,26 @@ def build_parser() -> argparse.ArgumentParser:
     tk.add_argument("state", choices=["on", "off", "list"])
     tk.add_argument("names", nargs="*", metavar="TASK", help=f"default: all ({', '.join(TASKS)})")
     tk.set_defaults(fn=cmd_tasks)
+    ap = sub.add_parser("app", help="git projects the dashboard can deploy")
+    apsub = ap.add_subparsers(dest="op", required=True)
+    apa = apsub.add_parser("add", help="deploy a git repo into a folder on this server")
+    apa.add_argument("name")
+    apa.add_argument("--repo", required=True, help="git URL this server can read")
+    apa.add_argument("--branch", default="main")
+    apa.add_argument("--path", required=True, help="the checkout (created on first deploy)")
+    apa.add_argument("--user", help="run git and the deploy as this user (recommended)")
+    how = apa.add_mutually_exclusive_group()
+    how.add_argument("--deploy", metavar="SCRIPT", help="deploy script kept on this server")
+    how.add_argument("--dashboard-steps", action="store_true",
+                     help="run the deploy steps written in the dashboard")  # fmt: skip
+    apa.add_argument("-t", "--timeout", type=int, default=1800, help="seconds (default 1800)")
+    apa.add_argument("--force", action="store_true")
+    apsub.add_parser("rm").add_argument("name")
+    apsub.add_parser("test", help="can the app's user read the repo?").add_argument("name")
+    ap.set_defaults(fn=cmd_app)
+    dr = sub.add_parser("deploy-run", help=argparse.SUPPRESS)  # the agent, through sudo
+    dr.add_argument("name")
+    dr.set_defaults(fn=cmd_deploy_run)
     tr = sub.add_parser("task", help=argparse.SUPPRESS)  # run by the agent through sudo
     tr.add_argument("task", choices=list(TASKS))
     tr.set_defaults(fn=cmd_task)

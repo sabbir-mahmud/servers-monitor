@@ -218,6 +218,19 @@ class Server(Machine):
         return bool(self.capabilities.get("shell"))
 
     @property
+    def apps(self) -> list[dict]:
+        """Git projects this server's agent can deploy (agent 2.4+), with the commit each
+        has checked out."""
+        return list(self.capabilities.get("apps") or [])
+
+    @property
+    def supports_deploy(self) -> bool:
+        return "deploy" in (self.capabilities.get("features") or [])
+
+    def app(self, name: str) -> dict | None:
+        return next((a for a in self.apps if a.get("name") == name), None)
+
+    @property
     def supports_tasks(self) -> bool:
         """Agent 2.3+ knows server tasks (whether or not any are turned on)."""
         return "tasks" in (self.capabilities.get("features") or [])

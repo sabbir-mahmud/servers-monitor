@@ -32,7 +32,9 @@ def _back_to(device) -> str:
     if device.person_id:
         return reverse("tenants:person_detail", args=[device.person_id])
     if device.account.kind == "solo":
-        return reverse("fleet:dashboard") + "?kind=device"  # a solo developer's devices sit with their servers
+        return (
+            reverse("fleet:dashboard") + "?kind=device"
+        )  # a solo developer's devices sit with their servers
     return reverse("tenants:people")
 
 

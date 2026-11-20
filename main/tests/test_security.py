@@ -126,8 +126,12 @@ def test_6_secure_cookies_by_default_in_production():
 
 def test_6_admins_warned_on_plain_http_from_another_machine(client, admin_user):
     client.force_login(admin_user)
-    remote = client.get(reverse("fleet:dashboard"), {"kind": "server"}, REMOTE_ADDR="192.168.1.20").content
-    local = client.get(reverse("fleet:dashboard"), {"kind": "server"}, REMOTE_ADDR="127.0.0.1").content
+    remote = client.get(
+        reverse("fleet:dashboard"), {"kind": "server"}, REMOTE_ADDR="192.168.1.20"
+    ).content
+    local = client.get(
+        reverse("fleet:dashboard"), {"kind": "server"}, REMOTE_ADDR="127.0.0.1"
+    ).content
     assert b"served over plain HTTP" in remote and b"served over plain HTTP" not in local
 
 

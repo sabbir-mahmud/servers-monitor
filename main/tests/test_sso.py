@@ -129,10 +129,14 @@ def test_superusers_never_sign_in_through_sso(client, sso, django_user_model):
 def test_sso_admins_skip_local_2fa_but_local_admins_do_not(client, sso, settings, admin_user):
     settings.REQUIRE_2FA_FOR_ADMINS = True
     sign_in(client, sso, groups=["sre"])
-    assert client.get(reverse("fleet:dashboard"), {"kind": "server"}).status_code == 200  # the provider did MFA
+    assert (
+        client.get(reverse("fleet:dashboard"), {"kind": "server"}).status_code == 200
+    )  # the provider did MFA
     client.logout()
     client.force_login(admin_user)  # a local Admin
-    assert client.get(reverse("fleet:dashboard"), {"kind": "server"})["Location"] == reverse("account_2fa")
+    assert client.get(reverse("fleet:dashboard"), {"kind": "server"})["Location"] == reverse(
+        "account_2fa"
+    )
 
 
 def test_new_accounts_can_be_invitation_only(client, sso, settings):

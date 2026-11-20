@@ -368,7 +368,10 @@ def test_parents_are_not_told_about_the_server_relay(client, parent, viewer):
     client.force_login(parent)
     assert "relay process" not in client.get(reverse("tenants:people")).content.decode()
     client.force_login(viewer)  # a company member who can see servers still is
-    assert "relay process" in client.get(reverse("fleet:dashboard"), {"kind": "server"}).content.decode()
+    assert (
+        "relay process"
+        in client.get(reverse("fleet:dashboard"), {"kind": "server"}).content.decode()
+    )
 
 
 # --------------------------------------------------------------------------- maps and the redesigned pages

@@ -64,7 +64,9 @@ def test_password_alone_does_not_sign_in(client, django_user_model, roles):
     resp = _login(client)
     assert resp.url == reverse("login_verify")
     assert "_auth_user_id" not in client.session
-    assert client.get(reverse("fleet:dashboard"), {"kind": "server"}).status_code == 302  # still signed out
+    assert (
+        client.get(reverse("fleet:dashboard"), {"kind": "server"}).status_code == 302
+    )  # still signed out
 
 
 def test_code_completes_sign_in(client, django_user_model, roles):

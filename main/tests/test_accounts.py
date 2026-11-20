@@ -156,7 +156,9 @@ def test_invite_accept_creates_account_with_role(client, admin_user):
     assert resp["Location"] == reverse("home")
     user = User.objects.get(username="dev")
     assert user.email == "dev@example.com" and accounts.role_of(user, acme()) == "operator"
-    assert client.get(reverse("fleet:dashboard"), {"kind": "server"}).status_code == 200  # signed in
+    assert (
+        client.get(reverse("fleet:dashboard"), {"kind": "server"}).status_code == 200
+    )  # signed in
     client.logout()
     assert client.get(path).status_code == 404  # single use
 
@@ -267,7 +269,9 @@ def test_role_change_and_deactivation_sign_out(client, admin_user, roles):
     client.post(reverse("users:detail", args=[victim.pk]), {"action": "role", "role": "viewer"})
     assert accounts.role_of(victim, acme()) == "viewer"
     client.post(reverse("users:detail", args=[victim.pk]), {"action": "deactivate"})
-    assert other.get(reverse("fleet:dashboard"), {"kind": "server"}).status_code == 302  # session dead
+    assert (
+        other.get(reverse("fleet:dashboard"), {"kind": "server"}).status_code == 302
+    )  # session dead
     assert AuditLog.objects.filter(action="user.deactivate", target="ops").exists()
 
 

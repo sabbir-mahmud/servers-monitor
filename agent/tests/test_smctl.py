@@ -226,7 +226,9 @@ def test_task_runs_the_package_managers_steps(env, monkeypatch, capsys):
     assert smctl.main(["task", "upgrade"]) == 0
     argvs = [a for a, _ in ran]
     assert argvs[0][:1] == ["apt-get"] and "update" in argvs[0]
-    assert "upgrade" in argvs[1] and "-y" in argvs[1] and "Dpkg::Options::=--force-confold" in argvs[1]
+    assert (
+        "upgrade" in argvs[1] and "-y" in argvs[1] and "Dpkg::Options::=--force-confold" in argvs[1]
+    )
     assert ran[1][1]["DEBIAN_FRONTEND"] == "noninteractive"
     out = capsys.readouterr().out
     assert "Upgrading packages" in out and "reboot is needed" in out

@@ -157,9 +157,14 @@ def test_banner_warns_when_relay_process_is_not_running(client, viewer, settings
 
     settings.SQLITE_PATH = tmp_path / "db.sqlite3"
     client.force_login(viewer)
-    assert b"relay process isn" in client.get(reverse("fleet:dashboard"), {"kind": "server"}).content
+    assert (
+        b"relay process isn" in client.get(reverse("fleet:dashboard"), {"kind": "server"}).content
+    )
     relay.mark_alive()
-    assert b"relay process isn" not in client.get(reverse("fleet:dashboard"), {"kind": "server"}).content
+    assert (
+        b"relay process isn"
+        not in client.get(reverse("fleet:dashboard"), {"kind": "server"}).content
+    )
 
 
 def test_sidebar_is_one_flat_list_with_problem_badges(client, admin_user, viewer):

@@ -74,6 +74,8 @@ class Job(models.Model):
             if self.args.get("script"):
                 return f"script {self.args['script']}"
             return self.args.get("command", "")[:80]
+        if self.action == "_deploy":
+            return f"deploy {self.args.get('app')} {(self.args.get('sha') or 'latest')[:7]}"
         if self.action == "_task":
             from .server_tasks import label
 

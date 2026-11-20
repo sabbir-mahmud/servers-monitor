@@ -6,6 +6,14 @@ import math
 from apps.operations.server_tasks import TASKS
 
 TASK_NAMES = set(TASKS)
+MAX_APPS = 50
+
+
+def _sha(value) -> str:
+    value = str(value or "")
+    return value if len(value) == 40 and all(c in "0123456789abcdef" for c in value) else ""
+
+
 MAX_SERVICES = 100
 MAX_DISKS = 32
 MAX_ACTIONS = 100
@@ -152,6 +160,18 @@ def clean_report(data) -> dict:
             "tasks": [t for t in (caps.get("tasks") or [])[:8] if t in TASK_NAMES],
             "package_manager": _str(caps.get("package_manager"), 16),
             "reboot_required": bool(caps.get("reboot_required")),
+            "apps": [
+                {
+                    "name": _str(a["name"], 64),
+                    "repo": _str(a.get("repo"), 300),
+                    "branch": _str(a.get("branch"), 200),
+                    "mode": "dashboard" if a.get("mode") == "dashboard" else "script",
+                    "timeout": _num(a.get("timeout"), lo=30, hi=86400, integer=True) or 1800,
+                    "sha": _sha(a.get("sha")),
+                }
+                for a in (caps.get("apps") or [])[:MAX_APPS]
+                if isinstance(a, dict) and a.get("name")
+            ],
             "features": [
                 _str(f, 32) for f in (caps.get("features") or [])[:32] if isinstance(f, str)
             ],

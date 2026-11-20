@@ -96,6 +96,20 @@ timeout = 30
 # [tasks]
 # enabled = ["updates", "cleanup"]
 
+# ---------------------------------------------------------------- git deploys
+# Apps the dashboard may deploy on push (Deploys in the sidebar). Write these with
+# `sudo smctl app add`, which also adds the one sudo rule each needs. The repo, branch and
+# folder are fixed here; the dashboard chooses only the commit (and, with
+# dashboard_steps, the deploy steps). Exactly one of `script` / `dashboard_steps`.
+# [apps.api]
+# repo = "git@github.com:acme/api.git"
+# branch = "main"
+# path = "/var/www/api"
+# user = "deploy"
+# script = "./deploy.sh"          # in the repo, or an absolute path
+# # dashboard_steps = true        # or: run the steps written on the project's page
+# timeout = 1800
+
 # ---------------------------------------------------------------- probes
 # Let the dashboard run HTTP/TCP uptime checks from this server (internal URLs included;
 # cloud metadata never). Results ride on heartbeats. `sudo smctl probes on`.

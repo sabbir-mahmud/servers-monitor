@@ -13,6 +13,14 @@ names); upgrading gets the relay backlog fixes below.
 
 ### Added
 
+- **Git deploys** (Deploys in the sidebar; **agents must be upgraded** to 2.4.0): connect
+  a repository from GitHub, GitLab, Gitea/Forgejo or Bitbucket with a signed webhook, and
+  each push to its branch deploys to the chosen servers, either at once or after an Admin
+  approves it. Each server opts in per app (`sudo smctl app add`), keeps the repo, branch
+  and folder in a root-owned spec, and runs the steps written on the project's page or
+  its own deploy script as the app's user. One server can host many apps. Deploys queue
+  (only the newest waiting one runs), can roll out in batches with health gates, keep
+  each server's log, and can be redeployed to roll back. Audited (`deploy.*`).
 - **Server tasks** (**agents must be upgraded** to 2.3.0): check for updates, upgrade
   packages, clean up and reboot from a server's page, from Run on servers, or on a
   schedule. Works with apt, dnf, yum, zypper, apk and pacman. Each server opts in per task

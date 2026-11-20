@@ -26,7 +26,8 @@ def _relay():
 
 logger = logging.getLogger(__name__)
 
-BUILTIN_ACTIONS = {"tail_log", "tail_follow", "restart_service", "shell", "_upgrade", "_task"}
+BUILTIN_ACTIONS = {"tail_log", "tail_follow", "restart_service", "shell", "_upgrade", "_task",
+                   "_deploy"}  # fmt: skip
 UPGRADE_SECONDS = 1200  # download, verify, reinstall, restart, test heartbeat
 FOLLOW_SECONDS = 600  # the agent's own maximum too
 JOURNAL_PREFIX = "journal:"  # tail_follow of a systemd service's journal instead of a file
@@ -79,6 +80,18 @@ def clean_args(action: str, raw: dict) -> dict:
         if not name:
             raise JobError("Choose a service.")
         return {"name": name}
+    if action == "_deploy":
+        import re
+
+        app, sha = str(raw.get("app", "")), str(raw.get("sha") or "")
+        steps = str(raw.get("steps") or "")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", app):
+            raise JobError("Name the app as it's called on the servers.")
+        if sha and not re.fullmatch(r"[0-9a-f]{40}", sha):
+            raise JobError("A commit must be its full 40-character id.")
+        if len(steps) > MAX_SCRIPT_LENGTH:
+            raise JobError(f"Deploy steps are limited to {MAX_SCRIPT_LENGTH} characters.")
+        return {"app": app, "sha": sha, **({"steps": steps} if steps.strip() else {})}
     if action == "_task":
         from .server_tasks import TASKS
 
@@ -104,6 +117,17 @@ def reason_unavailable(server, action: str, args: dict) -> str | None:
         return "server disabled"
     if action == "shell":
         return None if server.shell_enabled else "shell disabled in agent config"
+    if action == "_deploy":
+        if "deploy" not in (server.capabilities.get("features") or []):
+            return "agent too old for git deploys (upgrade it)"
+        app = server.app(args.get("app", ""))
+        if app is None:
+            return f"no app {args.get('app')!r} here (sudo smctl app add {args.get('app')} ...)"
+        if args.get("steps") and app.get("mode") != "dashboard":
+            return "the app runs its own deploy script there (smctl app add --dashboard-steps)"
+        if not args.get("steps") and app.get("mode") == "dashboard":
+            return "the app expects deploy steps from the dashboard, and this project has none"
+        return None
     if action == "_task":
         task = args.get("task")
         if not server.supports_tasks:
@@ -156,6 +180,9 @@ def _timeout_for(server, action: str, args: dict | None = None) -> int:
 
         task = TASKS.get(args.get("task", "")) if args else None
         return task.timeout if task else 900
+    if action == "_deploy":
+        app = server.app((args or {}).get("app", "")) or {}
+        return int(app.get("timeout") or 1800)
     return 60 if action in ("tail_log", "restart_service") else 300
 
 
@@ -200,6 +227,8 @@ def create_job(
         raise JobError("You do not have permission to run shell commands.")
     if action == "_upgrade" and not (user and user.has_perm("fleet.change_server")):
         raise JobError("Only Admins can upgrade agents.")
+    if action == "_deploy" and not (user and user.has_perm("deploys.add_deployment")):
+        raise JobError("You do not have permission to deploy.")
     args = clean_args(action, raw_args)
     if action == "_task":
         from . import server_tasks

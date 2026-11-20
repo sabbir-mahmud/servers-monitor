@@ -357,6 +357,12 @@
       <a class="chip chip-ghost" href="{% if scripts %}{% url 'operations:script_list' %}{% else %}{% url 'operations:script_create' %}{% endif %}">{% if scripts %}All scripts →{% else %}{% icon "plus" 12 %} New script{% endif %}</a>
     </div>
   {% endif %}
+  {% if server.apps and perms.deploys.view_project %}
+    <div class="script-strip">
+      <span class="task-title">Git apps</span>
+      {% for a in server.apps %}{% with p=deploy_projects|get_item:a.name %}<a class="chip" {% if p %}href="{% url 'deploys:project' p.pk %}"{% endif %} title="{{ a.repo }} · {{ a.branch }}">{% icon "git-branch" 12 %} {{ a.name }} <span class="mono">{{ a.sha|slice:":7"|default:"not deployed" }}</span></a>{% endwith %}{% endfor %}
+    </div>
+  {% endif %}
   <div id="action-output" class="mt-3"></div>
 </div></section>
 

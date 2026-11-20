@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Deploys{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Deploys</h1>
+    <p class="page-sub">Push to a branch and its servers update: each pulls the commit and runs your deploy steps. Every run's log is kept here.</p>
+  </div>
+  {% if perms.deploys.add_project and projects %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'deploys:create' %}">{% icon "plus" %} New project</a></div>{% endif %}
+</div>
+
+{% if projects %}
+<div class="deploy-grid">
+  {% for p in projects %}
+  <a class="card deploy-card{% if not p.is_enabled %} is-off{% endif %}" href="{% url 'deploys:project' p.pk %}">
+    <div class="deploy-card-head">
+      <span class="deploy-mark" aria-hidden="true">{% icon "rocket" 17 %}</span>
+      <span class="deploy-card-id">
+        <span class="deploy-card-name">{{ p.name }}</span>
+        <span class="deploy-card-repo mono">{{ p.repo_label }}</span>
+      </span>
+      {% if p.waiting %}<span class="chip chip-warning">{{ p.waiting }} to approve</span>{% endif %}
+    </div>
+    <div class="deploy-card-meta">
+      <span class="chip">{% icon "git-branch" 12 %} {{ p.branch }}</span>
+      <span class="chip">{% icon "server" 12 %} {{ p.servers.all|length }} server{{ p.servers.all|length|pluralize }}</span>
+      <span class="chip">{% if p.mode == "auto" %}Auto on push{% else %}Needs approval{% endif %}</span>
+      {% if not p.is_enabled %}<span class="chip">Off</span>{% endif %}
+    </div>
+    <div class="deploy-card-last">
+      {% if p.last %}
+        {% include "deploys/_badge.html" with dep=p.last %}
+        <span class="mono small">{{ p.last.short_sha }}</span>
+        <span class="deploy-card-msg">{{ p.last.message|default:p.last.get_source_display }}</span>
+        <span class="muted small text-nowrap">{{ p.last.created_at|ago }}</span>
+      {% else %}<span class="muted small">Not deployed yet</span>{% endif %}
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card"><div class="card-body empty-state">{% icon "rocket" 28 %}<h2>No projects yet</h2>
+  <p>Connect a git repository: pushes to its branch deploy to the servers you choose, automatically or after an Admin approves. One server can host many projects.</p>
+  {% if perms.deploys.add_project %}<a class="btn btn-primary" href="{% url 'deploys:create' %}">{% icon "plus" %} New project</a>{% endif %}</div></div>
+{% endif %}
+{% endblock %}

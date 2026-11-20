@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "apps.audit",
     "apps.fleet",
     "apps.operations",
+    "apps.deploys",
     "apps.alerts",
     "apps.monitors",
     "apps.agent_api",

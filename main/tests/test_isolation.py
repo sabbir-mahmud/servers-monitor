@@ -358,7 +358,9 @@ def test_new_account_needs_signup_or_superuser(client, admin_user, settings):
 def test_login_without_an_account_is_sent_to_create_one(client, django_user_model):
     user = django_user_model.objects.create_user("lost", "lost@example.com", "pw-x-1234567")
     client.force_login(user)
-    assert client.get(reverse("fleet:dashboard"), {"kind": "server"})["Location"] == reverse("tenants:create")
+    assert client.get(reverse("fleet:dashboard"), {"kind": "server"})["Location"] == reverse(
+        "tenants:create"
+    )
     assert client.get(reverse("account")).status_code == 200  # own login still manageable
 
 

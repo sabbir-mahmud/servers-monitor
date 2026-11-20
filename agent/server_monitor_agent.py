@@ -52,7 +52,7 @@ from pathlib import Path
 
 import psutil
 
-VERSION = "2.3.0"
+VERSION = "2.4.0"
 NET_TIMEOUT = 20  # seconds for a single non-blocking Redis round trip
 MAX_BLOCK = 120  # longest BLPOP wait (Upstash holds 110 s+); heartbeats go between waits
 MAX_CHUNK = 60 * 1024  # main accepts 64 KiB per progress message
@@ -96,6 +96,22 @@ class ActionSpec:
 
 
 @dataclass
+class AppSpec:
+    """A git project deployed on this server ([apps.<name>]). The repo, branch and folder
+    are fixed here; the dashboard can only choose the commit, and the deploy steps when
+    `dashboard_steps` is on. `smctl app add` writes it."""
+
+    name: str
+    repo: str
+    branch: str
+    path: str
+    user: str = ""  # run git and the deploy as this user (sudo rule); "" = the agent user
+    script: list[str] = field(default_factory=list)  # deploy script kept on this server
+    dashboard_steps: bool = False  # or: run the steps the dashboard sends
+    timeout: int = 1800
+
+
+@dataclass
 class Config:
     redis_url: str
     server_id: str
@@ -122,6 +138,7 @@ class Config:
     # Server tasks ([tasks] enabled = [...]): routine maintenance run as root through
     # `sudo -n smctl task <name>`, an exact sudo rule per task that `smctl tasks on` writes.
     tasks: list[str] = field(default_factory=list)
+    apps: dict[str, AppSpec] = field(default_factory=dict)
 
 
 # Server tasks and how long each may take (seconds). smctl does the work, as root, after
@@ -139,7 +156,13 @@ def package_manager() -> str:
     return ""
 
 
-BUILTIN_NAMES = {"tail_log", "tail_follow", "restart_service", "shell", "_upgrade", "_task"}
+BUILTIN_NAMES = {"tail_log", "tail_follow", "restart_service", "shell", "_upgrade", "_task",
+                 "_deploy"}  # fmt: skip
+BRANCH_RE = re.compile(r"^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]{1,200}$")
+USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+APP_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+MAX_STEPS = 20000
 SERVICE_KINDS = {"systemd", "docker", "pm2", "process", "http"}
 
 
@@ -204,6 +227,28 @@ def load_config(path: str | Path) -> Config:
     if not isinstance(tasks, list) or any(t not in TASKS for t in tasks):
         raise ConfigError(f"tasks.enabled must be a list of: {', '.join(TASKS)}")
     cfg.tasks = sorted(set(tasks))
+
+    for name, app in raw.get("apps", {}).items():
+        where = f"apps.{name}"
+        if not APP_NAME_RE.match(name):
+            raise ConfigError(f"{where}: use letters, digits, '_', '-', '.' in the name")
+        repo, branch = str(app.get("repo", "")), str(app.get("branch", "main"))
+        path, user = str(app.get("path", "")), str(app.get("user", ""))
+        if not repo or repo.startswith("-") or any(c.isspace() for c in repo):
+            raise ConfigError(f"{where}: repo must be a git URL")
+        if not BRANCH_RE.match(branch):
+            raise ConfigError(f"{where}: branch {branch!r} is not a valid branch name")
+        if not path.startswith("/"):
+            raise ConfigError(f"{where}: path must be absolute")
+        if user and not USER_RE.match(user):
+            raise ConfigError(f"{where}: user {user!r} is not a valid user name")
+        script = _argv(app["script"], where) if app.get("script") else []
+        steps = bool(app.get("dashboard_steps", False))
+        if bool(script) == steps:
+            raise ConfigError(f"{where}: set either script or dashboard_steps = true")
+        cfg.apps[name] = AppSpec(name=name, repo=repo, branch=branch, path=path, user=user,
+                                 script=script, dashboard_steps=steps,
+                                 timeout=max(30, int(app.get("timeout", 1800))))  # fmt: skip
 
     for name, svc in raw.get("services", {}).items():
         kind = svc.get("kind", "systemd")
@@ -521,7 +566,13 @@ class Collector:
             "package_manager": package_manager(),
             # Debian/Ubuntu leave this file after updates that need one (kernel, libc…).
             "reboot_required": os.path.exists("/var/run/reboot-required"),
-        }
+            "apps": [
+                {"name": a.name, "repo": a.repo, "branch": a.branch,
+                 "mode": "dashboard" if a.dashboard_steps else "script", "timeout": a.timeout,
+                 "sha": read_git_head(a.path)}
+                for a in self.cfg.apps.values()
+            ],
+        }  # fmt: skip
 
     def report(self) -> dict:
         disks = self.disks()
@@ -578,6 +629,7 @@ class Plan:
     follow_file: str | None = None
     follow: bool = False
     line_filter: str = ""
+    stdin_data: bytes | None = None  # written to the process, then closed
 
 
 UPGRADE_REF_RE = re.compile(r"^v\d{1,4}\.\d{1,4}\.\d{1,4}$")  # release tags only
@@ -642,6 +694,66 @@ def plan_follow(cfg: Config, args: dict) -> Plan:
     return Plan(follow_file=cfg.logs[name], timeout=seconds, follow=True, line_filter=line_filter)
 
 
+def plan_deploy(cfg: Config, args: dict) -> Plan:
+    """Deploy one of [apps]: the runner (`smctl deploy-run`, as the app's user) reads the
+    repo, branch and folder from a root-owned file, and gets only the commit and the
+    steps from here on stdin."""
+    name = str(args.get("app", ""))
+    app = cfg.apps.get(name)
+    if app is None:
+        raise Rejected(f"app {name!r} is not declared in [apps] (sudo smctl app add {name} ...)")
+    sha = str(args.get("sha") or "")
+    if sha and not SHA_RE.match(sha):
+        raise Rejected("sha must be a full 40-character commit id")
+    steps = args.get("steps") or ""
+    if not isinstance(steps, str) or len(steps) > MAX_STEPS:
+        raise Rejected("steps must be text, at most 20000 characters")
+    if steps and not app.dashboard_steps:
+        raise Rejected(f"app {name!r} runs its own deploy script here; it doesn't accept "
+                       "steps from the dashboard (smctl app add --dashboard-steps)")  # fmt: skip
+    if app.dashboard_steps and not steps.strip():
+        raise Rejected(f"app {name!r} takes its deploy steps from the dashboard: none were sent")
+    argv = [SMCTL_BIN, "deploy-run", name]
+    me = _current_user()
+    if app.user and app.user != me:
+        argv = ["sudo", "-n", "-u", app.user, *argv]
+    request = {"sha": sha, "steps": steps}
+    return Plan(argv=argv, timeout=app.timeout, stdin_data=json.dumps(request).encode())
+
+
+def _current_user() -> str:
+    try:
+        import pwd
+
+        return pwd.getpwuid(os.geteuid()).pw_name
+    except (ImportError, KeyError):
+        return ""
+
+
+def read_git_head(path: str) -> str:
+    """The commit checked out in `path`, read from .git without running git (which would
+    refuse a repository owned by another user). "" if unknown."""
+    git = Path(path) / ".git"
+    try:
+        head = (git / "HEAD").read_text().strip()
+        if SHA_RE.match(head):
+            return head
+        if not head.startswith("ref: "):
+            return ""
+        ref = head[5:].strip()
+        loose = git / ref
+        if loose.is_file():
+            value = loose.read_text().strip()
+            return value if SHA_RE.match(value) else ""
+        for line in (git / "packed-refs").read_text().splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[1] == ref and SHA_RE.match(parts[0]):
+                return parts[0]
+    except OSError:
+        pass
+    return ""
+
+
 def plan_command(cfg: Config, action: str, args: dict, command_id: str = "") -> Plan:
     """Map a requested action to what will actually run — or refuse. This function is
     the security boundary: nothing reaches subprocess without passing through it."""
@@ -686,6 +798,8 @@ def plan_command(cfg: Config, action: str, args: dict, command_id: str = "") -> 
         if os.geteuid() != 0:
             argv = ["sudo", "-n", *argv]
         return Plan(argv=argv, timeout=TASKS[task])
+    if action == "_deploy":
+        return plan_deploy(cfg, args)
     if action == "shell":
         if not cfg.shell_enabled:
             raise Rejected("free-form shell is disabled on this server ([shell] enabled = false)")
@@ -971,7 +1085,7 @@ class Executor:
                 plan.argv,
                 cwd=plan.cwd,
                 env=plan.env,
-                stdin=subprocess.DEVNULL,
+                stdin=subprocess.PIPE if plan.stdin_data is not None else subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,  # own process group so a timeout kills children too
@@ -979,6 +1093,12 @@ class Executor:
         except OSError as exc:
             self._post(cid, "failed", f"cannot start {plan.argv[0]}: {exc}\n", 127, retries=3)
             return
+        if plan.stdin_data is not None:
+            try:
+                proc.stdin.write(plan.stdin_data)
+                proc.stdin.close()
+            except OSError:
+                pass  # it exited early; its output says why
 
         buffer: list[bytes] = []
         buf_lock = threading.Lock()
@@ -1519,7 +1639,7 @@ CGROUP_GLOBS = (
 )
 CONTAINER_ID_RE = re.compile(r"(?:docker-|libpod-|/docker/)([0-9a-f]{64})")
 # What this agent can do, so the dashboard only offers features it supports.
-FEATURES = ["job_ping", "inventory", "log_follow", "tasks"]
+FEATURES = ["job_ping", "inventory", "log_follow", "tasks", "deploy"]
 
 JOB_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
 

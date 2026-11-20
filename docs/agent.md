@@ -231,6 +231,45 @@ root before doing anything, so a leftover sudo rule does nothing. Nothing waits 
 package lists say a reboot is pending (`/var/run/reboot-required`) show **Reboot needed**.
 Needs agent 2.3.0.
 
+## Git deploys
+
+Push to a branch and its servers update. Set up a project under **Deploys** (repository,
+branch, servers, and whether each push deploys at once or waits for an Admin to approve),
+then on each server, once:
+
+```bash
+sudo smctl app add api --repo git@github.com:acme/api.git --branch main \
+     --path /var/www/api --user deploy --dashboard-steps   # or --deploy ./deploy.sh
+sudo smctl app test api        # can that user reach the repo? (git ls-remote)
+sudo smctl app rm api
+```
+
+One server can host many apps. Add the webhook the project page shows (payload URL and
+secret) to GitHub, GitLab, Gitea/Forgejo or Bitbucket. Each request is checked against the
+secret (HMAC-SHA256, or GitLab's secret token) and each delivery is accepted once.
+
+What happens on a deploy, on every server, as the app's user (`sudo -n -u deploy smctl
+deploy-run api`, one exact sudo rule per app):
+
+1. Clone the repo into the folder the first time, then `git fetch` the branch.
+2. Check the commit exists and is on the branch (a webhook can't name some other commit),
+   and that nobody edited the checkout by hand.
+3. `git checkout --detach <commit>`.
+4. Run the steps (`bash -eo pipefail`, stopping at the first failing line) or the
+   server's own deploy script, with `NEXGUARD_APP`, `NEXGUARD_SHA`,
+   `NEXGUARD_PREVIOUS_SHA` and `NEXGUARD_BRANCH` set.
+
+The repo, branch, folder and user come from the root-owned app spec, never from the
+dashboard. Steps written in the dashboard run only for apps added with
+`--dashboard-steps`; otherwise only the server's script runs. Each server's log is kept on
+the deploy's page.
+
+One deploy per project runs at a time: pushes that arrive meanwhile queue, and only the
+newest of them deploys next (the others show as skipped). Deploys can roll out in batches
+with health gates, like any job. **Redeploy this commit** on an earlier deploy rolls back
+to it. Admins create projects, edit steps and approve; Operators can press Deploy latest
+and redeploy (on approval projects their request waits for an Admin). Needs agent 2.4.0.
+
 ## Upgrading and re-keying
 
 **Upgrade the agent:** on the server's page, open **⋯ → Install / upgrade agent** and run the

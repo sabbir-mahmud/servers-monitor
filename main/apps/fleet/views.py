@@ -255,6 +255,7 @@ class ServerDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
             can_shell=can_shell,
             ssh_logins=ssh_logins,
             scripts=scripts,
+            deploy_projects={p.app: p for p in server.deploy_projects.all()} if server.apps else {},
             can_admin=self.request.user.has_perm("fleet.change_server"),
             maintenance_window=maintenance.coverage(account=server.account_id).window_for_server(
                 server.pk
