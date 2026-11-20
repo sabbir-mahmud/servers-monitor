@@ -1,0 +1,15 @@
+{% load monitor %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Automations</h1>
+    <p class="page-sub">Actions, scripts and git deploys, run by hand, on a schedule or on every push.</p>
+  </div>
+  <div class="page-actions">
+    {% if perms.operations.add_job %}<a class="btn btn-outline-secondary" href="{% url 'operations:job_create' %}">{% icon "play" %} Run once</a>{% endif %}
+    {% if perms.automations.add_automation %}<a class="btn btn-primary" href="{% url 'automations:create' %}">{% icon "plus" %} New automation</a>{% endif %}
+  </div>
+</div>
+<nav class="tabs auto-tabs" aria-label="Automations">
+  <a href="{% url 'automations:list' %}" class="{% if tab == 'automations' %}active{% endif %}" {% if tab == 'automations' %}aria-current="page"{% endif %}>{% icon "zap" 15 %} Automations</a>
+  <a href="{% url 'operations:job_list' %}" class="{% if tab == 'activity' %}active{% endif %}" {% if tab == 'activity' %}aria-current="page"{% endif %}>{% icon "activity" 15 %} Activity{% if NAV.runs_waiting %} <span class="nav-badge is-warning">{{ NAV.runs_waiting }}</span>{% endif %}</a>
+</nav>

@@ -4,12 +4,13 @@ from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponsePermanentRedirect
 from django.urls import include, path, re_path, reverse
+from django.views.generic import RedirectView
 
 from apps.api import ui as api_ui
 from apps.api import views as api_views
+from apps.automations import views as automation_views
 from apps.core import pwa
 from apps.core import views as core_views
-from apps.deploys import views as deploy_views
 from apps.devices import connect as device_connect
 from apps.devices.urls import api_urlpatterns as device_api_urls
 from apps.monitors import views as monitor_views
@@ -64,8 +65,9 @@ urlpatterns = [
         name="api_token_revoke",
     ),
     path("api/v1/", include("apps.api.urls")),
+    # Git push webhooks (public; each request is signed with the automation's secret).
+    path("hooks/git/<uuid:pk>/", automation_views.webhook, name="automation_webhook"),
     # Git push webhooks (public; each request is signed with the project's secret).
-    path("hooks/git/<uuid:pk>/", deploy_views.webhook, name="deploy_webhook"),
     path("device/v1/", include(device_api_urls)),
     # Connect a computer: the link a parent sends, and the scripts it tells you to run.
     path(
@@ -103,8 +105,12 @@ urlpatterns = [
     path("offline/", pwa.offline, name="offline"),
     path("users/", include("apps.users.urls")),
     path("system/", core_views.SystemView.as_view(), name="system"),
+    # Scripts, schedules and git deploys are automations now; their old pages lead there.
+    re_path(r"^jobs/scripts/", RedirectView.as_view(url="/automations/?kind=script")),
+    re_path(r"^jobs/schedules/", RedirectView.as_view(url="/automations/?when=scheduled")),
+    re_path(r"^deploys/", RedirectView.as_view(url="/automations/?kind=deploy")),
     path("jobs/", include("apps.operations.urls")),
-    path("deploys/", include("apps.deploys.urls")),
+    path("automations/", include("apps.automations.urls")),
     path("alerts/", include("apps.alerts.urls")),
     path("apps/", include("apps.monitors.urls")),
     path("audit/", include("apps.audit.urls")),

@@ -84,6 +84,7 @@ ICONS = {
     "copy": '<rect width="13" height="13" x="9" y="9" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
     "alert": '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4M12 17h.01"/>',
     "terminal": '<path d="m4 17 6-6-6-6M12 19h8"/>',
+    "zap": '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',
     "rocket": '<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/>',
     "git-branch": '<path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
     "git-commit": '<circle cx="12" cy="12" r="3"/><path d="M3 12h6M15 12h6"/>',
@@ -146,6 +147,13 @@ def health_badge(health):
 @register.simple_tag
 def device_badge(state):
     return _badge(DEVICE_BADGES, state)
+
+
+@register.filter
+def cron_label(expr) -> str:
+    from apps.operations.cron import describe
+
+    return describe(expr)
 
 
 @register.filter
@@ -329,6 +337,18 @@ def ago(value):
     if (timezone.now() - value).total_seconds() < 60:
         return "just now"
     return f"{timesince(value, depth=1)} ago"
+
+
+@register.filter
+def until(value):
+    """Compact time to come with one unit ("in 7 hours"); "now" once it's due."""
+    if not value:
+        return ""
+    from django.utils.timesince import timeuntil
+
+    if (value - timezone.now()).total_seconds() < 60:
+        return "now"
+    return f"in {timeuntil(value, depth=1)}"
 
 
 @register.filter

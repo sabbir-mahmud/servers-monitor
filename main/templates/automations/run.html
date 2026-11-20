@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}{{ a.name }} · {{ run.created_at|date:"M j H:i" }}{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'automations:detail' a.pk %}">{% icon "arrow-left" 15 %} {{ a.name }}</a>
+{% partialdef run inline %}
+<div id="run" {% if run.is_open %}hx-get="{% url 'automations:run' a.pk run.pk %}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+<header class="auto-hero">
+  {% include "automations/_mark.html" with size="lg" %}
+  <div class="auto-hero-text">
+    <h1 class="page-title">{{ run.title }}</h1>
+    <div class="auto-hero-sub">
+      {% include "automations/_badge.html" %}
+      {% if a.kind == "deploy" %}<span>{% icon "git-commit" 14 %} {% if commit_url %}<a class="mono" href="{{ commit_url }}" target="_blank" rel="noopener noreferrer">{{ run.sha|slice:":12" }}</a>{% elif run.sha %}<span class="mono">{{ run.sha|slice:":12" }}</span>{% else %}<span class="mono">latest {{ a.branch }}</span>{% endif %}</span>{% endif %}
+      {% if run.author %}<span>{% icon "user" 14 %} {{ run.author }}</span>{% endif %}
+    </div>
+    {% if run.note %}<p class="auto-hero-desc">{{ run.note }}</p>{% endif %}
+  </div>
+  <div class="auto-hero-actions">
+    {% if run.status == "waiting" and can_approve %}
+      <form method="post" action="{% url 'automations:decide' a.pk run.pk 'reject' %}">{% csrf_token %}<button class="btn btn-outline-secondary">Reject</button></form>
+      <form method="post" action="{% url 'automations:decide' a.pk run.pk 'approve' %}">{% csrf_token %}<button class="btn btn-primary">{% icon "check" %} Approve and run</button></form>
+    {% elif a.kind == "deploy" and run.sha and not run.is_open and can_run and a.is_enabled %}
+      <form method="post" action="{% url 'automations:run_now' a.pk %}" data-confirm="Deploy {{ run.short_sha }} again?{% if run.status == 'succeeded' %} Use this to roll back to it.{% endif %}">{% csrf_token %}
+        <input type="hidden" name="redeploy" value="{{ run.pk }}"><input type="hidden" name="quick" value="1">
+        <button class="btn btn-outline-secondary">{% icon "refresh" %} Redeploy this commit</button></form>
+    {% elif not run.is_open and can_run and a.is_enabled %}
+      <a class="btn btn-outline-secondary" href="{% url 'automations:run_now' a.pk %}">{% icon "play" %} Run again</a>
+    {% endif %}
+  </div>
+</header>
+
+<div class="auto-stats">
+  <div class="auto-stat"><span class="auto-stat-label">Status</span><span class="auto-stat-value auto-last-status is-{{ run.status }}">{{ run.get_status_display }}</span>
+    <span class="auto-stat-sub">{% if run.finished_at %}{{ run.finished_at|ago }}{% elif run.status == "running" %}started {{ run.started_at|ago }}{% else %}requested {{ run.created_at|ago }}{% endif %}</span></div>
+  <div class="auto-stat"><span class="auto-stat-label">Started by</span><span class="auto-stat-value">{{ run.get_trigger_display }}</span>
+    <span class="auto-stat-sub">{% if run.requested_by %}{{ run.requested_by }}{% elif run.author %}{{ run.author }}{% else %}automatic{% endif %}</span></div>
+  <div class="auto-stat"><span class="auto-stat-label">Took</span><span class="auto-stat-value">{% if run.duration %}{{ run.duration|duration_td }}{% else %}—{% endif %}</span>
+    <span class="auto-stat-sub">{{ run.created_at|date:"M j, H:i:s" }}</span></div>
+  <div class="auto-stat"><span class="auto-stat-label">Servers</span>
+    {% if commands %}<span class="auto-stat-value"><span class="text-good">{{ ok_count }}</span>{% if bad_count %} <span class="muted fw-normal">/</span> <span class="text-critical">{{ bad_count }}</span>{% endif %}{% if active_count %} <span class="muted fw-normal">/</span> <span class="auto-last-status is-running">{{ active_count }}</span>{% endif %}</span>
+      <span class="auto-stat-sub">{{ ok_count }} ok{% if bad_count %}, {{ bad_count }} failed{% endif %}{% if active_count %}, {{ active_count }} going{% endif %} of {{ commands|length }}</span>
+    {% else %}<span class="auto-stat-value muted">—</span><span class="auto-stat-sub">nothing sent yet</span>{% endif %}</div>
+</div>
+
+{% if run.status == "waiting" %}<div class="alert alert-warning" role="alert">{% icon "clock" %}<div>Waiting for an Admin to approve. Nothing has run yet.</div></div>{% endif %}
+{% if run.status == "queued" %}<div class="alert alert-info" role="alert">{% icon "clock" %}<div>Queued: starts when the run before it finishes.</div></div>{% endif %}
+{% if run.status == "skipped" %}<div class="alert alert-info" role="alert">{% icon "info" %}<div>A newer {% if run.trigger == "push" %}push{% else %}run{% endif %} arrived while this one was queued, so only the newer one ran.</div></div>{% endif %}
+{% if run.error %}<div class="alert {% if run.status == 'failed' %}alert-danger{% else %}alert-warning{% endif %}" role="alert">{% icon "alert" %}<div>{% if run.status != "failed" %}Skipped: {% endif %}{{ run.error }}</div></div>{% endif %}
+
+<div class="auto-layout">
+  <div class="stack">
+    {% for c in commands %}
+    <details class="card auto-log is-{{ c.status }}" {% if c.status != "succeeded" or commands|length == 1 %}open{% endif %}>
+      <summary class="auto-log-head">
+        <span class="chev">{% icon "chevron" 16 %}</span>
+        <span class="auto-log-dot" aria-hidden="true"></span>
+        <strong>{{ c.server.name }}</strong>
+        {% command_badge c.status %}
+        <span class="auto-log-meta">{% if c.exit_code is not None %}exit {{ c.exit_code }}{% endif %}{% if c.duration %}{% if c.exit_code is not None %} · {% endif %}{{ c.duration|duration_td }}{% endif %}{% if c.status == "waiting" %}later batch{% endif %}</span>
+      </summary>
+      {% if c.output_truncated %}<div class="auto-log-note">Long output: showing the end.</div>{% endif %}
+      <pre class="auto-terminal">{{ c.output|default:"(waiting for output…)" }}</pre>
+    </details>
+    {% empty %}
+    {% if a.kind == "script" or a.steps %}<section class="card"><div class="card-header">{% icon "code" 17 %} {% if a.kind == "script" %}Script{% else %}Deploy steps{% endif %} that will run</div><pre class="auto-code">{% if a.kind == "script" %}{{ a.body }}{% else %}{{ a.steps }}{% endif %}</pre></section>
+    {% else %}<div class="card"><div class="card-body auto-runs-empty">{% icon "layers" 22 %}<div><b>No output</b><span>Nothing was sent to any server for this run.</span></div></div></div>{% endif %}
+    {% endfor %}
+  </div>
+
+  <div class="stack">
+    <section class="card">
+      <div class="card-header">{% icon "clock" 17 %} Timeline</div>
+      <ol class="auto-timeline">
+        <li class="is-done"><b>{% if run.trigger == "push" %}Pushed{% elif run.trigger == "schedule" %}Scheduled{% else %}Requested{% endif %}</b><span>{{ run.created_at|date:"M j, H:i:s" }}{% if run.requested_by %} · {{ run.requested_by }}{% elif run.author %} · {{ run.author }}{% endif %}</span></li>
+        {% if run.decided_by %}<li class="{% if run.status == 'rejected' %}is-bad{% else %}is-done{% endif %}"><b>{% if run.status == "rejected" %}Rejected{% else %}Approved{% endif %}</b><span>{{ run.decided_at|date:"M j, H:i:s" }} · {{ run.decided_by }}</span></li>
+        {% elif run.status == "waiting" %}<li class="is-now"><b>Waiting for approval</b><span>an Admin approves or rejects it</span></li>{% endif %}
+        {% if run.started_at and run.status != "skipped" and run.status != "rejected" %}<li class="is-done"><b>Started</b><span>{{ run.started_at|date:"M j, H:i:s" }}{% if run.job %} · <a href="{% url 'operations:job_detail' run.job_id %}">job</a>{% endif %}</span></li>{% endif %}
+        {% if run.status == "running" %}<li class="is-now"><b>Running</b><span>{{ ok_count|add:bad_count }} of {{ commands|length }} servers done</span></li>
+        {% elif run.finished_at %}<li class="{% if run.status == 'succeeded' %}is-done{% elif run.status == 'failed' %}is-bad{% else %}is-skip{% endif %}"><b>{{ run.get_status_display }}</b><span>{{ run.finished_at|date:"M j, H:i:s" }}</span></li>{% endif %}
+      </ol>
+    </section>
+    {% if a.kind == "deploy" and run.message %}
+    <section class="card"><div class="card-header">{% icon "git-commit" 17 %} Commit</div>
+      <div class="card-body small d-grid gap-1"><b>{{ run.message }}</b><span class="muted">{% if run.author %}{{ run.author }} · {% endif %}<span class="mono">{{ run.sha|slice:":12" }}</span> on <span class="mono">{{ a.branch }}</span></span>
+        {% if commit_url %}<a href="{{ commit_url }}" target="_blank" rel="noopener noreferrer">{% icon "link" 12 %} View the commit</a>{% endif %}</div></section>
+    {% endif %}
+  </div>
+</div>
+</div>
+{% endpartialdef %}
+{% endblock %}

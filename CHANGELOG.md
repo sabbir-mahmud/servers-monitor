@@ -13,22 +13,40 @@ names); upgrading gets the relay backlog fixes below.
 
 ### Added
 
-- **Git deploys** (Deploys in the sidebar; **agents must be upgraded** to 2.4.0): connect
+- **Automation templates.** New automation opens a gallery of 17 ready-made automations:
+  weekly package upgrades, rolling reboot, Docker cleanup, PostgreSQL/MySQL/folder
+  backups, disk, website and certificate checks, certbot renewals, and deploy steps for
+  Node, Django, Docker Compose, static sites and Laravel. Picking one fills in the form,
+  including schedule and rollout, and says what each server needs. Script templates show
+  only for people allowed to save scripts.
+
+- **Automations** (one sidebar entry, replacing Jobs, Scripts and Schedules): one record
+  for anything you run on servers. **What** it runs: an action or server task, a script,
+  or a git deploy. **What starts it**: by hand (always), a cron schedule, and/or a git
+  push, each optionally behind an Admin's approval. **Where**: servers, groups and
+  environments resolved at each run, or chosen each time. One run per automation at a
+  time; queued scheduled runs and pushes collapse into the newest. Each run keeps every
+  server's output. The **Activity** tab is the job history, labelled by what started each
+  job, with approvals waiting on top. Existing schedules and scripts become automations
+  on upgrade (same ids; a script whose name a schedule already has gets " (script)"), and
+  their job history stays linked. Old Scripts and Schedules pages redirect. Audited as
+  `automation.*`.
+- **Git deploys** (an automation kind; **agents must be upgraded** to 2.4.0): connect
   a repository from GitHub, GitLab, Gitea/Forgejo or Bitbucket with a signed webhook, and
   each push to its branch deploys to the chosen servers, either at once or after an Admin
   approves it. Each server opts in per app (`sudo smctl app add`), keeps the repo, branch
-  and folder in a root-owned spec, and runs the steps written on the project's page or
-  its own deploy script as the app's user. One server can host many apps. Deploys queue
-  (only the newest waiting one runs), can roll out in batches with health gates, keep
-  each server's log, and can be redeployed to roll back. Audited (`deploy.*`).
+  and folder in a root-owned spec, and runs the steps written in the automation or its
+  own deploy script as the app's user. One server can host many apps. Pushes queue (only
+  the newest waiting one runs), can roll out in batches with health gates, keep each
+  server's log, and can be redeployed to roll back.
 - **Server tasks** (**agents must be upgraded** to 2.3.0): check for updates, upgrade
   packages, clean up and reboot from a server's page, from Run on servers, or on a
   schedule. Works with apt, dnf, yum, zypper, apk and pacman. Each server opts in per task
   (`sudo smctl tasks on`), which writes one exact sudo rule each; checking for updates is
   open to Operators, the rest to Admins. Servers needing a reboot after updates say so.
-- **Scripts** (Scripts in the sidebar): write a Bash, sh or Python script once and run it
-  on chosen servers as a job, with output per server. Owner and Admin only; runs as the
-  agent user on servers with shell turned on; audited (`script.save`, `script.delete`).
+- **Scripts** (now a kind of automation): write a Bash, sh or Python script once and run it
+  on chosen servers, by hand or on a schedule, with output per server. Owner and Admin
+  only; runs as the agent user on servers with shell turned on.
 - **Saved SSH logins**: tick "Save this login" when connecting, and later connect in one
   click from the Terminal page or the SSH menu on a server's page. The password or key is
   stored encrypted (from `SECRET_KEY`), only after it worked, and is private to the person

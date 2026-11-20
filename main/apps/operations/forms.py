@@ -1,12 +1,11 @@
 from django import forms
 
-from apps.fleet.models import Environment, Server, ServerGroup
+from apps.fleet.models import Server
 from apps.monitors.models import Monitor
 from apps.tenants.scoping import AccountFormMixin
 
 from . import server_tasks
-from .cron import CronError, validate
-from .models import Schedule, Script, Strategy
+from .models import Strategy
 
 TASK_PREFIX = server_tasks.ACTION + ":"  # "_task:upgrade" in the action menu
 
@@ -16,6 +15,33 @@ BUILTIN_LABELS = {
     "restart_service": "Restart service",
     "shell": "Shell command (admin)",
 }
+
+
+def action_choices(servers, user) -> list:
+    """The action menu: built-ins, server tasks (one entry each, "_task:upgrade") and the
+    custom actions the given servers' agents offer."""
+    custom = sorted(
+        {
+            (a["name"], a.get("description") or a["name"])
+            for s in servers.only("capabilities")
+            for a in s.actions
+            if a.get("name") not in BUILTIN_LABELS
+        }
+    )
+    choices = [
+        ("tail_log", BUILTIN_LABELS["tail_log"]),
+        ("tail_follow", BUILTIN_LABELS["tail_follow"]),
+        ("restart_service", BUILTIN_LABELS["restart_service"]),
+    ]
+    if user is not None and user.has_perm("operations.run_shell"):
+        choices.append(("shell", BUILTIN_LABELS["shell"]))
+    tasks = [(TASK_PREFIX + t.key, t.label) for t in server_tasks.TASKS.values()
+             if user is None or server_tasks.can_run(user, t.key)]  # fmt: skip
+    if tasks:
+        choices.append(("Server tasks", tasks))
+    if custom:
+        choices.append(("Agent actions", [(n, f"{n} — {d}") for n, d in custom]))
+    return choices
 
 
 class JobForm(AccountFormMixin, forms.Form):
@@ -59,27 +85,7 @@ class JobForm(AccountFormMixin, forms.Form):
             "groups"
         )
         self.fields["servers"].queryset = servers
-        custom = sorted(
-            {
-                (a["name"], a.get("description") or a["name"])
-                for s in servers.only("capabilities")
-                for a in s.actions
-                if a.get("name") not in BUILTIN_LABELS
-            }
-        )
-        choices = [
-            ("tail_log", BUILTIN_LABELS["tail_log"]),
-            ("tail_follow", BUILTIN_LABELS["tail_follow"]),
-            ("restart_service", BUILTIN_LABELS["restart_service"]),
-        ]
-        if user is not None and user.has_perm("operations.run_shell"):
-            choices.append(("shell", BUILTIN_LABELS["shell"]))
-        tasks = [(TASK_PREFIX + t.key, t.label) for t in server_tasks.TASKS.values()
-                 if user is None or server_tasks.can_run(user, t.key)]  # fmt: skip
-        if tasks:
-            choices.append(("Server tasks", tasks))
-        if custom:
-            choices.append(("Agent actions", [(n, f"{n} — {d}") for n, d in custom]))
+        choices = action_choices(servers, user)
         self.fields["action"].choices = choices
         self.fields["health_gates"].queryset = Monitor.objects.filter(
             account=self.account, is_enabled=True
@@ -114,155 +120,3 @@ class JobForm(AccountFormMixin, forms.Form):
         return {"strategy": Strategy.ROLLING, "batch_size": d.get("batch_size") or 1,
                 "pause_seconds": d.get("pause_seconds") or 0, "stop_on_failure": d.get("stop_on_failure", False),
                 "health_gates": list(d.get("health_gates") or [])}  # fmt: skip
-
-
-class ScheduleForm(JobForm):
-    """A job form plus when to run it and how to pick servers at run time."""
-
-    sched_name = forms.CharField(max_length=100, label="Name")
-    cron = forms.CharField(max_length=100, label="When (cron)", initial="0 3 * * *",
-                           help_text="minute hour day month weekday in the dashboard's time zone, "
-                                     "e.g. 0 3 * * * (daily 03:00), 30 2 * * mon (Mondays), or @hourly.")  # fmt: skip
-    groups = forms.ModelMultipleChoiceField(queryset=ServerGroup.objects.all(), required=False,
-                                            widget=forms.CheckboxSelectMultiple, label="Plus every server in groups")  # fmt: skip
-    environments = forms.MultipleChoiceField(choices=Environment.choices, required=False,
-                                             widget=forms.CheckboxSelectMultiple, label="Plus every server in environments")  # fmt: skip
-    is_enabled = forms.BooleanField(required=False, initial=True, label="Enabled")
-
-    def __init__(self, *args, instance: Schedule | None = None, **kwargs):
-        self.instance = instance
-        if instance is not None:
-            kwargs.setdefault("initial", {}).update(
-                sched_name=instance.name, cron=instance.cron, note="",
-                action=(TASK_PREFIX + instance.args.get("task", "")
-                        if instance.action == server_tasks.ACTION else instance.action),
-                name=instance.args.get("name"), lines=instance.args.get("lines"),
-                command=instance.args.get("command"), servers=list(instance.servers.all()),
-                groups=list(instance.groups.all()), environments=instance.environments,
-                is_enabled=instance.is_enabled, rolling=instance.strategy == Strategy.ROLLING,
-                batch_size=instance.batch_size, pause_seconds=instance.pause_seconds,
-                stop_on_failure=instance.stop_on_failure, health_gates=list(instance.health_gates.all()),
-            )  # fmt: skip
-        super().__init__(*args, **kwargs)
-        self.fields["servers"].required = False
-        self.fields["sched_name"].widget.attrs["class"] = "form-control"
-        self.fields["cron"].widget.attrs["class"] = "form-control mono"
-        self.fields["is_enabled"].widget.attrs["class"] = "form-check-input"
-
-    def clean_cron(self):
-        try:
-            return validate(self.cleaned_data["cron"])
-        except CronError as exc:
-            raise forms.ValidationError(str(exc)) from None
-
-    def clean_sched_name(self):
-        name = self.cleaned_data["sched_name"].strip()
-        clash = Schedule.objects.filter(account=self.account, name=name)
-        if self.instance is not None:
-            clash = clash.exclude(pk=self.instance.pk)
-        if clash.exists():
-            raise forms.ValidationError("Another schedule has this name.")
-        return name
-
-    def clean(self):
-        data = super().clean()
-        from .services import JobError, clean_args
-
-        if not (data.get("servers") or data.get("groups") or data.get("environments")):
-            raise forms.ValidationError("Choose servers, groups or environments to run on.")
-        if data.get("action"):
-            try:
-                self.clean_action_args = clean_args(data["action"], self.action_args())
-            except JobError as exc:
-                raise forms.ValidationError(str(exc)) from None
-        return data
-
-    def save(self, user) -> Schedule:
-        from django.utils import timezone
-
-        from .services import schedule_next
-
-        d = self.cleaned_data
-        sched = self.instance or Schedule(account=self.account, created_by=user)
-        sched.name, sched.cron, sched.action = d["sched_name"], d["cron"], d["action"]
-        sched.args = self.clean_action_args
-        sched.environments = list(d.get("environments") or [])
-        sched.is_enabled = bool(d.get("is_enabled"))
-        sched.strategy = Strategy.ROLLING if d.get("rolling") else Strategy.ALL
-        sched.batch_size = d.get("batch_size") or 1
-        sched.pause_seconds = d.get("pause_seconds") or 0
-        sched.stop_on_failure = bool(d.get("stop_on_failure"))
-        sched.next_run_at = schedule_next(sched, timezone.now()) if sched.is_enabled else None
-        sched.save()
-        sched.servers.set(d.get("servers") or [])
-        sched.groups.set(d.get("groups") or [])
-        sched.health_gates.set(d.get("health_gates") or [])
-        return sched
-
-
-class ScriptForm(AccountFormMixin, forms.ModelForm):
-    class Meta:
-        model = Script
-        fields = ["name", "description", "interpreter", "body"]
-        labels = {"body": "Script"}
-        widgets = {
-            "body": forms.Textarea(attrs={"rows": 20, "spellcheck": "false", "wrap": "off",
-                                         "class": "form-control mono script-editor",
-                                         "placeholder": "#!/usr/bin/env bash\nset -euo pipefail\n\ndf -h /"}),
-        }  # fmt: skip
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields["name"].widget.attrs.update(
-            {"class": "form-control", "placeholder": "e.g. Disk report"}
-        )
-        self.fields["description"].widget.attrs.update(
-            {"class": "form-control", "placeholder": "What it does, in a few words"}
-        )
-        self.fields["interpreter"].widget.attrs["class"] = "form-select"
-
-    def clean_name(self):
-        return self.cleaned_data["name"].strip()
-
-    def clean_body(self):
-        body = self.cleaned_data["body"].replace("\r\n", "\n").strip("\n")
-        if not body.strip():
-            raise forms.ValidationError("Write the script.")
-        if len(body) > self.Meta.model.MAX_BODY:
-            raise forms.ValidationError(
-                f"Scripts are limited to {self.Meta.model.MAX_BODY} characters."
-            )
-        return body + "\n"
-
-    def clean(self):
-        data = super().clean()
-        from .services import MAX_SCRIPT_LENGTH
-
-        if data.get("body") and data.get("interpreter"):
-            probe = self.Meta.model(
-                name=data.get("name") or "x", interpreter=data["interpreter"], body=data["body"]
-            )
-            if len(probe.command()) > MAX_SCRIPT_LENGTH:
-                raise forms.ValidationError("This script is too long once quoted for its "
-                                            "interpreter. Shorten it, or keep it on the "
-                                            "server and add it as an action.")  # fmt: skip
-        return data
-
-
-class ScriptRunForm(AccountFormMixin, forms.Form):
-    servers = forms.ModelMultipleChoiceField(
-        queryset=Server.objects.none(), widget=forms.CheckboxSelectMultiple,
-        error_messages={"required": "Choose at least one server."},
-    )  # fmt: skip
-    note = forms.CharField(required=False, max_length=200)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields["servers"].queryset = (
-            Server.objects.filter(account=self.account, is_enabled=True)
-            .prefetch_related("groups")
-            .order_by("name")
-        )
-        self.fields["note"].widget.attrs.update(
-            {"class": "form-control", "placeholder": "Why, for the audit log (optional)"}
-        )

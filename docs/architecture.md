@@ -98,9 +98,13 @@ message types and fields are added, never repurposed.
   A failure (or a gate that stays down past its timeout) halts the job; **Resume** accepts
   the failures so far and continues, **Abort** cancels the batches not started. Both are
   audited.
-- **Schedules** run an action on a 5-field cron expression in `TIME_ZONE` (DST-safe). The
-  relay process claims each slot before running it, so a slot runs once even with two relay
-  processes, and slots missed while it was down run once, not once per missed slot.
+- **Automations** (`apps/automations`) are saved runs: an action, a script or a git
+  deploy, started by hand, on a 5-field cron expression in `TIME_ZONE` (DST-safe), or by a
+  signed git webhook, optionally behind approval. Each start is a `Run`; each run that goes
+  ahead is a `Job`. One run per automation is active at a time (`kick`), and `sync()` in
+  the relay loop settles finished runs. The relay process claims each schedule slot before
+  running it, so a slot runs once even with two relay processes, and slots missed while it
+  was down run once, not once per missed slot.
 - **Live log follow** (`tail_follow`) is a long-running command: the agent streams new lines
   (of a declared log file, through rotation, or of a declared systemd unit's journal) with
   the usual 3-second flushes for up to 10 minutes; **Stop** sends `cancel`.

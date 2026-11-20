@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import script_views, ssh_views, views
+from . import ssh_views, views
 
 app_name = "operations"
 urlpatterns = [
@@ -17,21 +17,8 @@ urlpatterns = [
         name="ssh_login_delete",
     ),  # fmt: skip
     path("ssh/keys/<int:pk>/forget/", ssh_views.SshForgetKeyView.as_view(), name="ssh_forget_key"),
-    path("scripts/", script_views.ScriptListView.as_view(), name="script_list"),
-    path("scripts/new/", script_views.ScriptCreateView.as_view(), name="script_create"),
-    path("scripts/<uuid:pk>/", script_views.ScriptUpdateView.as_view(), name="script_update"),
-    path("scripts/<uuid:pk>/run/", script_views.ScriptRunView.as_view(), name="script_run"),
-    path(
-        "scripts/<uuid:pk>/delete/",
-        script_views.ScriptDeleteView.as_view(),
-        name="script_delete",
-    ),
     path("<uuid:pk>/", views.JobDetailView.as_view(), name="job_detail"),
     path("<uuid:pk>/<str:op>/", views.JobControlView.as_view(), name="job_control"),
-    path("schedules/", views.ScheduleListView.as_view(), name="schedule_list"),
-    path("schedules/new/", views.ScheduleCreateView.as_view(), name="schedule_create"),
-    path("schedules/<uuid:pk>/", views.ScheduleUpdateView.as_view(), name="schedule_update"),
-    path("schedules/<uuid:pk>/delete/", views.ScheduleDeleteView.as_view(), name="schedule_delete"),
     path("commands/<uuid:pk>/", views.CommandDetailView.as_view(), name="command_detail"),
     path("commands/<uuid:pk>/cancel/", views.CommandCancelView.as_view(), name="command_cancel"),
     path("commands/<uuid:pk>/stop/", views.CommandStopView.as_view(), name="command_stop"),

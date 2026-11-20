@@ -7,10 +7,12 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.audit.models import AuditLog
+from apps.automations import services as auto
+from apps.automations.models import Automation
 from apps.monitors.models import Monitor, MonitorStatus
 from apps.operations import services
 from apps.operations.cron import Cron, CronError
-from apps.operations.models import CommandStatus, Job, JobState, Schedule
+from apps.operations.models import CommandStatus, Job, JobState
 
 from .conftest import acme, make_server
 
@@ -215,11 +217,13 @@ def test_job_form_starts_a_rolling_job(client, operator, fleet):
 
 
 # --------------------------------------------------------------------------- schedules
+# (scheduled automations; more in test_automations.py)
 
 
 def _schedule(user, servers=(), **kw):
-    s = Schedule.objects.create(account=acme(), name=kw.pop("name", "nightly"), action="deploy_api", cron=kw.pop("cron", "0 3 * * *"),
-                                created_by=user, next_run_at=kw.pop("next_run_at", timezone.now()), **kw)  # fmt: skip
+    s = Automation.objects.create(account=acme(), name=kw.pop("name", "nightly"), kind="action",
+                                  action="deploy_api", cron=kw.pop("cron", "0 3 * * *"),
+                                  created_by=user, next_run_at=kw.pop("next_run_at", timezone.now()), **kw)  # fmt: skip
     s.servers.set(servers)
     return s
 
@@ -227,19 +231,19 @@ def _schedule(user, servers=(), **kw):
 def test_schedule_fires_once_per_slot(admin_user, fleet):
     sched = _schedule(admin_user, fleet[:2])
     now = timezone.now()
-    assert services.run_due_schedules(now) == 1
-    assert services.run_due_schedules(now) == 0  # same slot: not again
+    assert auto.run_due(now) == 1
+    assert auto.run_due(now) == 0  # same slot: not again
     sched.refresh_from_db()
     assert sched.next_run_at > now and sched.last_run_at == now
     job = Job.objects.get()
-    assert job.schedule == sched and job.note == "Scheduled: nightly" and job.commands.count() == 2
+    assert job.automation == sched and job.note == "Schedule: nightly" and job.commands.count() == 2
 
 
 def test_missed_slots_run_once(admin_user, fleet):
     _schedule(
         admin_user, fleet[:1], cron="*/5 * * * *", next_run_at=timezone.now() - timedelta(hours=3)
     )
-    assert services.run_due_schedules() == 1 and Job.objects.count() == 1
+    assert auto.run_due() == 1 and Job.objects.count() == 1
 
 
 def test_targets_resolve_groups_and_environments_at_run_time(admin_user, fleet):
@@ -256,21 +260,23 @@ def test_targets_resolve_groups_and_environments_at_run_time(admin_user, fleet):
 
 def test_failing_schedule_records_why(admin_user):
     sched = _schedule(admin_user, [make_server("old", capabilities={"actions": []})[0]])
-    assert services.run_due_schedules() == 0
+    auto.run_due()
     sched.refresh_from_db()
     assert "action not offered" in sched.last_error
+    assert not Job.objects.exists()
 
 
 def test_schedule_form_admin_only(client, operator, admin_user, fleet):
     client.force_login(operator)
-    assert client.get(reverse("operations:schedule_create")).status_code == 403
+    assert client.get(reverse("automations:create")).status_code == 403
     client.force_login(admin_user)
-    resp = client.post(reverse("operations:schedule_create"), {
-        "sched_name": "Weekly deploy", "cron": "0 2 * * sun", "action": "deploy_api",
-        "servers": [fleet[0].pk], "is_enabled": "on"})  # fmt: skip
-    assert resp.status_code == 302
-    sched = Schedule.objects.get()
+    resp = client.post(reverse("automations:create"), {
+        "name": "Weekly deploy", "kind": "action", "cron": "0 2 * * sun", "action": "deploy_api",
+        "servers": [fleet[0].pk], "is_enabled": "on", "interpreter": "bash"})  # fmt: skip
+    assert resp.status_code == 302, resp.context["form"].errors
+    sched = Automation.objects.get()
     assert sched.next_run_at.astimezone(UTC).weekday() == 6 and sched.next_run_at.hour == 2
-    bad = client.post(reverse("operations:schedule_create"), {"sched_name": "x", "cron": "61 * * * *",
-                                                              "action": "deploy_api", "servers": [fleet[0].pk]})  # fmt: skip
+    bad = client.post(reverse("automations:create"), {"name": "x", "kind": "action", "cron": "61 * * * *",
+                                                      "action": "deploy_api", "servers": [fleet[0].pk],
+                                                      "interpreter": "bash"})  # fmt: skip
     assert "cron" in bad.context["form"].errors

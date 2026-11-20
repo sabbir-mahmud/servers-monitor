@@ -15,11 +15,12 @@ from apps.alerts import delivery, maintenance
 from apps.alerts.models import Alert, AlertKind, Channel, MaintenanceWindow, Severity
 from apps.api.models import ApiToken
 from apps.audit.models import AuditLog
+from apps.automations.models import Automation
 from apps.devices.models import Device
 from apps.fleet.models import Server, ServerGroup
 from apps.monitors.models import Monitor
 from apps.operations import services as ops
-from apps.operations.models import Command, CommandStatus, Job, Schedule
+from apps.operations.models import Command, CommandStatus, Job
 from apps.tenants.models import Account, Person
 from apps.users.models import Invitation
 
@@ -50,8 +51,8 @@ def globex(django_user_model):
     job = Job.objects.create(account=b, action="deploy_api", note="globex-deploy")
     command = Command.objects.create(job=job, server=server, action="deploy_api",
                                      deliver_by=now + timedelta(minutes=5))  # fmt: skip
-    schedule = Schedule.objects.create(account=b, name="globex-nightly", action="deploy_api",
-                                       cron="0 3 * * *")  # fmt: skip
+    schedule = Automation.objects.create(account=b, name="globex-nightly", kind="action",
+                                         action="deploy_api", cron="0 3 * * *")  # fmt: skip
     alert = Alert.objects.create(account=b, server=server, kind=AlertKind.OFFLINE,
                                  severity=Severity.CRITICAL, message="globex-db is offline")  # fmt: skip
     person = Person.objects.create(account=b, kind="staff", name="Globex Gary")
@@ -92,8 +93,10 @@ OBJECT_URLS = [
     ("operations:command_detail", "command", {}),
     ("operations:command_cancel", "command", {}),
     ("operations:command_stop", "command", {}),
-    ("operations:schedule_update", "schedule", {}),
-    ("operations:schedule_delete", "schedule", {}),
+    ("automations:detail", "schedule", {}),
+    ("automations:update", "schedule", {}),
+    ("automations:delete", "schedule", {}),
+    ("automations:run_now", "schedule", {}),
     ("tenants:person_detail", "person", {}),
     ("tenants:person_update", "person", {}),
     ("devices:detail", "device", {}),
@@ -140,9 +143,9 @@ LIST_PAGES = [
     ("alerts:channels", "globex-pager"),
     ("alerts:maintenance", "globex-upgrade"),
     ("operations:job_list", "globex-deploy"),
-    ("operations:schedule_list", "globex-nightly"),
+    ("automations:list", "globex-nightly"),
     ("operations:job_create", "globex-db"),
-    ("operations:schedule_create", "globex-group"),
+    ("automations:create", "globex-group"),
     ("monitors:create", "globex-db"),
     ("alerts:maintenance_create", "globex-db"),
     ("tenants:people", "Globex Gary"),
@@ -188,19 +191,20 @@ def test_forms_refuse_another_accounts_ids(client, admin_user, globex):
     })  # fmt: skip
     assert not Monitor.objects.filter(name="probe-b").exists()
     # A schedule on B's group.
-    client.post(reverse("operations:schedule_create"), {
-        "sched_name": "b-group", "cron": "0 3 * * *", "action": "deploy_api",
-        "groups": [str(globex["group"].pk)], "is_enabled": "on",
+    client.post(reverse("automations:create"), {
+        "name": "b-group", "kind": "action", "cron": "0 3 * * *", "action": "deploy_api",
+        "groups": [str(globex["group"].pk)], "is_enabled": "on", "interpreter": "bash",
     })  # fmt: skip
-    assert not Schedule.objects.filter(name="b-group").exists()
+    assert not Automation.objects.filter(name="b-group").exists()
     # Names are unique per account only: Acme may have its own "globex-db".
     assert client.get(reverse("fleet:server_detail", args=[mine.pk])).status_code == 200
 
 
 def test_schedule_environments_resolve_inside_the_account(globex):
     mine = make_server("acme-prod", environment="production")[0]
-    sched = Schedule.objects.create(account=acme(), name="nightly", action="deploy_api",
-                                    cron="0 3 * * *", environments=["production"])  # fmt: skip
+    sched = Automation.objects.create(account=acme(), name="nightly", kind="action",
+                                      action="deploy_api", cron="0 3 * * *",
+                                      environments=["production"])  # fmt: skip
     assert list(sched.targets()) == [mine]  # not globex-db, also "production"
 
 

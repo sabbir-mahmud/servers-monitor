@@ -193,7 +193,7 @@ def create_job(
     servers,
     note: str = "",
     rollout: dict | None = None,
-    schedule=None,
+    automation=None,
     account=None,
 ) -> tuple[Job, list]:
     """Queue `action` on every eligible server. Returns (job, [(server, skip reason)]).
@@ -227,7 +227,7 @@ def create_job(
         raise JobError("You do not have permission to run shell commands.")
     if action == "_upgrade" and not (user and user.has_perm("fleet.change_server")):
         raise JobError("Only Admins can upgrade agents.")
-    if action == "_deploy" and not (user and user.has_perm("deploys.add_deployment")):
+    if action == "_deploy" and not (user and user.has_perm("automations.add_run")):
         raise JobError("You do not have permission to deploy.")
     args = clean_args(action, raw_args)
     if action == "_task":
@@ -253,7 +253,7 @@ def create_job(
     with transaction.atomic():
         job = Job.objects.create(
             account=account, action=action, args=args, note=note, created_by=user if getattr(user, "pk", None) else None,
-            schedule=schedule,
+            automation=automation,
             **({"strategy": Strategy.ROLLING, "batch_size": batch_size,
                 "pause_seconds": int(rollout.get("pause_seconds") or 0),
                 "stop_on_failure": bool(rollout.get("stop_on_failure", True)),
@@ -285,7 +285,7 @@ def create_job(
             servers=[s.name for s in eligible],
             skipped={s.name: r for s, r in skipped},
             **({"rolling": f"batches of {batch_size}"} if rolling else {}),
-            **({"schedule": schedule.name} if schedule else {}),
+            **({"automation": automation.name} if automation else {}),
         )
         transaction.on_commit(
             lambda: dispatch(
@@ -396,43 +396,6 @@ def schedule_next(schedule, after=None):
     from .cron import Cron
 
     return Cron(schedule.cron).next_after(after or timezone.now(), settings.TIME_ZONE)
-
-
-def run_due_schedules(now=None) -> int:
-    """Start every schedule whose time has come. Missed runs (relay down) run once, not
-    once per missed slot."""
-    from .models import Schedule
-
-    now = now or timezone.now()
-    started = 0
-    for sched in Schedule.objects.filter(is_enabled=True, next_run_at__lte=now):
-        # Claim it first, so two relay processes never run the same slot.
-        claimed = Schedule.objects.filter(pk=sched.pk, next_run_at=sched.next_run_at).update(
-            next_run_at=schedule_next(sched, now), last_run_at=now
-        )
-        if not claimed:
-            continue
-        rollout = None
-        if sched.strategy == Strategy.ROLLING:
-            rollout = {"strategy": Strategy.ROLLING, "batch_size": sched.batch_size,
-                       "pause_seconds": sched.pause_seconds, "stop_on_failure": sched.stop_on_failure,
-                       "health_gates": list(sched.health_gates.all())}  # fmt: skip
-        try:
-            create_job(sched.created_by, sched.action, sched.args, list(sched.targets()),
-                       note=f"Scheduled: {sched.name}", rollout=rollout, schedule=sched,
-                       account=sched.account)  # fmt: skip
-            Schedule.objects.filter(pk=sched.pk).update(last_error="")
-            started += 1
-        except JobError as exc:
-            Schedule.objects.filter(pk=sched.pk).update(last_error=str(exc)[:300])
-            record(
-                None,
-                "schedule.failed",
-                target=sched.name,
-                account=sched.account,
-                error=str(exc)[:300],
-            )
-    return started
 
 
 def dispatch(commands) -> int:

@@ -81,11 +81,11 @@ def _nav_counts(user, account) -> dict:
         monitors = Monitor.objects.filter(account=account)
         counts["apps"] = monitors.count()
         counts["apps_down"] = monitors.filter(is_enabled=True, status=MonitorStatus.DOWN).count()
-    if user.has_perm("deploys.approve_deployment"):
-        from apps.deploys.models import Deployment, DeployStatus
+    if user.has_perm("automations.approve_run"):
+        from apps.automations.models import Run, RunStatus
 
-        counts["deploys_waiting"] = Deployment.objects.filter(
-            project__account=account, status=DeployStatus.WAITING
+        counts["runs_waiting"] = Run.objects.filter(
+            automation__account=account, status=RunStatus.WAITING
         ).count()
     if user.has_perm("alerts.view_alert"):
         counts["alerts"] = Alert.objects.filter(account=account, resolved_at__isnull=True).count()

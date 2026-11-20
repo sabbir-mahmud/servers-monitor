@@ -113,7 +113,7 @@ _MODEL_FEATURE = {
 _APP_FEATURE = {
     "fleet": "servers",
     "operations": "operations",
-    "deploys": "operations",
+    "automations": "operations",
     "monitors": "monitors",
     "users": "team",
     "audit": "audit",

@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}{% if object %}Edit {{ object.name }}{% else %}New automation{% endif %}{% endblock %}
+{% block content %}
+<a class="back-link" href="{% if object %}{% url 'automations:detail' object.pk %}{% else %}{% url 'automations:list' %}{% endif %}">{% icon "arrow-left" 15 %} {% if object %}{{ object.name }}{% else %}Automations{% endif %}</a>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">{% if object %}Edit {{ object.name }}{% else %}New automation{% endif %}</h1>
+    <p class="page-sub">What runs, on which servers, and what starts it.</p>
+  </div>
+  {% if object and perms.automations.delete_automation %}<div class="page-actions"><a class="btn btn-outline-secondary" href="{% url 'automations:delete' object.pk %}">{% icon "trash" %} Delete</a></div>{% endif %}
+</div>
+
+<form method="post" class="auto-form" data-kind-form novalidate>{% csrf_token %}
+  {% if preset %}
+  <div class="tpl-banner">
+    <span class="auto-mark is-{{ preset.kind }}" aria-hidden="true">{% icon "zap" 16 %}</span>
+    <div><b>From the "{{ preset.title }}" template</b>
+      <span>Everything below is filled in. Check the {% if preset.kind == "script" %}values at the top of the script{% elif preset.kind == "deploy" %}repository and steps{% else %}settings{% endif %}, pick servers, and save.</span>
+      {% if preset.needs %}<span class="tpl-needs">{% icon "wrench" 12 %} Each server needs: {{ preset.needs }}</span>{% endif %}</div>
+    <a class="btn btn-sm btn-link" href="{% url 'automations:create' %}">Other templates</a>
+  </div>
+  {% endif %}
+  {% if form.non_field_errors %}<div class="alert alert-danger" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+
+  <section class="card"><div class="card-body">
+    <h2 class="form-step-head"><span class="form-step-num">1</span> What it runs</h2>
+    <div class="choice-grid kind-grid">
+      {% for radio in form.kind %}
+      <label class="check-tile kind-tile">{{ radio.tag }}
+        <span class="auto-mark is-{{ radio.data.value }}" aria-hidden="true">{% if radio.data.value == "deploy" %}{% icon "rocket" 16 %}{% elif radio.data.value == "script" %}{% icon "code" 16 %}{% else %}{% icon "play" 16 %}{% endif %}</span>
+        <span><span class="check-tile-name d-block">{{ radio.choice_label }}</span>
+          <span class="check-tile-meta">{% if radio.data.value == "action" %}A restart, log read, package upgrade, reboot or an action from agent.toml.{% elif radio.data.value == "script" %}Bash, sh or Python kept here, run as the agent user.{% if not can_shell %} Owners and Admins only.{% endif %}{% else %}Pull a commit and run your deploy steps, as the app's user.{% endif %}</span></span>
+      </label>
+      {% endfor %}
+    </div>
+
+    <div class="auto-fields mt-3">
+      <div><label class="form-label" for="id_name">Name</label>{{ form.name }}{% for e in form.name.errors %}<div class="field-error">{{ e }}</div>{% endfor %}</div>
+      <div class="span-2"><label class="form-label" for="id_description">Description <span class="muted fw-normal">· optional</span></label>{{ form.description }}</div>
+    </div>
+
+    <div data-kind-section="action" class="mt-3">
+      <div class="auto-fields">
+        <div class="span-2"><label class="form-label" for="id_action">Action</label>{{ form.action }}{% for e in form.action.errors %}<div class="field-error">{{ e }}</div>{% endfor %}</div>
+        <div data-arg="name"><label class="form-label" for="id_arg_name">{{ form.arg_name.label }}</label>{{ form.arg_name }}</div>
+        <div data-arg="lines"><label class="form-label" for="id_arg_lines">Lines</label>{{ form.arg_lines }}</div>
+        <div data-arg="filter"><label class="form-label" for="id_arg_filter">{{ form.arg_filter.label }}</label>{{ form.arg_filter }}</div>
+        <div data-arg="command" class="span-full"><label class="form-label" for="id_arg_command">Command</label>{{ form.arg_command }}<div class="form-text">Runs via /bin/sh -c as the agent user, on servers whose agent has shell turned on.</div></div>
+      </div>
+    </div>
+
+    <div data-kind-section="script" class="mt-3">
+      <div class="auto-fields">
+        <div><label class="form-label" for="id_interpreter">{{ form.interpreter.label }}</label>{{ form.interpreter }}</div>
+      </div>
+      <div class="card script-editor-card mt-3">
+        <div class="script-editor-bar"><span class="mono small">{% icon "code" 14 %} script</span><span class="muted small" data-lines-for="id_body"></span></div>
+        {{ form.body }}
+      </div>
+      {% for e in form.body.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+      <p class="form-text">Runs as the agent user on servers with shell turned on. Exit code 0 counts as success. A <code>#!</code> line is ignored: "Run with" decides. Tip: <code>set -euo pipefail</code> stops at the first error.</p>
+    </div>
+
+    <div data-kind-section="deploy" class="mt-3">
+      <div class="auto-fields">
+        <div class="span-2"><label class="form-label" for="id_repo_url">{{ form.repo_url.label }}</label>{{ form.repo_url }}{% for e in form.repo_url.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+          <div class="form-text">The servers clone it, so it's their access that counts: a deploy key (SSH) or a token in an https URL.</div></div>
+        <div><label class="form-label" for="id_branch">{{ form.branch.label|capfirst }}</label>{{ form.branch }}{% for e in form.branch.errors %}<div class="field-error">{{ e }}</div>{% endfor %}</div>
+        <div><label class="form-label" for="id_app">{{ form.app.label }}</label>{{ form.app }}{% for e in form.app.errors %}<div class="field-error">{{ e }}</div>{% endfor %}<div class="form-text">{{ form.app.help_text }}</div></div>
+      </div>
+      <label class="form-label mt-3" for="id_steps">{{ form.steps.label }} <span class="muted fw-normal">· optional</span></label>
+      <div class="card script-editor-card">{{ form.steps }}</div>
+      {% for e in form.steps.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+      <p class="form-text">Run in the checkout as the app's user once the commit is checked out; the first failing line stops it. Available: <code>$NEXGUARD_SHA</code>, <code>$NEXGUARD_PREVIOUS_SHA</code>, <code>$NEXGUARD_BRANCH</code>. Leave empty if each server keeps its own deploy script (<code>smctl app add --deploy</code>).</p>
+    </div>
+  </div></section>
+
+  <section class="card"><div class="card-body">
+    <h2 class="form-step-head"><span class="form-step-num">2</span> Servers</h2>
+    {% for e in form.servers.errors %}<div class="field-error mb-2">{{ e }}</div>{% endfor %}
+    <div class="check-grid server-check">
+    {% for s in form.fields.servers.queryset %}
+      <label class="check-tile{% if not s.is_enabled %} is-off{% endif %}">
+        <input class="form-check-input" type="checkbox" name="servers" value="{{ s.pk }}"{% if s.pk|stringformat:"s" in form.servers.value or s.pk in form.servers.value %} checked{% endif %}>
+        <span><span class="check-tile-name d-block">{{ s.name }}</span>
+          <span class="check-tile-meta">{{ s.environment }}{% for g in s.groups.all %} · {{ g.name }}{% endfor %}<span data-kind-section="deploy">{% if not s.supports_deploy %} · agent needs 2.4{% elif s.apps %} · apps: {% for x in s.apps %}{{ x.name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% else %} · no apps yet{% endif %}</span></span></span>
+      </label>
+    {% empty %}<p class="muted mb-0">No servers yet.</p>{% endfor %}
+    </div>
+    {% if form.fields.groups.queryset %}<div class="mt-3"><span class="form-label d-block">{{ form.groups.label }}</span><div class="d-flex flex-wrap gap-1">{% for cb in form.groups %}<label class="check-tile py-2">{{ cb.tag }} <span class="check-tile-name">{{ cb.choice_label }}</span></label>{% endfor %}</div></div>{% endif %}
+    <div class="mt-3"><span class="form-label d-block">{{ form.environments.label }}</span><div class="d-flex flex-wrap gap-1">{% for cb in form.environments %}<label class="check-tile py-2">{{ cb.tag }} <span class="check-tile-name">{{ cb.choice_label }}</span></label>{% endfor %}</div>
+      <div class="form-text">Groups and environments are resolved at each run, so new servers join on their own. Leave everything empty to pick servers each time you run it.</div></div>
+  </div></section>
+
+  <section class="card"><div class="card-body">
+    <h2 class="form-step-head"><span class="form-step-num">3</span> What starts it</h2>
+    <p class="form-text mt-0">You can always run it by hand.</p>
+    <div class="auto-fields">
+      <div><label class="form-label" for="id_cron">{{ form.cron.label }}</label>{{ form.cron }}{% for e in form.cron.errors %}<div class="field-error">{{ e }}</div>{% endfor %}<div class="form-text">{{ form.cron.help_text }}</div></div>
+    </div>
+    <div class="d-grid gap-2 mt-3">
+      <label class="form-check" data-kind-section="deploy">{{ form.on_push }} <span class="form-check-label">{{ form.on_push.label }} <span class="muted">(a webhook from GitHub, GitLab, Gitea or Bitbucket)</span></span></label>
+      <label class="form-check">{{ form.require_approval }} <span class="form-check-label">{{ form.require_approval.label }} <span class="muted">(scheduled runs and pushes wait; so do runs by people who can't approve)</span></span></label>
+      <label class="form-check">{{ form.is_enabled }} <span class="form-check-label">Enabled</span></label>
+    </div>
+  </div></section>
+
+  <section class="card"><div class="card-body" data-rollout>
+    <h2 class="form-step-head"><span class="form-step-num">4</span> Rollout</h2>
+    <label class="form-check">{{ form.rolling }} <span class="form-check-label">{{ form.rolling.label }}</span></label>
+    <div class="form-text">{{ form.rolling.help_text }}</div>
+    <div data-rolling-only class="mt-3">
+      <div class="auto-fields">
+        <div><label class="form-label" for="id_batch_size">{{ form.batch_size.label }}</label>{{ form.batch_size }}</div>
+        <div><label class="form-label" for="id_pause_seconds">{{ form.pause_seconds.label }}</label>{{ form.pause_seconds }}</div>
+        <div class="d-flex align-items-end"><label class="form-check">{{ form.stop_on_failure }} <span class="form-check-label">{{ form.stop_on_failure.label }}</span></label></div>
+      </div>
+      {% if form.fields.health_gates.queryset %}
+      <span class="form-label d-block mt-3">{{ form.health_gates.label }}</span>
+      <div class="d-flex flex-wrap gap-1">{% for cb in form.health_gates %}<label class="check-tile py-2">{{ cb.tag }} <span class="check-tile-name">{{ cb.choice_label }}</span></label>{% endfor %}</div>
+      {% endif %}
+    </div>
+  </div></section>
+
+  <div class="auto-form-foot"><button class="btn btn-primary">{% icon "check" %} {% if object %}Save{% else %}Create automation{% endif %}</button></div>
+</form>
+{% endblock %}

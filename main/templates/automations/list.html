@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Automations{% endblock %}
+{% block content %}
+{% include "automations/_head.html" %}
+
+{% if waiting or failing %}
+<div class="auto-attention">
+  {% if waiting %}
+  <a class="auto-alert is-warning" href="{% if waiting|length == 1 %}{% url 'automations:run' waiting.0.automation_id waiting.0.pk %}{% else %}{% url 'operations:job_list' %}{% endif %}">
+    <span class="auto-alert-icon">{% icon "clock" 16 %}</span>
+    <span><b>{{ waiting|length }} run{{ waiting|length|pluralize }} waiting for approval</b>
+      <span class="auto-alert-sub">{% for r in waiting|slice:":3" %}{{ r.automation.name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% if waiting|length > 3 %} and more{% endif %}</span></span>
+    <span class="auto-alert-go">Review {% icon "chevron" 14 %}</span>
+  </a>{% endif %}
+  {% if failing %}
+  <div class="auto-alert is-critical">
+    <span class="auto-alert-icon">{% icon "alert" 16 %}</span>
+    <span><b>{{ failing|length }} failed {% if failing|length == 1 %}its{% else %}their{% endif %} last run</b>
+      <span class="auto-alert-sub">{% for a in failing %}<a href="{% url 'automations:run' a.pk a.last.pk %}">{{ a.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</span></span>
+  </div>{% endif %}
+</div>
+{% endif %}
+
+{% if total %}
+<form class="auto-toolbar" method="get" role="search">
+  {% if kind %}<input type="hidden" name="kind" value="{{ kind }}">{% endif %}
+  {% if when %}<input type="hidden" name="when" value="{{ when }}">{% endif %}
+  <div class="input-icon auto-search">{% icon "search" 15 %}<input class="form-control" type="search" name="q" value="{{ q }}" placeholder="Search automations" aria-label="Search automations"></div>
+  <div class="segmented" role="group" aria-label="What it runs">
+    <a href="?{% if when %}when={{ when }}&{% endif %}{% if q %}q={{ q|urlencode }}{% endif %}" class="{% if not kind %}active{% endif %}">All</a>
+    <a href="?kind=action{% if when %}&when={{ when }}{% endif %}{% if q %}&q={{ q|urlencode }}{% endif %}" class="{% if kind == 'action' %}active{% endif %}">Actions{% if kind_counts.action %} <span class="seg-count">{{ kind_counts.action }}</span>{% endif %}</a>
+    <a href="?kind=script{% if when %}&when={{ when }}{% endif %}{% if q %}&q={{ q|urlencode }}{% endif %}" class="{% if kind == 'script' %}active{% endif %}">Scripts{% if kind_counts.script %} <span class="seg-count">{{ kind_counts.script }}</span>{% endif %}</a>
+    <a href="?kind=deploy{% if when %}&when={{ when }}{% endif %}{% if q %}&q={{ q|urlencode }}{% endif %}" class="{% if kind == 'deploy' %}active{% endif %}">Deploys{% if kind_counts.deploy %} <span class="seg-count">{{ kind_counts.deploy }}</span>{% endif %}</a>
+  </div>
+  <div class="segmented" role="group" aria-label="What starts it">
+    <a href="?{% if kind %}kind={{ kind }}&{% endif %}{% if q %}q={{ q|urlencode }}{% endif %}" class="{% if not when %}active{% endif %}">Any start</a>
+    <a href="?when=scheduled{% if kind %}&kind={{ kind }}{% endif %}{% if q %}&q={{ q|urlencode }}{% endif %}" class="{% if when == 'scheduled' %}active{% endif %}">{% icon "clock" 13 %} Schedule</a>
+    <a href="?when=push{% if kind %}&kind={{ kind }}{% endif %}{% if q %}&q={{ q|urlencode }}{% endif %}" class="{% if when == 'push' %}active{% endif %}">{% icon "git-branch" 13 %} Push</a>
+    <a href="?when=manual{% if kind %}&kind={{ kind }}{% endif %}{% if q %}&q={{ q|urlencode }}{% endif %}" class="{% if when == 'manual' %}active{% endif %}">{% icon "play" 13 %} By hand</a>
+  </div>
+</form>
+{% endif %}
+
+{% if automations %}
+<div class="card auto-table" role="table" aria-label="Automations">
+  <div class="auto-row auto-row-head" role="row">
+    <span role="columnheader" class="auto-col-name">Automation</span>
+    <span role="columnheader">Starts</span>
+    <span role="columnheader">Servers</span>
+    <span role="columnheader">Recent runs</span>
+    <span role="columnheader"><span class="visually-hidden">Run</span></span>
+  </div>
+  {% for a in automations %}
+  <div class="auto-row{% if not a.is_enabled %} is-off{% endif %}" role="row">
+    <div class="auto-col-name" role="cell">
+      {% include "automations/_mark.html" %}
+      <div class="auto-name-text">
+        <a class="auto-name stretched" href="{% url 'automations:detail' a.pk %}">{{ a.name }}</a>
+        {% if not a.is_enabled %}<span class="chip">Off</span>{% endif %}
+        {% if a.waiting %}<span class="chip chip-warning">{{ a.waiting }} to approve</span>{% endif %}
+        <span class="auto-what{% if a.kind != 'script' and not a.description %} mono{% endif %}">{{ a.description|default:a.summary }}</span>
+      </div>
+    </div>
+    <div role="cell" class="auto-col-starts">{% include "automations/_starts.html" %}</div>
+    <div role="cell" class="auto-col-servers">
+      {% if a.target_count or a.groups.all or a.environments %}
+        <span>{% if a.target_count %}{{ a.target_count }} server{{ a.target_count|pluralize }}{% endif %}{% if a.groups.all or a.environments %}{% if a.target_count %} + {% endif %}{% for g in a.groups.all %}{{ g.name }}{% if not forloop.last or a.environments %}, {% endif %}{% endfor %}{% for e in a.environments %}{{ e }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</span>
+      {% else %}<span class="muted">Chosen each run</span>{% endif %}
+    </div>
+    <div role="cell" class="auto-col-runs">
+      <span class="run-strip" aria-label="Last {{ a.recent|length }} runs">
+        {% for x in a.pad %}<span class="run-tick is-empty"></span>{% endfor %}
+        {% for r in a.history %}<a class="run-tick is-{{ r.status }}" href="{% url 'automations:run' a.pk r.pk %}" title="{{ r.get_status_display }} · {{ r.get_trigger_display }} · {{ r.created_at|date:'M j, H:i' }}"></a>{% endfor %}
+      </span>
+      <span class="auto-last">{% if a.last %}<span class="auto-last-status is-{{ a.last.status }}">{{ a.last.get_status_display }}</span> {{ a.last.created_at|ago }}{% else %}<span class="muted">Not run yet</span>{% endif %}</span>
+    </div>
+    <div role="cell" class="auto-col-act">
+      {% if a.can_run and a.is_enabled %}
+        {% if a.target_count or a.groups.all or a.environments %}
+        <form method="post" action="{% url 'automations:run_now' a.pk %}" data-confirm="Run {{ a.name }} now{% if a.kind == 'deploy' %} (latest commit on {{ a.branch }}){% endif %}?">{% csrf_token %}<input type="hidden" name="quick" value="1">
+          <button class="btn btn-sm btn-outline-secondary auto-run-btn" aria-label="Run {{ a.name }} now">{% if a.kind == "deploy" %}{% icon "rocket" 14 %} Deploy{% else %}{% icon "play" 14 %} Run{% endif %}</button></form>
+        {% else %}
+        <a class="btn btn-sm btn-outline-secondary auto-run-btn" href="{% url 'automations:run_now' a.pk %}" aria-label="Run {{ a.name }} on chosen servers">{% icon "play" 14 %} Run…</a>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% elif total %}
+<div class="card"><div class="card-body empty-small">Nothing matches. <a href="{% url 'automations:list' %}">Show all</a></div></div>
+{% else %}
+<div class="card"><div class="card-body auto-empty">
+  <div class="auto-empty-head">{% icon "zap" 26 %}<h2>Automate what you run on servers</h2>
+    <p>Save it once, then run it by hand, on a schedule, or on every git push, with an Admin's approval if you want it.</p></div>
+  {% if perms.automations.add_automation %}
+  <div class="auto-empty-grid">
+    <a class="auto-empty-tile" href="{% url 'automations:create' %}?kind=action"><span class="auto-mark is-action">{% icon "play" 17 %}</span><b>Action</b><span>Restart a service, upgrade packages, reboot, or an action from agent.toml.</span></a>
+    <a class="auto-empty-tile" href="{% url 'automations:create' %}?kind=script"><span class="auto-mark is-script">{% icon "code" 17 %}</span><b>Script</b><span>Bash, sh or Python you keep here, like a nightly backup.</span></a>
+    <a class="auto-empty-tile" href="{% url 'automations:create' %}?kind=deploy"><span class="auto-mark is-deploy">{% icon "rocket" 17 %}</span><b>Git deploy</b><span>Pull a commit and run your deploy steps on every push.</span></a>
+  </div>
+  <p class="text-center mt-3 mb-0"><a class="btn btn-primary" href="{% url 'automations:create' %}">{% icon "zap" %} Browse templates</a></p>{% endif %}
+</div></div>
+{% endif %}
+{% endblock %}

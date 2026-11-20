@@ -1,0 +1,6 @@
+{% load monitor %}<span class="auto-starts">
+  {% if a.on_push %}<span class="auto-start">{% icon "git-branch" 14 %} Push to <span class="mono">{{ a.branch }}</span></span>{% endif %}
+  {% if a.cron %}<span class="auto-start" title="{{ a.cron }}">{% icon "clock" 14 %} {{ a.cron|cron_label|capfirst }}</span>{% endif %}
+  {% if not a.on_push and not a.cron %}<span class="auto-start is-muted">{% icon "play" 14 %} By hand</span>{% endif %}
+  {% if a.cron and a.next_run_at and a.is_enabled %}<span class="auto-start-sub">next {{ a.next_run_at|until }}</span>{% elif a.require_approval %}<span class="auto-start-sub">{% icon "check" 12 %} needs approval</span>{% endif %}
+</span>

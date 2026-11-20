@@ -1,12 +1,14 @@
 {% extends "base.html" %}
 {% load monitor %}
-{% block title %}Run on servers{% endblock %}
+{% block title %}Run once{% endblock %}
 {% block content %}
+<a class="back-link" href="{% url 'automations:list' %}">{% icon "arrow-left" 15 %} Automations</a>
 <div class="page-head">
   <div>
-    <h1 class="page-title">Run on servers</h1>
-    <p class="page-sub">Fan one action out to many servers. Each agent runs it only if its own config allows it. Servers that can't are skipped and listed.</p>
+    <h1 class="page-title">Run once</h1>
+    <p class="page-sub">Fan one action out to many servers, one time. Each agent runs it only if its own config allows it. Servers that can't are skipped and listed.</p>
   </div>
+  {% if perms.automations.add_automation %}<div class="page-actions"><a class="btn btn-outline-secondary" href="{% url 'automations:create' %}?kind=action">{% icon "zap" %} Save as an automation instead</a></div>{% endif %}
 </div>
 <form method="post">{% csrf_token %}
   {% if form.non_field_errors %}<div class="alert alert-danger" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}

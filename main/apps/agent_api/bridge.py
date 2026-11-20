@@ -26,8 +26,8 @@ from django.utils import timezone
 
 from apps.alerts import delivery, forecast
 from apps.alerts.services import sweep
+from apps.automations import services as automations
 from apps.core import backup
-from apps.deploys import services as deploys
 from apps.devices import activity as device_activity
 from apps.devices import blocklist as device_blocklist
 from apps.devices import geoip as device_geoip
@@ -304,9 +304,9 @@ class Bridge:
             now = time.monotonic()
             try:
                 ops.dispatch_pending()
-                ops.run_due_schedules()
+                automations.run_due()
                 ops.advance_rollouts()
-                deploys.sync()  # settle finished deploys, start the next queued one
+                automations.sync()  # settle finished runs, start the next queued one
                 if now - last_sweep >= settings.MONITOR_SWEEP_SECONDS:
                     last_sweep = now
                     result = sweep()

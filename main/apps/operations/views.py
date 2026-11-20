@@ -1,17 +1,15 @@
 from django.contrib import messages
 from django.db.models import Count, Q
 from django.shortcuts import redirect, render
-from django.urls import reverse
 from django.views import View
-from django.views.generic import DeleteView, DetailView, FormView, ListView
+from django.views.generic import DetailView, FormView, ListView
 
-from apps.audit.services import record
 from apps.core.mixins import HtmxTemplateMixin, StaffViewMixin
 from apps.tenants.scoping import AccountScopedMixin, get_scoped_or_404
 
 from . import services
-from .forms import JobForm, ScheduleForm
-from .models import ACTIVE_STATUSES, Command, CommandStatus, Job, Schedule
+from .forms import JobForm
+from .models import ACTIVE_STATUSES, Command, CommandStatus, Job
 
 
 class JobListView(StaffViewMixin, AccountScopedMixin, ListView):
@@ -24,7 +22,7 @@ class JobListView(StaffViewMixin, AccountScopedMixin, ListView):
         return (
             super()
             .get_queryset()
-            .select_related("created_by")
+            .select_related("created_by", "automation")
             .annotate(
                 total=Count("commands"),
                 active=Count("commands", filter=Q(commands__status__in=ACTIVE_STATUSES)),
@@ -42,6 +40,17 @@ class JobListView(StaffViewMixin, AccountScopedMixin, ListView):
             )
             .order_by("-created_at")
         )  # GROUP BY drops Meta.ordering; pagination needs one
+
+    def get_context_data(self, **kwargs):
+        from apps.automations.models import Run, RunStatus
+
+        ctx = super().get_context_data(**kwargs)
+        ctx["tab"] = "activity"
+        ctx["waiting"] = list(
+            Run.objects.filter(automation__account=self.request.account, status=RunStatus.WAITING)
+            .select_related("automation", "requested_by").order_by("created_at")[:20]
+        )  # fmt: skip
+        return ctx
 
 
 class JobCreateView(StaffViewMixin, AccountScopedMixin, FormView):
@@ -100,7 +109,10 @@ class JobDetailView(StaffViewMixin, AccountScopedMixin, HtmxTemplateMixin, Detai
 
     def get_queryset(self):
         return (
-            super().get_queryset().select_related("created_by").prefetch_related("commands__server")
+            super()
+            .get_queryset()
+            .select_related("created_by", "automation")
+            .prefetch_related("commands__server")
         )
 
     def get_context_data(self, **kwargs):
@@ -167,72 +179,3 @@ class JobControlView(StaffViewMixin, View):
             n = services.abort_job(request, job)
             messages.success(request, f"Rollout aborted; {n} server(s) won't run it.")
         return redirect("operations:job_detail", pk=pk)
-
-
-class ScheduleListView(StaffViewMixin, AccountScopedMixin, ListView):
-    permission_required = "operations.view_schedule"
-    template_name = "operations/schedule_list.html"
-    model = Schedule
-    context_object_name = "schedules"
-
-    def get_queryset(self):
-        return super().get_queryset().prefetch_related("servers", "groups")
-
-
-class _ScheduleFormView(StaffViewMixin, AccountScopedMixin, FormView):
-    template_name = "operations/schedule_form.html"
-    form_class = ScheduleForm
-    instance = None
-
-    def get_form_kwargs(self):
-        kwargs = super().get_form_kwargs()
-        kwargs["user"] = self.request.user
-        kwargs["instance"] = self.instance
-        return kwargs
-
-    def get_context_data(self, **kwargs):
-        ctx = super().get_context_data(**kwargs)
-        ctx["object"] = self.instance
-        return ctx
-
-    def form_valid(self, form):
-        sched = form.save(self.request.user)
-        record(self.request, "schedule.save", target=sched.name, cron=sched.cron, runs=sched.action)
-        messages.success(
-            self.request,
-            f"Saved. Next run: {sched.next_run_at:%b %d %H:%M %Z}."
-            if sched.next_run_at
-            else "Saved (disabled).",
-        )
-        return redirect("operations:schedule_list")
-
-
-class ScheduleCreateView(_ScheduleFormView):
-    permission_required = "operations.add_schedule"
-
-
-class ScheduleUpdateView(_ScheduleFormView):
-    permission_required = "operations.change_schedule"
-
-    def dispatch(self, request, *args, **kwargs):
-        self.instance = get_scoped_or_404(request, Schedule, pk=kwargs["pk"])
-        return super().dispatch(request, *args, **kwargs)
-
-
-class ScheduleDeleteView(StaffViewMixin, AccountScopedMixin, DeleteView):
-    permission_required = "operations.delete_schedule"
-    model = Schedule
-    template_name = "confirm_delete.html"
-
-    def get_success_url(self):
-        return reverse("operations:schedule_list")
-
-    def get_context_data(self, **kwargs):
-        ctx = super().get_context_data(**kwargs)
-        ctx.update(delete_note="Stops future runs. Jobs it already started stay in the history.",
-                   delete_label="Delete schedule", cancel_url=reverse("operations:schedule_list"))  # fmt: skip
-        return ctx
-
-    def form_valid(self, form):
-        record(self.request, "schedule.delete", target=self.object.name)
-        return super().form_valid(form)

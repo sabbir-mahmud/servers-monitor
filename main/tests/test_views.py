@@ -179,8 +179,10 @@ def test_sidebar_is_one_flat_list_with_problem_badges(client, admin_user, viewer
     client.force_login(admin_user)
     page = client.get(reverse("fleet:dashboard"), {"kind": "server"}).content.decode()
     assert "nav-group" not in page  # no collapsible categories any more
-    for label in ("Servers", "Applications", "Jobs", "Alerts", "Members", "Settings"):
+    for label in ("Servers", "Applications", "Automations", "Alerts", "Members", "Settings"):
         assert f'<span class="side-text">{label}</span>' in page
+    for gone in ("Jobs", "Scripts", "Schedules", "Deploys"):  # all inside Automations now
+        assert f'<span class="side-text">{gone}</span>' not in page
     assert page.count('class="nav-badge is-critical"') == 2  # 1 server offline, 1 app down
     # Viewers don't see links to pages they can't open.
     client.force_login(viewer)

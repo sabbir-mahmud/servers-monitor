@@ -105,7 +105,7 @@ All commands except `--help` need `sudo`.
 | `smctl action rm NAME` | Remove it. |
 | `smctl run NAME -- CMD ARGS…` | Run a cron job and report start, success or failure (with its exit code) to the Heartbeat monitor called NAME. Exits with the job's own code. |
 | `smctl ping NAME [--fail] [--start] [--exit-code N]` | Report a job's heartbeat from your own script. |
-| `smctl shell on\|off` | Allow or forbid free-form shell from the dashboard (also what saved Scripts run through). |
+| `smctl shell on\|off` | Allow or forbid free-form shell from the dashboard (also what script automations run through). |
 | `smctl tasks on\|off [TASK…]` / `smctl tasks list` | Turn server tasks (`updates`, `upgrade`, `cleanup`, `reboot`) on or off; no names means all. |
 | `smctl docker enable\|disable` | Let the agent see Docker containers. **The docker group is root-equivalent.** |
 | `smctl probes on\|off` | Let the dashboard run HTTP/TCP uptime checks from this server (off by default). |
@@ -175,12 +175,14 @@ and only then starts the next one. If a server fails (or a gate isn't up within 
 the job **halts** and later batches don't start; on the job page, **Resume** continues
 (accepting the failures so far) and **Abort** cancels the remaining batches.
 
-**Schedules** (Operations → Schedules, Admins) run an action on a cron expression in the
-dashboard's `TIME_ZONE`: `0 3 * * *` (daily at 03:00), `30 2 * * mon`, `*/15 * * * *`, or
+**Scheduled automations** (Automations → New automation, "On a schedule"; Admins) run an
+action, a script or a deploy on a cron expression in the dashboard's `TIME_ZONE`: `0 3 * * *` (daily at 03:00), `30 2 * * mon`, `*/15 * * * *`, or
 `@hourly`/`@daily`/`@weekly`. Targets can be servers, groups and environments, resolved each
-time it runs, so new servers in a group are included automatically. A schedule can roll out
-in batches too. Each run is an ordinary job (marked *Scheduled: name*); if the relay process
-was down at the time, a missed run happens once when it's back, not once per missed slot.
+time it runs, so new servers in a group are included automatically. It can roll out in
+batches too, and can wait for an Admin's approval. Each run is an ordinary job, linked to
+its automation in Activity. If the relay process was down at the time, a missed run happens
+once when it's back, not once per missed slot, and a run never starts while the previous
+one is still going.
 
 ## Following logs live
 
@@ -233,9 +235,9 @@ Needs agent 2.3.0.
 
 ## Git deploys
 
-Push to a branch and its servers update. Set up a project under **Deploys** (repository,
-branch, servers, and whether each push deploys at once or waits for an Admin to approve),
-then on each server, once:
+Push to a branch and its servers update. Create an automation of kind **Git deploy**
+(repository, branch, servers, "On every push", and whether each push waits for an Admin
+to approve), then on each server, once:
 
 ```bash
 sudo smctl app add api --repo git@github.com:acme/api.git --branch main \
@@ -244,7 +246,7 @@ sudo smctl app test api        # can that user reach the repo? (git ls-remote)
 sudo smctl app rm api
 ```
 
-One server can host many apps. Add the webhook the project page shows (payload URL and
+One server can host many apps. Add the webhook the automation's page shows (payload URL and
 secret) to GitHub, GitLab, Gitea/Forgejo or Bitbucket. Each request is checked against the
 secret (HMAC-SHA256, or GitLab's secret token) and each delivery is accepted once.
 
@@ -262,13 +264,13 @@ deploy-run api`, one exact sudo rule per app):
 The repo, branch, folder and user come from the root-owned app spec, never from the
 dashboard. Steps written in the dashboard run only for apps added with
 `--dashboard-steps`; otherwise only the server's script runs. Each server's log is kept on
-the deploy's page.
+the run's page.
 
-One deploy per project runs at a time: pushes that arrive meanwhile queue, and only the
+One deploy per automation runs at a time: pushes that arrive meanwhile queue, and only the
 newest of them deploys next (the others show as skipped). Deploys can roll out in batches
 with health gates, like any job. **Redeploy this commit** on an earlier deploy rolls back
-to it. Admins create projects, edit steps and approve; Operators can press Deploy latest
-and redeploy (on approval projects their request waits for an Admin). Needs agent 2.4.0.
+to it. Admins create automations, edit steps and approve; Operators can press Deploy latest
+and redeploy (on automations that need approval, their request waits for an Admin). Needs agent 2.4.0.
 
 ## Upgrading and re-keying
 

@@ -61,8 +61,8 @@ document.addEventListener("change", (e) => {
   }
 });
 function toggleArgs(action) {
-  const show = { tail_log: ["name", "lines"], restart_service: ["name"], shell: ["command"] }[action] || [];
-  ["name", "lines", "command"].forEach((f) => {
+  const show = { tail_log: ["name", "lines"], tail_follow: ["name", "filter"], restart_service: ["name"], shell: ["command"] }[action] || [];
+  ["name", "lines", "filter", "command"].forEach((f) => {
     const row = document.querySelector(`[data-arg="${f}"]`);
     if (row) row.hidden = !show.includes(f);
   });
@@ -449,3 +449,64 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("DOMContentLoaded", () =>
     document.querySelectorAll("form[data-controls-form]").forEach(bind));
 })();
+
+// Automation form: show only the fields of the chosen kind (action / script / deploy).
+function syncKind(form) {
+  const kind = form.querySelector("input[name=kind]:checked")?.value || "action";
+  form.querySelectorAll("[data-kind-section]").forEach((el) => { el.hidden = el.dataset.kindSection !== kind; });
+}
+document.addEventListener("DOMContentLoaded", () => document.querySelectorAll("[data-kind-form]").forEach(syncKind));
+document.addEventListener("change", (e) => {
+  if (e.target.name === "kind" && e.target.closest("[data-kind-form]")) syncKind(e.target.closest("[data-kind-form]"));
+});
+
+// Code editors (scripts, deploy steps): a line count, and Tab indents. Esc then Tab, or
+// Shift+Tab, still moves focus out, so the box never traps the keyboard.
+document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll("textarea.script-editor").forEach((ta) => {
+    const out = document.querySelector(`[data-lines-for="${ta.id}"]`);
+    const count = () => {
+      if (!out) return;
+      const n = ta.value ? ta.value.replace(/\n$/, "").split("\n").length : 0;
+      out.textContent = `${n} line${n === 1 ? "" : "s"}`;
+    };
+    let escaped = false;
+    ta.addEventListener("input", count);
+    count();
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { escaped = true; return; }
+      if (e.key === "Tab" && !e.shiftKey && !escaped) {
+        e.preventDefault();
+        ta.setRangeText("  ", ta.selectionStart, ta.selectionEnd, "end");
+        count();
+      }
+      escaped = false;
+    });
+  });
+});
+
+// Show/hide a blurred secret (webhook secrets).
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-reveal]");
+  if (btn) document.querySelector(btn.dataset.reveal)?.classList.toggle("is-secret");
+});
+
+// Template gallery: filter the cards as you type.
+document.addEventListener("input", (e) => {
+  const box = e.target.closest("[data-tpl-search]");
+  if (!box) return;
+  const q = box.value.trim().toLowerCase();
+  let shown = 0;
+  document.querySelectorAll("[data-tpl-section]").forEach((sec) => {
+    let any = false;
+    sec.querySelectorAll("[data-tpl-text]").forEach((card) => {
+      const hit = !q || card.dataset.tplText.includes(q);
+      card.hidden = !hit;
+      any ||= hit;
+      shown += hit;
+    });
+    sec.hidden = !any;
+  });
+  const none = document.querySelector("[data-tpl-none]");
+  if (none) none.hidden = shown > 0;
+});

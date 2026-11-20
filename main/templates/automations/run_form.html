@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}Run {{ a.name }}{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'automations:detail' a.pk %}">{% icon "arrow-left" 15 %} {{ a.name }}</a>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Run {{ a.name }}</h1>
+    <p class="page-sub">{% if targets %}Leave all unticked to run on its {{ targets|length }} saved server{{ targets|length|pluralize }}, or tick the ones you want this time.{% else %}Choose where to run it this time.{% endif %}{% if a.needs_shell %} Only servers with shell turned on can run it.{% endif %}</p>
+  </div>
+</div>
+<form method="post">{% csrf_token %}
+  {% if form.non_field_errors %}<div class="alert alert-danger" role="alert">{% icon "alert" %}<div>{{ form.non_field_errors|join:" " }}</div></div>{% endif %}
+  <div class="card mb-3"><div class="card-header">{% icon "server" 17 %} Servers
+    <div class="card-actions"><div class="segmented"><button type="button" data-select-all="1">Select all</button><button type="button" data-select-all="0">None</button></div></div></div>
+    <div class="card-body"><div class="check-grid server-check">
+      {% for s in form.fields.servers.queryset %}
+      <label class="check-tile{% if a.needs_shell and not s.shell_enabled %} is-off{% endif %}">
+        <input class="form-check-input" type="checkbox" name="servers" value="{{ s.pk }}"{% if s.pk|stringformat:"s" in chosen %} checked{% endif %}>
+        <span><span class="check-tile-name d-block">{{ s.name }}</span>
+          <span class="check-tile-meta">{% if s in targets %}saved · {% endif %}{{ s.environment }}{% if a.needs_shell and not s.shell_enabled %} · shell off{% endif %}</span></span>
+      </label>
+      {% empty %}<p class="muted mb-0">No enabled servers.</p>{% endfor %}
+    </div></div></div>
+  <div class="card"><div class="card-body d-flex flex-wrap gap-2 align-items-end">
+    <div class="flex-grow-1"><label class="form-label" for="id_note">Note <span class="muted fw-normal">· optional</span></label>{{ form.note }}</div>
+    <button class="btn btn-primary">{% if a.kind == "deploy" %}{% icon "rocket" %} Deploy{% else %}{% icon "play" %} Run{% endif %}</button>
+  </div></div>
+</form>
+{% endblock %}

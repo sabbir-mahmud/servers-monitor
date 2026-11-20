@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% load monitor %}
+{% block title %}New automation{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'automations:list' %}">{% icon "arrow-left" 15 %} Automations</a>
+<div class="page-head">
+  <div>
+    <h1 class="page-title">New automation</h1>
+    <p class="page-sub">Start from a template and change what you need, or build one from scratch.</p>
+  </div>
+</div>
+
+<div class="tpl-scratch">
+  <span class="tpl-scratch-label">From scratch</span>
+  {% for value, label in kind_choices %}
+  <a class="tpl-scratch-btn" href="{% url 'automations:create' %}?kind={{ value }}">
+    <span class="auto-mark is-{{ value }}" aria-hidden="true">{% if value == "deploy" %}{% icon "rocket" 15 %}{% elif value == "script" %}{% icon "code" 15 %}{% else %}{% icon "play" 15 %}{% endif %}</span>{{ label }}</a>
+  {% endfor %}
+  <div class="input-icon tpl-search">{% icon "search" 15 %}<input class="form-control" type="search" placeholder="Find a template" aria-label="Find a template" data-tpl-search></div>
+</div>
+
+{% for key, label, blurb, items in categories %}
+<section class="tpl-section" data-tpl-section>
+  <div class="tpl-section-head"><h2>{{ label }}</h2><span>{{ blurb }}</span></div>
+  <div class="tpl-grid">
+    {% for t in items %}
+    <a class="tpl-card" href="{% url 'automations:create' %}?template={{ t.key }}" data-tpl-text="{{ t.title|lower }} {{ t.blurb|lower }} {{ label|lower }}">
+      <div class="tpl-card-top">
+        <span class="auto-mark is-{{ t.kind }}" aria-hidden="true">{% if t.kind == "deploy" %}{% icon "rocket" 16 %}{% elif t.kind == "script" %}{% icon "code" 16 %}{% else %}{% icon "play" 16 %}{% endif %}</span>
+        <span class="tpl-when">{% if t.initial.on_push %}{% icon "git-branch" 12 %}{% elif t.initial.cron %}{% icon "clock" 12 %}{% else %}{% icon "play" 12 %}{% endif %} {{ t.when }}</span>
+      </div>
+      <b class="tpl-title">{{ t.title }}</b>
+      <span class="tpl-blurb">{{ t.blurb }}</span>
+      {% if t.needs %}<span class="tpl-needs" title="What each server needs">{% icon "wrench" 12 %} {{ t.needs }}</span>{% endif %}
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
+<div class="card" data-tpl-none hidden><div class="card-body empty-small">No template matches. <a href="{% url 'automations:create' %}?kind=script">Start a script from scratch</a></div></div>
+{% endblock %}

@@ -1,0 +1,1 @@
+{% load monitor %}<span class="auto-mark is-{{ a.kind }}{% if size == 'lg' %} is-lg{% endif %}" aria-hidden="true">{% if a.kind == "deploy" %}{% icon "rocket" 17 %}{% elif a.kind == "script" %}{% icon "code" 17 %}{% else %}{% icon "play" 17 %}{% endif %}</span>

@@ -1,28 +1,34 @@
 {% extends "base.html" %}
 {% load monitor %}
-{% block title %}Jobs{% endblock %}
+{% block title %}Activity · Automations{% endblock %}
 {% block content %}
-<div class="page-head">
-  <div>
-    <h1 class="page-title">Jobs</h1>
-    <p class="page-sub">Every action that was fanned out to your servers, newest first.</p>
-  </div>
-  {% if perms.operations.add_job %}<div class="page-actions"><a class="btn btn-primary" href="{% url 'operations:job_create' %}">{% icon "play" %} Run on servers</a></div>{% endif %}
-</div>
+{% include "automations/_head.html" %}
+{% if waiting %}
+<div class="card mb-3 is-warning-card"><div class="card-header">{% icon "clock" 17 %} Waiting for approval</div>
+  <ul class="auto-runs" role="list">
+  {% for r in waiting %}
+    <li class="auto-run"><a class="auto-run-main" href="{% url 'automations:run' r.automation_id r.pk %}">
+      {% include "automations/_badge.html" with run=r %}
+      <span class="auto-run-text"><span class="auto-run-msg">{{ r.automation.name }}{% if r.message %}: {{ r.message }}{% endif %}</span>
+        <span class="auto-run-meta">{{ r.get_trigger_display }}{% if r.requested_by %} by {{ r.requested_by }}{% elif r.author %} by {{ r.author }}{% endif %} · {{ r.created_at|ago }}</span></span></a></li>
+  {% endfor %}
+  </ul></div>
+{% endif %}
 <div class="card"><div class="table-responsive"><table class="table table-hover align-middle">
-  <thead><tr><th>When</th><th>Action</th><th>By</th><th class="num">Servers</th><th class="num">Running</th><th class="num">OK</th><th class="num">Failed</th></tr></thead>
+  <thead><tr><th>When</th><th>What</th><th>Started by</th><th class="num">Servers</th><th class="num">Running</th><th class="num">OK</th><th class="num">Failed</th></tr></thead>
   <tbody>
   {% for job in object_list %}
     <tr>
       <td class="text-nowrap"><a class="row-link" href="{% url 'operations:job_detail' job.pk %}">{{ job.created_at|date:"M j, H:i:s" }}</a><div class="row-sub">{{ job.created_at|timesince }} ago</div></td>
-      <td><span class="mono">{{ job.summary }}</span>{% if job.note %}<div class="row-sub">{{ job.note }}</div>{% endif %}</td>
-      <td class="text-body-secondary">{{ job.created_by|default:"—" }}</td>
+      <td>{% if job.automation %}<a class="fw-semibold" href="{% url 'automations:detail' job.automation_id %}">{{ job.automation.name }}</a><div class="row-sub mono">{{ job.summary }}</div>
+        {% else %}<span class="mono">{{ job.summary }}</span><div class="row-sub">{% if job.note %}{{ job.note }}{% else %}one-off{% endif %}</div>{% endif %}</td>
+      <td class="text-body-secondary">{% if job.created_by %}{{ job.created_by }}{% else %}—{% endif %}{% if job.automation and job.note %}<div class="row-sub">{{ job.note|truncatechars:48 }}</div>{% endif %}</td>
       <td class="num">{{ job.total }}</td>
       <td class="num {% if job.active %}text-body-secondary{% else %}muted{% endif %}">{{ job.active }}</td>
       <td class="num text-good">{{ job.ok }}</td>
       <td class="num {% if job.bad %}text-critical fw-semibold{% else %}muted{% endif %}">{{ job.bad }}</td>
     </tr>
-  {% empty %}<tr><td colspan="7" class="empty">{% icon "layers" 28 %}<div class="empty-title">No jobs yet</div><div>Run an action on one or more servers and it will show up here.</div></td></tr>{% endfor %}
+  {% empty %}<tr><td colspan="7" class="empty">{% icon "activity" 28 %}<div class="empty-title">Nothing has run yet</div><div>Runs of your automations and one-off jobs show up here.</div></td></tr>{% endfor %}
   </tbody>
 </table></div></div>
 {% include "partials/pagination.html" %}

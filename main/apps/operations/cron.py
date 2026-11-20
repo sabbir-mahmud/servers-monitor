@@ -115,3 +115,38 @@ class Cron:
 
 def validate(expression: str) -> str:
     return Cron(expression).expression
+
+
+DAY_NAMES = {"0": "Sun", "7": "Sun", "1": "Mon", "2": "Tue", "3": "Wed", "4": "Thu",
+             "5": "Fri", "6": "Sat"}  # fmt: skip
+
+
+def describe(expr: str) -> str:
+    """A few words for the usual shapes ("daily 03:00", "Mon 02:30", "every 15 min");
+    the expression itself for anything else."""
+    expr = (expr or "").strip()
+    words = {"@hourly": "hourly", "@daily": "daily 00:00", "@midnight": "daily 00:00",
+             "@weekly": "weekly", "@monthly": "monthly", "@yearly": "yearly",
+             "@annually": "yearly"}  # fmt: skip
+    if expr.lower() in words:
+        return words[expr.lower()]
+    parts = expr.split()
+    if len(parts) != 5:
+        return expr
+    minute, hour, day, month, weekday = (p.lower() for p in parts)
+    if minute.startswith("*/") and hour == day == month == weekday == "*":
+        return f"every {minute[2:]} min"
+    if minute.isdigit() and hour == "*" and day == month == weekday == "*":
+        return f"hourly at :{int(minute):02d}"
+    if not (minute.isdigit() and hour.isdigit()) or month != "*":
+        return expr
+    at = f"{int(hour):02d}:{int(minute):02d}"
+    if day == "*" and weekday == "*":
+        return f"daily {at}"
+    if day == "*" and (weekday in DAY_NAMES or weekday[:3] in NAMES["weekday"]):
+        return f"{DAY_NAMES.get(weekday, weekday[:3].title())} {at}"
+    if weekday == "*" and day.isdigit():
+        return f"monthly, day {day} {at}"
+    if day == "*" and weekday == "1-5":
+        return f"weekdays {at}"
+    return expr

@@ -351,16 +351,14 @@
         <button class="btn btn-outline-danger">Run</button></div>
       <div class="form-text">Runs as the agent user. Every command is audited.</div>
     </form>
-    <div class="script-strip">
-      <span class="task-title">Scripts</span>
-      {% for s in scripts %}<a class="chip" href="{% url 'operations:script_run' s.pk %}?server={{ server.pk }}">{% icon "code" 12 %} {{ s.name }}</a>{% endfor %}
-      <a class="chip chip-ghost" href="{% if scripts %}{% url 'operations:script_list' %}{% else %}{% url 'operations:script_create' %}{% endif %}">{% if scripts %}All scripts →{% else %}{% icon "plus" 12 %} New script{% endif %}</a>
-    </div>
   {% endif %}
-  {% if server.apps and perms.deploys.view_project %}
+  {% if automations or server.apps or perms.automations.add_automation %}
     <div class="script-strip">
-      <span class="task-title">Git apps</span>
-      {% for a in server.apps %}{% with p=deploy_projects|get_item:a.name %}<a class="chip" {% if p %}href="{% url 'deploys:project' p.pk %}"{% endif %} title="{{ a.repo }} · {{ a.branch }}">{% icon "git-branch" 12 %} {{ a.name }} <span class="mono">{{ a.sha|slice:":7"|default:"not deployed" }}</span></a>{% endwith %}{% endfor %}
+      <span class="task-title">Automations</span>
+      {% for a in automations %}<a class="chip" href="{% url 'automations:run_now' a.pk %}?server={{ server.pk }}" title="Run {{ a.name }} here">{% if a.kind == "deploy" %}{% icon "rocket" 12 %}{% elif a.kind == "script" %}{% icon "code" 12 %}{% else %}{% icon "play" 12 %}{% endif %} {{ a.name }}</a>{% endfor %}
+      {% for x in server.apps %}{% if not deploy_automations|get_item:x.name %}<span class="chip" title="{{ x.repo }} · {{ x.branch }}: no automation deploys it yet">{% icon "git-branch" 12 %} {{ x.name }} <span class="mono">{{ x.sha|slice:":7"|default:"not deployed" }}</span></span>{% endif %}{% endfor %}
+      {% if perms.automations.add_automation %}<a class="chip chip-ghost" href="{% url 'automations:create' %}?server={{ server.pk }}">{% icon "plus" 12 %} New</a>{% endif %}
+      {% if automations %}<a class="chip chip-ghost" href="{% url 'automations:list' %}">All →</a>{% endif %}
     </div>
   {% endif %}
   <div id="action-output" class="mt-3"></div>

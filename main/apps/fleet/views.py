@@ -208,6 +208,30 @@ class ServerDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
     def get_queryset(self):
         return super().get_queryset().prefetch_related("groups")
 
+    def _automations(self, server) -> list:
+        """Automations that run here (saved targets) or can be pointed here (no saved
+        targets), that this person may start."""
+        from apps.automations.models import Automation
+        from apps.automations.views import may_run
+
+        user = self.request.user
+        if not user.has_perm("automations.view_automation"):
+            return []
+        group_ids = {g.pk for g in server.groups.all()}
+        found = []
+        for a in (
+            scoped(self.request, Automation)
+            .filter(is_enabled=True)
+            .prefetch_related("servers", "groups")[:200]
+        ):
+            saved = {s.pk for s in a.servers.all()}
+            groups = {g.pk for g in a.groups.all()}
+            here = server.pk in saved or groups & group_ids or server.environment in a.environments
+            if (here or not (saved or groups or a.environments)) and may_run(user, a):
+                a.targets_here = bool(here)
+                found.append(a)
+        return sorted(found, key=lambda a: (not a.targets_here, a.name))[:12]
+
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         server = self.object
@@ -228,11 +252,7 @@ class ServerDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
             from apps.operations.ssh_logins import mine
 
             ssh_logins = list(mine(self.request).filter(server=server))
-        scripts = []
-        if can_shell and server.shell_enabled and not self.request.htmx:
-            from apps.operations.models import Script
-
-            scripts = list(scoped(self.request, Script).only("pk", "name", "interpreter")[:12])
+        automations = [] if self.request.htmx else self._automations(server)
         from apps.operations import server_tasks
 
         user = self.request.user
@@ -254,8 +274,8 @@ class ServerDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
             can_operate=self.request.user.has_perm("operations.add_job"),
             can_shell=can_shell,
             ssh_logins=ssh_logins,
-            scripts=scripts,
-            deploy_projects={p.app: p for p in server.deploy_projects.all()} if server.apps else {},
+            automations=automations,
+            deploy_automations={a.app: a for a in automations if a.kind == "deploy"},
             can_admin=self.request.user.has_perm("fleet.change_server"),
             maintenance_window=maintenance.coverage(account=server.account_id).window_for_server(
                 server.pk

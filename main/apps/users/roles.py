@@ -23,9 +23,8 @@ VIEW = [
     "alerts.view_alert",
     "monitors.view_monitor",
     "alerts.view_maintenancewindow",
-    "operations.view_schedule",
-    "deploys.view_project",
-    "deploys.view_deployment",
+    "automations.view_automation",
+    "automations.view_run",
 ]
 OPERATE = [
     "operations.add_job",
@@ -37,7 +36,7 @@ OPERATE = [
     "alerts.delete_maintenancewindow",
     "status.add_statusincident",
     "status.change_statusincident",
-    "deploys.add_deployment",  # deploy now, redeploy an earlier commit
+    "automations.add_run",  # run now, redeploy an earlier commit
 ]
 ADMINISTER = [
     "fleet.add_server",
@@ -53,17 +52,14 @@ ADMINISTER = [
     "monitors.add_monitor",
     "monitors.delete_monitor",
     "operations.run_shell",
-    "operations.add_schedule",
-    "operations.change_schedule",
-    "operations.delete_schedule",
     "audit.view_auditlog",
     "users.view_user",
     "users.add_user",
     "users.change_user",
-    "deploys.add_project",
-    "deploys.change_project",
-    "deploys.delete_project",
-    "deploys.approve_deployment",
+    "automations.add_automation",
+    "automations.change_automation",
+    "automations.delete_automation",
+    "automations.approve_run",
 ]
 
 ROLE_MATRIX = {
