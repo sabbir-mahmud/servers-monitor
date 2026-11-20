@@ -105,7 +105,8 @@ All commands except `--help` need `sudo`.
 | `smctl action rm NAME` | Remove it. |
 | `smctl run NAME -- CMD ARGS…` | Run a cron job and report start, success or failure (with its exit code) to the Heartbeat monitor called NAME. Exits with the job's own code. |
 | `smctl ping NAME [--fail] [--start] [--exit-code N]` | Report a job's heartbeat from your own script. |
-| `smctl shell on\|off` | Allow or forbid free-form shell from the dashboard. |
+| `smctl shell on\|off` | Allow or forbid free-form shell from the dashboard (also what saved Scripts run through). |
+| `smctl tasks on\|off [TASK…]` / `smctl tasks list` | Turn server tasks (`updates`, `upgrade`, `cleanup`, `reboot`) on or off; no names means all. |
 | `smctl docker enable\|disable` | Let the agent see Docker containers. **The docker group is root-equivalent.** |
 | `smctl probes on\|off` | Let the dashboard run HTTP/TCP uptime checks from this server (off by default). |
 | `smctl connect` | Install new relay credentials after a rotation (pasted at a hidden prompt). |
@@ -204,6 +205,31 @@ command and arguments, validated with `visudo`. Arguments with spaces, quotes or
 special characters (`, : = \ * ?`) are refused: put that logic in a script instead.
 Restartable systemd services get the same treatment (`systemctl restart <unit>`), and unit
 names are restricted to letters, digits and `_ . : @ -`.
+
+## Server tasks: updates, upgrades, cleanup, reboot
+
+Routine maintenance, one click on the server's page (or as a schedule, e.g. a weekly
+cleanup). Each server opts in, per task:
+
+```bash
+sudo smctl tasks on                    # all four
+sudo smctl tasks on updates cleanup    # or just some
+sudo smctl tasks list                  # what's on, and the package manager found
+```
+
+| Task | What runs (apt shown; dnf, yum, zypper, apk and pacman have their equivalents) | Who |
+|---|---|---|
+| `updates` | `apt-get update`, then `apt list --upgradable`. Changes nothing installed. | Operator+ |
+| `upgrade` | `apt-get update`, then `apt-get -y upgrade`, keeping changed config files. Says if a reboot is needed. | Admin |
+| `cleanup` | `apt-get autoremove`, `apt-get clean`, `journalctl --vacuum-time=14d` | Admin |
+| `reboot` | `shutdown -r +1`: in one minute, so the result reaches the dashboard first | Admin |
+
+The dashboard sends only the task's name. The agent runs `sudo -n /usr/local/bin/smctl task
+<name>` under one exact sudo rule per enabled task, and `smctl` checks the config again as
+root before doing anything, so a leftover sudo rule does nothing. Nothing waits for input
+(`DEBIAN_FRONTEND=noninteractive`; `needrestart` only lists services). Servers whose
+package lists say a reboot is pending (`/var/run/reboot-required`) show **Reboot needed**.
+Needs agent 2.3.0.
 
 ## Upgrading and re-keying
 

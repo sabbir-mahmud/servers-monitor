@@ -52,7 +52,7 @@ from pathlib import Path
 
 import psutil
 
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 NET_TIMEOUT = 20  # seconds for a single non-blocking Redis round trip
 MAX_BLOCK = 120  # longest BLPOP wait (Upstash holds 110 s+); heartbeats go between waits
 MAX_CHUNK = 60 * 1024  # main accepts 64 KiB per progress message
@@ -119,9 +119,27 @@ class Config:
     shell_enabled: bool = False
     shell_timeout: int = 120
     use_sudo_for_restart: bool = True
+    # Server tasks ([tasks] enabled = [...]): routine maintenance run as root through
+    # `sudo -n smctl task <name>`, an exact sudo rule per task that `smctl tasks on` writes.
+    tasks: list[str] = field(default_factory=list)
 
 
-BUILTIN_NAMES = {"tail_log", "tail_follow", "restart_service", "shell", "_upgrade"}
+# Server tasks and how long each may take (seconds). smctl does the work, as root, after
+# checking the same config; nothing from the dashboard but the task's name reaches it.
+TASKS = {"updates": 900, "upgrade": 3600, "cleanup": 900, "reboot": 60}
+SMCTL_BIN = "/usr/local/bin/smctl"
+PACKAGE_MANAGERS = ("apt-get", "dnf", "yum", "zypper", "apk", "pacman")
+
+
+def package_manager() -> str:
+    """The first package manager found here (what `smctl task` would use), or ""."""
+    for name in PACKAGE_MANAGERS:
+        if shutil.which(name):
+            return "apt" if name == "apt-get" else name
+    return ""
+
+
+BUILTIN_NAMES = {"tail_log", "tail_follow", "restart_service", "shell", "_upgrade", "_task"}
 SERVICE_KINDS = {"systemd", "docker", "pm2", "process", "http"}
 
 
@@ -182,6 +200,10 @@ def load_config(path: str | Path) -> Config:
         probes=bool(raw.get("probes", {}).get("enabled", False)),
         docker_names=bool(raw.get("docker", {}).get("names", False)),
     )
+    tasks = raw.get("tasks", {}).get("enabled", [])
+    if not isinstance(tasks, list) or any(t not in TASKS for t in tasks):
+        raise ConfigError(f"tasks.enabled must be a list of: {', '.join(TASKS)}")
+    cfg.tasks = sorted(set(tasks))
 
     for name, svc in raw.get("services", {}).items():
         kind = svc.get("kind", "systemd")
@@ -495,6 +517,10 @@ class Collector:
             ],
             "logs": sorted(self.cfg.logs),
             "shell": self.cfg.shell_enabled,
+            "tasks": list(self.cfg.tasks),
+            "package_manager": package_manager(),
+            # Debian/Ubuntu leave this file after updates that need one (kernel, libc…).
+            "reboot_required": os.path.exists("/var/run/reboot-required"),
         }
 
     def report(self) -> dict:
@@ -650,6 +676,16 @@ def plan_command(cfg: Config, action: str, args: dict, command_id: str = "") -> 
         else:
             raise Rejected(f"service {name!r} ({svc.kind}) needs an explicit restart_command")
         return Plan(argv=argv, timeout=120)
+    if action == "_task":
+        task = str(args.get("task", ""))
+        if task not in TASKS:
+            raise Rejected(f"unknown server task {task!r}")
+        if task not in cfg.tasks:
+            raise Rejected(f"the {task!r} task is off on this server (sudo smctl tasks on {task})")
+        argv = [SMCTL_BIN, "task", task]
+        if os.geteuid() != 0:
+            argv = ["sudo", "-n", *argv]
+        return Plan(argv=argv, timeout=TASKS[task])
     if action == "shell":
         if not cfg.shell_enabled:
             raise Rejected("free-form shell is disabled on this server ([shell] enabled = false)")
@@ -1483,7 +1519,7 @@ CGROUP_GLOBS = (
 )
 CONTAINER_ID_RE = re.compile(r"(?:docker-|libpod-|/docker/)([0-9a-f]{64})")
 # What this agent can do, so the dashboard only offers features it supports.
-FEATURES = ["job_ping", "inventory", "log_follow"]
+FEATURES = ["job_ping", "inventory", "log_follow", "tasks"]
 
 JOB_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
 

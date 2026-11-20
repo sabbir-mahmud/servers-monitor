@@ -71,7 +71,13 @@ class Job(models.Model):
     @property
     def summary(self) -> str:
         if self.action == "shell":
+            if self.args.get("script"):
+                return f"script {self.args['script']}"
             return self.args.get("command", "")[:80]
+        if self.action == "_task":
+            from .server_tasks import label
+
+            return label(self.args.get("task", "")).lower()
         if self.action == "_upgrade":
             return f"upgrade agent to {self.args.get('ref', '?')}"
         if self.action == "tail_follow":
@@ -266,3 +272,60 @@ class SshLogin(models.Model):
     @property
     def target(self) -> str:
         return f"{self.username}@{self.host}" + ("" if self.port == 22 else f":{self.port}")
+
+
+class Interpreter(models.TextChoices):
+    BASH = "bash", "Bash"
+    SH = "sh", "POSIX sh"
+    PYTHON = "python3", "Python 3"
+
+
+class Script(models.Model):
+    """A script the account keeps here and runs on servers as a job.
+
+    It travels as an ordinary free-form shell command (the `shell` action), so it runs
+    only on servers whose agent has shell turned on, as the agent user (not root), and
+    only for people allowed to run shell (Owner, Admin). Each run is a job: audited, with
+    output per server."""
+
+    MAX_BODY = 16000
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    account = models.ForeignKey("tenants.Account", on_delete=models.CASCADE, related_name="+")
+    name = models.CharField(max_length=100)
+    description = models.CharField(max_length=200, blank=True)
+    interpreter = models.CharField(
+        max_length=10, choices=Interpreter.choices, default=Interpreter.BASH
+    )
+    body = models.TextField()
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(fields=["account", "name"], name="script_name_per_account"),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def line_count(self) -> int:
+        return len(self.body.splitlines())
+
+    def command(self) -> str:
+        """The shell command that runs this script (the agent runs it with /bin/sh -c).
+        Quoted whole, so nothing in the body can break out of its interpreter."""
+        import shlex
+
+        body = self.body.replace("\r\n", "\n")
+        if self.interpreter == Interpreter.SH:
+            return body
+        return f"exec {self.interpreter} -c {shlex.quote(body)} {shlex.quote(self.name)}"

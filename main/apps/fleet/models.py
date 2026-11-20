@@ -217,6 +217,23 @@ class Server(Machine):
     def shell_enabled(self) -> bool:
         return bool(self.capabilities.get("shell"))
 
+    @property
+    def supports_tasks(self) -> bool:
+        """Agent 2.3+ knows server tasks (whether or not any are turned on)."""
+        return "tasks" in (self.capabilities.get("features") or [])
+
+    @property
+    def tasks_enabled(self) -> list[str]:
+        return list(self.capabilities.get("tasks") or [])
+
+    @property
+    def package_manager(self) -> str:
+        return self.capabilities.get("package_manager") or ""
+
+    @property
+    def reboot_required(self) -> bool:
+        return bool(self.capabilities.get("reboot_required"))
+
 
 class MetricSample(models.Model):
     """One heartbeat's numbers. Pruned after MONITOR_METRIC_RETENTION_DAYS."""

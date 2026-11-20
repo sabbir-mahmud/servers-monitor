@@ -185,3 +185,71 @@ def test_run_still_exits_with_the_job_code_when_the_ping_fails(env, monkeypatch)
     with pytest.raises(SystemExit) as done:
         smctl.main(["run", "backup", "--", sys.executable, "-c", "pass"])
     assert done.value.code == 0
+
+
+# --------------------------------------------------------------------------- server tasks
+
+
+def test_tasks_on_writes_config_and_one_exact_sudo_rule_each(env, tmp_path):
+    assert smctl.main(["tasks", "on", "updates", "reboot"]) == 0
+    assert read(env)["tasks"]["enabled"] == ["reboot", "updates"]
+    rules = (tmp_path / "sudoers").read_text()
+    assert f"NOPASSWD: {smctl.SMCTL_BIN} task reboot\n" in rules
+    assert f"NOPASSWD: {smctl.SMCTL_BIN} task updates\n" in rules
+    assert "task upgrade" not in rules
+    assert smctl.main(["tasks", "off", "reboot"]) == 0
+    assert "task reboot" not in (tmp_path / "sudoers").read_text()
+    assert smctl.main(["tasks", "on", "rm-rf"]) == 1  # only known tasks
+    assert smctl.main(["tasks", "on"]) == 0  # no names: all of them
+    assert read(env)["tasks"]["enabled"] == sorted(smctl.TASKS)
+
+
+def test_task_refuses_unless_enabled(env, monkeypatch):
+    ran = []
+    monkeypatch.setattr(smctl.subprocess, "run", lambda argv, **kw: ran.append(argv))
+    assert smctl.main(["task", "upgrade"]) == 1 and not ran
+
+
+def test_task_runs_the_package_managers_steps(env, monkeypatch, capsys):
+    smctl.main(["tasks", "on", "upgrade"])
+    ran = []
+
+    class Done:
+        returncode = 0
+
+    def fake_run(argv, **kw):
+        ran.append((argv, kw["env"]))
+        return Done()
+
+    monkeypatch.setattr(smctl.subprocess, "run", fake_run)
+    monkeypatch.setattr(smctl, "reboot_hint", lambda: "A reboot is needed to finish.")
+    assert smctl.main(["task", "upgrade"]) == 0
+    argvs = [a for a, _ in ran]
+    assert argvs[0][:1] == ["apt-get"] and "update" in argvs[0]
+    assert "upgrade" in argvs[1] and "-y" in argvs[1] and "Dpkg::Options::=--force-confold" in argvs[1]
+    assert ran[1][1]["DEBIAN_FRONTEND"] == "noninteractive"
+    out = capsys.readouterr().out
+    assert "Upgrading packages" in out and "reboot is needed" in out
+
+
+def test_task_stops_at_a_failing_step(env, monkeypatch):
+    smctl.main(["tasks", "on", "cleanup"])
+
+    class Failed:
+        returncode = 100
+
+    monkeypatch.setattr(smctl.subprocess, "run", lambda argv, **kw: Failed())
+    assert smctl.main(["task", "cleanup"]) == 1
+
+
+def test_task_steps_per_package_manager():
+    which = lambda name: f"/usr/bin/{name}"  # noqa: E731
+    for pm in ("apt", "dnf", "yum", "zypper", "apk", "pacman"):
+        for task in ("updates", "upgrade", "cleanup"):
+            assert smctl.task_steps(task, pm, which=which)
+    dnf = smctl.task_steps("updates", "dnf", which=which)
+    assert 100 in dnf[0][2]  # check-update exits 100 when there are updates
+    reboot = smctl.task_steps("reboot", "", which=which)
+    assert reboot[0][1][:3] == ["shutdown", "-r", "+1"]  # scheduled: the result gets home
+    with pytest.raises(smctl.Fail):
+        smctl.task_steps("upgrade", "", which=which)

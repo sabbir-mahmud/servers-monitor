@@ -3,6 +3,9 @@ everything is bounded so one misbehaving agent can't bloat the servers table."""
 
 import math
 
+from apps.operations.server_tasks import TASKS
+
+TASK_NAMES = set(TASKS)
 MAX_SERVICES = 100
 MAX_DISKS = 32
 MAX_ACTIONS = 100
@@ -146,6 +149,9 @@ def clean_report(data) -> dict:
             "actions": actions,
             "logs": logs,
             "shell": bool(caps.get("shell")),
+            "tasks": [t for t in (caps.get("tasks") or [])[:8] if t in TASK_NAMES],
+            "package_manager": _str(caps.get("package_manager"), 16),
+            "reboot_required": bool(caps.get("reboot_required")),
             "features": [
                 _str(f, 32) for f in (caps.get("features") or [])[:32] if isinstance(f, str)
             ],

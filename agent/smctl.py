@@ -15,6 +15,7 @@ it. The dashboard shows the result on the next heartbeat.
   sudo smctl service add api --unit gunicorn-api --restartable
   sudo smctl log add api /var/www/api/logs/app.log
   sudo smctl action add deploy --sudo -- /opt/deploy/deploy.sh
+  sudo smctl tasks on [updates upgrade cleanup reboot]   one-click server tasks
   sudo smctl connect 'rediss://sm-...'      install rotated credentials
   sudo smctl upgrade | uninstall
 
@@ -52,7 +53,7 @@ NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 # read as syntax (`,` separates commands, spaces add arguments, `!` negates, `*` globs).
 UNIT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
 SERVICE_KINDS = ("systemd", "docker", "pm2", "process", "http")
-RESERVED = {"tail_log", "tail_follow", "restart_service", "shell", "_upgrade"}
+RESERVED = {"tail_log", "tail_follow", "restart_service", "shell", "_upgrade", "_task"}
 STATE_DIR = Path(os.environ.get("SMCTL_STATE", "/var/lib/server-monitor-agent"))
 UPGRADE_REQUEST = STATE_DIR / "upgrade-request.json"
 UPGRADE_UNITS = ("server-monitor-upgrade.path", "server-monitor-upgrade.service")
@@ -61,6 +62,16 @@ REF_RE = re.compile(r"^v\d{1,4}\.\d{1,4}\.\d{1,4}$")
 SUM_RE = re.compile(r"^[0-9a-f]{64}$")
 COMMAND_ID_RE = re.compile(r"^[0-9a-f-]{36}$")
 UPGRADE_FILES = ("install", "agent", "smctl", "unit", "upath", "uservice")
+# Where install.sh puts this file. Server tasks run as root through an exact sudo rule for
+# `<SMCTL_BIN> task <name>`, so this path must stay root-owned.
+SMCTL_BIN = Path(os.environ.get("SMCTL_BIN", "/usr/local/bin/smctl"))
+TASKS = {
+    "updates": "Check for package updates",
+    "upgrade": "Upgrade all packages",
+    "cleanup": "Remove unused packages, clear package caches, trim old journal logs",
+    "reboot": "Reboot the server (one minute after it's asked)",
+}
+PACKAGE_MANAGERS = ("apt-get", "dnf", "yum", "zypper", "apk", "pacman")
 
 HEADER = """\
 # Server Monitor agent: the allowlist for this server. Managed by `smctl`.
@@ -259,6 +270,8 @@ def sudo_rules(data: dict) -> list[str]:
         argv = act.get("command") or []
         if len(argv) > 2 and argv[:2] == ["sudo", "-n"]:
             cmds.append(" ".join(argv[2:]))
+    for task in enabled_tasks(data):  # names from TASKS only: nothing user-typed
+        cmds.append(f"{SMCTL_BIN} task {task}")
     return sorted(set(cmds))
 
 
@@ -284,6 +297,178 @@ def sync_sudoers(data: dict) -> None:
             raise Fail(f"generated sudoers did not validate, nothing changed: {out}")
     os.replace(tmp, SUDOERS)
     ok(f"sudo rules updated ({len(rules)} command{'s' if len(rules) != 1 else ''})")
+
+
+# --------------------------------------------------------------------------- server tasks
+
+
+def enabled_tasks(data: dict) -> list[str]:
+    tasks = data.get("tasks", {}).get("enabled", [])
+    return sorted(t for t in tasks if t in TASKS) if isinstance(tasks, list) else []
+
+
+def package_manager(which=None) -> str:
+    which = which or shutil.which
+    for name in PACKAGE_MANAGERS:
+        if which(name):
+            return "apt" if name == "apt-get" else name
+    return ""
+
+
+Step = tuple[str, list[str], frozenset]  # (what it does, argv, exit codes that mean OK)
+OK = frozenset({0})
+
+APT = ["apt-get", "-q", "-o", "DPkg::Lock::Timeout=300"]  # wait out unattended-upgrades
+APT_KEEP_CONFIG = ["-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold"]
+
+
+def task_steps(task: str, pm: str, which=None) -> list[Step]:
+    """What `task` runs with package manager `pm`, in order. Pure, so it can be tested."""
+    which = which or shutil.which
+    if task == "reboot":
+        if not which("shutdown"):
+            raise Fail("no shutdown command on this server")
+        # Scheduled, not immediate: the result reaches the dashboard before the reboot.
+        return [("Scheduling a reboot in one minute",
+                 ["shutdown", "-r", "+1", "NexGuard: reboot requested from the dashboard"], OK)]  # fmt: skip
+    steps: dict[str, dict[str, list[Step]]] = {
+        "apt": {
+            "updates": [("Refreshing package lists", [*APT, "update"], OK),
+                        ("Packages with updates", ["apt", "list", "--upgradable"], OK)],
+            "upgrade": [("Refreshing package lists", [*APT, "update"], OK),
+                        ("Upgrading packages", [*APT, "-y", *APT_KEEP_CONFIG, "upgrade"], OK)],
+            "cleanup": [("Removing packages nothing needs", [*APT, "-y", "autoremove"], OK),
+                        ("Clearing the package cache", [*APT, "clean"], OK)],
+        },
+        "dnf": {
+            "updates": [("Packages with updates", ["dnf", "-q", "check-update"], frozenset({0, 100}))],
+            "upgrade": [("Upgrading packages", ["dnf", "-y", "upgrade"], OK)],
+            "cleanup": [("Removing packages nothing needs", ["dnf", "-y", "autoremove"], OK),
+                        ("Clearing the package cache", ["dnf", "clean", "all"], OK)],
+        },
+        "yum": {
+            "updates": [("Packages with updates", ["yum", "-q", "check-update"], frozenset({0, 100}))],
+            "upgrade": [("Upgrading packages", ["yum", "-y", "update"], OK)],
+            "cleanup": [("Removing packages nothing needs", ["yum", "-y", "autoremove"], OK),
+                        ("Clearing the package cache", ["yum", "clean", "all"], OK)],
+        },
+        "zypper": {
+            "updates": [("Refreshing repositories", ["zypper", "-n", "refresh"], OK),
+                        ("Packages with updates", ["zypper", "-n", "list-updates"], OK)],
+            "upgrade": [("Refreshing repositories", ["zypper", "-n", "refresh"], OK),
+                        ("Upgrading packages", ["zypper", "-n", "update"], OK)],
+            "cleanup": [("Clearing the package cache", ["zypper", "-n", "clean", "--all"], OK)],
+        },
+        "apk": {
+            "updates": [("Refreshing package lists", ["apk", "update"], OK),
+                        ("Packages with updates", ["apk", "version", "-l", "<"], OK)],
+            "upgrade": [("Refreshing package lists", ["apk", "update"], OK),
+                        ("Upgrading packages", ["apk", "upgrade"], OK)],
+            "cleanup": [("Clearing the package cache", ["apk", "cache", "clean"], frozenset({0, 1}))],
+        },
+        "pacman": {
+            # checkupdates uses a copy of the sync database, so it never half-updates the
+            # system (pacman -Sy alone would). Exit 2 = nothing to update.
+            "updates": [("Packages with updates", ["checkupdates"], frozenset({0, 2}))]
+            if which("checkupdates")
+            else [("Packages with updates (from the last sync)", ["pacman", "-Qu"], frozenset({0, 1}))],
+            "upgrade": [("Upgrading packages", ["pacman", "-Syu", "--noconfirm"], OK)],
+            "cleanup": [("Clearing the package cache", ["pacman", "-Sc", "--noconfirm"], OK)],
+        },
+    }  # fmt: skip
+    if not pm:
+        raise Fail(f"no supported package manager found ({', '.join(PACKAGE_MANAGERS)})")
+    plan = list(steps[pm][task])
+    if task == "cleanup" and which("journalctl"):
+        plan.append(("Trimming journal logs older than 14 days",
+                     ["journalctl", "--vacuum-time=14d"], OK))  # fmt: skip
+    return plan
+
+
+def _task_env() -> dict:
+    env = {k: v for k, v in os.environ.items() if k in ("PATH", "LANG", "LC_ALL", "HOME")}
+    env.setdefault("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+    # Never stop to ask: there is nobody at a terminal. Keep changed config files as they
+    # are, and only list (not restart) services that need a restart after an upgrade.
+    env.update(DEBIAN_FRONTEND="noninteractive", APT_LISTCHANGES_FRONTEND="none",
+               NEEDRESTART_MODE="l", NEEDRESTART_SUSPEND="1")  # fmt: skip
+    return env
+
+
+def _say(text: str) -> None:
+    print(text, flush=True)  # the agent streams this to the dashboard as it comes
+
+
+def reboot_hint(which=None, exists=None) -> str:
+    which, exists = which or shutil.which, exists or os.path.exists
+    if exists("/var/run/reboot-required"):
+        pkgs = ""
+        try:
+            pkgs = Path("/var/run/reboot-required.pkgs").read_text().split()
+        except OSError:
+            pass
+        return (
+            "A reboot is needed to finish"
+            + (f" ({', '.join(sorted(set(pkgs))[:8])})" if pkgs else "")
+            + "."
+        )
+    if which("needs-restarting"):
+        code, _ = run(["needs-restarting", "-r"], timeout=60)
+        if code == 1:
+            return "A reboot is needed to finish (needs-restarting)."
+    return ""
+
+
+def cmd_task(opts) -> None:
+    """Run one server task, as root. The agent calls this through sudo (an exact rule per
+    enabled task); it re-checks the config, so a rule left behind does nothing."""
+    need_root()
+    task = opts.task
+    if task not in enabled_tasks(load()):
+        raise Fail(f"the {task!r} task is off on this server (sudo smctl tasks on {task})")
+    pm = "" if task == "reboot" else package_manager()
+    steps = task_steps(task, pm)
+    env = _task_env()
+    _say(f"{TASKS[task]}" + (f" with {pm}" if pm else "") + f" on {os.uname().nodename}")
+    for title, argv, ok_codes in steps:
+        _say(f"\n== {title}\n$ {shlex.join(argv)}")
+        try:
+            code = subprocess.run(argv, stdin=subprocess.DEVNULL, env=env, check=False).returncode
+        except FileNotFoundError:
+            raise Fail(f"{argv[0]}: not found") from None
+        if code not in ok_codes:
+            raise Fail(f"{title.lower()} failed (exit {code})")
+    if task == "upgrade" and (hint := reboot_hint()):
+        _say(f"\n{hint} Use the Reboot task when it suits you.")
+    _say("\nDone.")
+
+
+def cmd_tasks(opts) -> None:
+    """Turn server tasks on or off (all of them, or the ones named)."""
+    data = load()
+    current = set(enabled_tasks(data))
+    if opts.state == "list":
+        pm = package_manager() or "none found"
+        head(f"Server tasks (package manager: {pm})")
+        for name, what in TASKS.items():
+            state = _c("32", "on ") if name in current else dim("off")
+            print(f"  {state} {name:<9} {dim(what)}")
+        return
+    names = opts.names or list(TASKS)
+    for name in names:
+        if name not in TASKS:
+            raise Fail(f"unknown task {name!r}: choose from {', '.join(TASKS)}")
+    if opts.state == "on":
+        current |= set(names)
+        if {"upgrade", "reboot"} & set(names):
+            warn("dashboard Admins can now upgrade packages and reboot this server, as root")
+        if not SMCTL_BIN.exists():
+            warn(f"{SMCTL_BIN} is missing: re-run the installer so the sudo rules work")
+    else:
+        current -= set(names)
+    data["tasks"] = {"enabled": sorted(current)}
+    save(data)
+    ok(f"server tasks on: {', '.join(sorted(current)) or 'none'}")
 
 
 # --------------------------------------------------------------------------- detection
@@ -502,6 +687,8 @@ def cmd_list(opts) -> None:
         print(dim("  none: sudo smctl action add deploy -- /opt/deploy/deploy.sh"))
     shell = data.get("shell", {}).get("enabled", False)
     print(_c("1", "\nFree-form shell: ") + ("on" if shell else "off"))
+    tasks = enabled_tasks(data)
+    print(_c("1", "Server tasks: ") + (", ".join(tasks) if tasks else "off (sudo smctl tasks on)"))
 
 
 def cmd_service(opts) -> None:
@@ -1152,6 +1339,13 @@ def build_parser() -> argparse.ArgumentParser:
     sh = sub.add_parser("shell", help="allow or forbid free-form shell from the dashboard")
     sh.add_argument("state", choices=["on", "off"])
     sh.set_defaults(fn=cmd_shell)
+    tk = sub.add_parser("tasks", help="one-click server tasks: updates, upgrade, cleanup, reboot")
+    tk.add_argument("state", choices=["on", "off", "list"])
+    tk.add_argument("names", nargs="*", metavar="TASK", help=f"default: all ({', '.join(TASKS)})")
+    tk.set_defaults(fn=cmd_tasks)
+    tr = sub.add_parser("task", help=argparse.SUPPRESS)  # run by the agent through sudo
+    tr.add_argument("task", choices=list(TASKS))
+    tr.set_defaults(fn=cmd_task)
     pr = sub.add_parser("probes", help="run uptime checks for the dashboard from this server")
     pr.add_argument("state", choices=["on", "off"])
     pr.set_defaults(fn=cmd_probes)

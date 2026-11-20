@@ -90,6 +90,12 @@ timeout = 30
 # command = ["sudo", "-n", "/usr/bin/unattended-upgrade", "-v"]
 # timeout = 1800
 
+# ---------------------------------------------------------------- server tasks
+# One-click maintenance from the dashboard, run as root through `smctl task <name>`
+# (one exact sudo rule per task). `sudo smctl tasks on [updates upgrade cleanup reboot]`.
+# [tasks]
+# enabled = ["updates", "cleanup"]
+
 # ---------------------------------------------------------------- probes
 # Let the dashboard run HTTP/TCP uptime checks from this server (internal URLs included;
 # cloud metadata never). Results ride on heartbeats. `sudo smctl probes on`.

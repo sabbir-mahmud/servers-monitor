@@ -13,10 +13,22 @@ names); upgrading gets the relay backlog fixes below.
 
 ### Added
 
+- **Server tasks** (**agents must be upgraded** to 2.3.0): check for updates, upgrade
+  packages, clean up and reboot from a server's page, from Run on servers, or on a
+  schedule. Works with apt, dnf, yum, zypper, apk and pacman. Each server opts in per task
+  (`sudo smctl tasks on`), which writes one exact sudo rule each; checking for updates is
+  open to Operators, the rest to Admins. Servers needing a reboot after updates say so.
+- **Scripts** (Scripts in the sidebar): write a Bash, sh or Python script once and run it
+  on chosen servers as a job, with output per server. Owner and Admin only; runs as the
+  agent user on servers with shell turned on; audited (`script.save`, `script.delete`).
+- **Saved SSH logins**: tick "Save this login" when connecting, and later connect in one
+  click from the Terminal page or the SSH menu on a server's page. The password or key is
+  stored encrypted (from `SECRET_KEY`), only after it worked, and is private to the person
+  who saved it; it's decrypted only to open the connection and never sent back to a
+  browser. Audited (`ssh.login_saved`, `ssh.login_removed`).
 - **SSH terminal in the browser** (Terminal in the sidebar, or SSH on a server's page):
   user, IP, port and a password or private key open an interactive terminal (xterm.js).
-  Owner and Admin only; credentials never stored; host keys trusted on first use per
-  account; audited (`ssh.open`, `ssh.close`, `ssh.failed`); idle and abandoned sessions
+  Owner and Admin only; host keys trusted on first use per account; audited (`ssh.open`, `ssh.close`, `ssh.failed`); idle and abandoned sessions
   close. New dependency: `paramiko`. New settings: `SSH_ALLOW_PRIVATE_TARGETS`,
   `SSH_IDLE_MINUTES`, `SSH_MAX_SESSIONS`.
 - **Device alerts**: a computer or phone not reporting for `DEVICE_OFFLINE_ALERT_HOURS`

@@ -239,3 +239,25 @@ def test_heartbeat_carries_its_send_time(cfg, monkeypatch):
     before = int(sma.time.time())
     assert agent.heartbeat()
     assert before <= relay.sent[-1]["at"] <= int(sma.time.time())
+
+
+def test_server_tasks_run_only_when_enabled_and_through_sudo(cfg, monkeypatch):
+    with pytest.raises(sma.Rejected, match="off on this server"):
+        sma.plan_command(cfg, "_task", {"task": "reboot"})
+    cfg.tasks = ["reboot", "upgrade"]
+    monkeypatch.setattr(sma.os, "geteuid", lambda: 999)
+    plan = sma.plan_command(cfg, "_task", {"task": "upgrade"})
+    assert plan.argv == ["sudo", "-n", sma.SMCTL_BIN, "task", "upgrade"]
+    assert plan.timeout == sma.TASKS["upgrade"]
+    with pytest.raises(sma.Rejected, match="unknown"):
+        sma.plan_command(cfg, "_task", {"task": "upgrade; rm -rf /"})
+
+
+def test_tasks_config_is_validated(tmp_path):
+    base = 'main.redis_url = "rediss://sm-srv1:tok@relay.test:6379"\n'
+    path = tmp_path / "a.toml"
+    path.write_text(base + 'tasks.enabled = ["updates", "reboot"]\n')
+    assert sma.load_config(path).tasks == ["reboot", "updates"]
+    path.write_text(base + 'tasks.enabled = ["format_disk"]\n')
+    with pytest.raises(sma.ConfigError):
+        sma.load_config(path)

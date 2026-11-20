@@ -26,12 +26,13 @@ def _relay():
 
 logger = logging.getLogger(__name__)
 
-BUILTIN_ACTIONS = {"tail_log", "tail_follow", "restart_service", "shell", "_upgrade"}
+BUILTIN_ACTIONS = {"tail_log", "tail_follow", "restart_service", "shell", "_upgrade", "_task"}
 UPGRADE_SECONDS = 1200  # download, verify, reinstall, restart, test heartbeat
 FOLLOW_SECONDS = 600  # the agent's own maximum too
 JOURNAL_PREFIX = "journal:"  # tail_follow of a systemd service's journal instead of a file
 MAX_TAIL_LINES = 2000
 MAX_SHELL_LENGTH = 4000
+MAX_SCRIPT_LENGTH = 20000  # a saved script, wrapped for its interpreter
 # Seconds past an action's timeout before a silent delivered command counts as lost.
 LOST_GRACE_SECONDS = 120
 FINAL_STATUSES = {CommandStatus.SUCCEEDED, CommandStatus.FAILED}
@@ -78,13 +79,22 @@ def clean_args(action: str, raw: dict) -> dict:
         if not name:
             raise JobError("Choose a service.")
         return {"name": name}
+    if action == "_task":
+        from .server_tasks import TASKS
+
+        task = str(raw.get("task", "")).strip()
+        if task not in TASKS:
+            raise JobError("Choose a server task.")
+        return {"task": task}
     if action == "shell":
         command = str(raw.get("command", "")).strip()
         if not command:
             raise JobError("Enter a command.")
-        if len(command) > MAX_SHELL_LENGTH:
-            raise JobError(f"Commands are limited to {MAX_SHELL_LENGTH} characters.")
-        return {"command": command}
+        script = str(raw.get("script") or "").strip()[:100]
+        limit = MAX_SCRIPT_LENGTH if script else MAX_SHELL_LENGTH
+        if len(command) > limit:
+            raise JobError(f"Commands are limited to {limit} characters.")
+        return {"command": command, **({"script": script} if script else {})}
     return {}  # custom actions take no arguments: their argv is fixed in the agent config
 
 
@@ -94,6 +104,15 @@ def reason_unavailable(server, action: str, args: dict) -> str | None:
         return "server disabled"
     if action == "shell":
         return None if server.shell_enabled else "shell disabled in agent config"
+    if action == "_task":
+        task = args.get("task")
+        if not server.supports_tasks:
+            return "agent too old for server tasks (upgrade it)"
+        if task not in server.tasks_enabled:
+            return f"the {task} task is off on the server (sudo smctl tasks on {task})"
+        if task != "reboot" and not server.package_manager:
+            return "no supported package manager on the server"
+        return None
     if action == "tail_log":
         return (
             None if args.get("name") in server.log_names else f"no log named {args.get('name')!r}"
@@ -124,7 +143,7 @@ def reason_unavailable(server, action: str, args: dict) -> str | None:
     return None if action in server.action_names else "action not offered by agent"
 
 
-def _timeout_for(server, action: str) -> int:
+def _timeout_for(server, action: str, args: dict | None = None) -> int:
     for spec in server.actions:
         if spec.get("name") == action:
             return int(spec.get("timeout") or 300)
@@ -132,6 +151,11 @@ def _timeout_for(server, action: str) -> int:
         return FOLLOW_SECONDS + 30
     if action == "_upgrade":
         return UPGRADE_SECONDS
+    if action == "_task":
+        from .server_tasks import TASKS
+
+        task = TASKS.get(args.get("task", "")) if args else None
+        return task.timeout if task else 900
     return 60 if action in ("tail_log", "restart_service") else 300
 
 
@@ -177,6 +201,11 @@ def create_job(
     if action == "_upgrade" and not (user and user.has_perm("fleet.change_server")):
         raise JobError("Only Admins can upgrade agents.")
     args = clean_args(action, raw_args)
+    if action == "_task":
+        from . import server_tasks
+
+        if not server_tasks.can_run(user, args["task"]):
+            raise JobError(f"Only Admins can run “{server_tasks.label(args['task'])}”.")
     eligible, skipped = [], []
     for server in servers:
         reason = reason_unavailable(server, action, args)
@@ -209,7 +238,7 @@ def create_job(
                 server=s,
                 action=action,
                 args=args,
-                timeout_seconds=_timeout_for(s, action),
+                timeout_seconds=_timeout_for(s, action, args),
                 deliver_by=deliver_by,
                 batch=i // batch_size if rolling else 0,
                 status=CommandStatus.WAITING

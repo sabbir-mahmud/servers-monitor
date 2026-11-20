@@ -4,8 +4,11 @@ from apps.fleet.models import Environment, Server, ServerGroup
 from apps.monitors.models import Monitor
 from apps.tenants.scoping import AccountFormMixin
 
+from . import server_tasks
 from .cron import CronError, validate
-from .models import Schedule, Strategy
+from .models import Schedule, Script, Strategy
+
+TASK_PREFIX = server_tasks.ACTION + ":"  # "_task:upgrade" in the action menu
 
 BUILTIN_LABELS = {
     "tail_log": "Read log (tail)",
@@ -71,6 +74,10 @@ class JobForm(AccountFormMixin, forms.Form):
         ]
         if user is not None and user.has_perm("operations.run_shell"):
             choices.append(("shell", BUILTIN_LABELS["shell"]))
+        tasks = [(TASK_PREFIX + t.key, t.label) for t in server_tasks.TASKS.values()
+                 if user is None or server_tasks.can_run(user, t.key)]  # fmt: skip
+        if tasks:
+            choices.append(("Server tasks", tasks))
         if custom:
             choices.append(("Agent actions", [(n, f"{n} — {d}") for n, d in custom]))
         self.fields["action"].choices = choices
@@ -88,10 +95,17 @@ class JobForm(AccountFormMixin, forms.Form):
         self.fields["action"].widget.attrs["class"] = "form-select"
         self.fields["command"].widget.attrs["class"] = "form-control font-monospace"
 
+    def clean(self):
+        data = super().clean()
+        action = data.get("action") or ""
+        if action.startswith(TASK_PREFIX):  # one menu entry per task, one action underneath
+            data["action"], data["task"] = server_tasks.ACTION, action.removeprefix(TASK_PREFIX)
+        return data
+
     def action_args(self) -> dict:
         d = self.cleaned_data
         return {"name": d.get("name"), "lines": d.get("lines"), "command": d.get("command"),
-                "filter": d.get("filter")}  # fmt: skip
+                "filter": d.get("filter"), "task": d.get("task")}  # fmt: skip
 
     def rollout(self) -> dict | None:
         d = self.cleaned_data
@@ -119,7 +133,9 @@ class ScheduleForm(JobForm):
         self.instance = instance
         if instance is not None:
             kwargs.setdefault("initial", {}).update(
-                sched_name=instance.name, cron=instance.cron, action=instance.action, note="",
+                sched_name=instance.name, cron=instance.cron, note="",
+                action=(TASK_PREFIX + instance.args.get("task", "")
+                        if instance.action == server_tasks.ACTION else instance.action),
                 name=instance.args.get("name"), lines=instance.args.get("lines"),
                 command=instance.args.get("command"), servers=list(instance.servers.all()),
                 groups=list(instance.groups.all()), environments=instance.environments,
@@ -182,3 +198,71 @@ class ScheduleForm(JobForm):
         sched.groups.set(d.get("groups") or [])
         sched.health_gates.set(d.get("health_gates") or [])
         return sched
+
+
+class ScriptForm(AccountFormMixin, forms.ModelForm):
+    class Meta:
+        model = Script
+        fields = ["name", "description", "interpreter", "body"]
+        labels = {"body": "Script"}
+        widgets = {
+            "body": forms.Textarea(attrs={"rows": 20, "spellcheck": "false", "wrap": "off",
+                                         "class": "form-control mono script-editor",
+                                         "placeholder": "#!/usr/bin/env bash\nset -euo pipefail\n\ndf -h /"}),
+        }  # fmt: skip
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["name"].widget.attrs.update(
+            {"class": "form-control", "placeholder": "e.g. Disk report"}
+        )
+        self.fields["description"].widget.attrs.update(
+            {"class": "form-control", "placeholder": "What it does, in a few words"}
+        )
+        self.fields["interpreter"].widget.attrs["class"] = "form-select"
+
+    def clean_name(self):
+        return self.cleaned_data["name"].strip()
+
+    def clean_body(self):
+        body = self.cleaned_data["body"].replace("\r\n", "\n").strip("\n")
+        if not body.strip():
+            raise forms.ValidationError("Write the script.")
+        if len(body) > self.Meta.model.MAX_BODY:
+            raise forms.ValidationError(
+                f"Scripts are limited to {self.Meta.model.MAX_BODY} characters."
+            )
+        return body + "\n"
+
+    def clean(self):
+        data = super().clean()
+        from .services import MAX_SCRIPT_LENGTH
+
+        if data.get("body") and data.get("interpreter"):
+            probe = self.Meta.model(
+                name=data.get("name") or "x", interpreter=data["interpreter"], body=data["body"]
+            )
+            if len(probe.command()) > MAX_SCRIPT_LENGTH:
+                raise forms.ValidationError("This script is too long once quoted for its "
+                                            "interpreter. Shorten it, or keep it on the "
+                                            "server and add it as an action.")  # fmt: skip
+        return data
+
+
+class ScriptRunForm(AccountFormMixin, forms.Form):
+    servers = forms.ModelMultipleChoiceField(
+        queryset=Server.objects.none(), widget=forms.CheckboxSelectMultiple,
+        error_messages={"required": "Choose at least one server."},
+    )  # fmt: skip
+    note = forms.CharField(required=False, max_length=200)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["servers"].queryset = (
+            Server.objects.filter(account=self.account, is_enabled=True)
+            .prefetch_related("groups")
+            .order_by("name")
+        )
+        self.fields["note"].widget.attrs.update(
+            {"class": "form-control", "placeholder": "Why, for the audit log (optional)"}
+        )

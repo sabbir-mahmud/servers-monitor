@@ -13,6 +13,7 @@
         <h1 class="page-title">{{ server.name }}</h1>
         <span id="hero-health">{% health_badge server.health %}</span>
         <span class="chip chip-env">{{ server.get_environment_display }}</span>
+        {% if server.reboot_required %}<a class="chip chip-warning" href="#operate" title="Packages were updated that need a restart">{% icon "refresh" 12 %} Reboot needed</a>{% endif %}
         {% for g in server.groups.all %}<a class="chip" href="{% url 'fleet:dashboard' %}?kind=server&group={{ g.name }}">{{ g.name }}</a>{% endfor %}
       </div>
       <div class="hero-sub">
@@ -299,6 +300,34 @@
 {# ---------- Actions & logs ---------- #}
 {% if can_operate %}
 <section id="operate" class="anchor card"><div class="card-header">{% icon "play" 17 %} Actions</div><div class="card-body">
+  {% if server_tasks %}
+  <div class="task-block">
+    <div class="task-head">
+      <span class="task-title">Server tasks</span>
+      {% if server.package_manager %}<span class="chip" title="{{ package_manager_label }}">{% icon "box" 12 %} {{ server.package_manager }}</span>{% endif %}
+      {% if server.reboot_required %}<span class="chip chip-warning">{% icon "refresh" 12 %} Reboot needed</span>{% endif %}
+    </div>
+    {% if not server.supports_tasks %}
+    <p class="task-note">{% if can_admin %}<a href="{% url 'fleet:server_enroll' server.pk %}">Upgrade this {{ MACHINE }}'s agent</a>{% else %}Upgrade this {{ MACHINE }}'s agent{% endif %} to 2.3 to check for updates, upgrade packages, clean up and reboot from here. Then turn them on with <code>sudo smctl tasks on</code>.</p>
+    {% else %}
+    <div class="task-grid">
+      {% for t in server_tasks %}
+      <form class="task-card{% if not t.enabled %} is-off{% endif %}{% if t.task.key == 'reboot' %} is-danger{% endif %}" hx-post="{% url 'operations:job_create' %}" hx-target="#action-output"{% if t.confirm %} hx-confirm="{{ t.confirm }}"{% endif %}>
+        <input type="hidden" name="servers" value="{{ server.pk }}"><input type="hidden" name="action" value="_task:{{ t.task.key }}">
+        <span class="task-icon" aria-hidden="true">{% icon t.task.icon 16 %}</span>
+        <span class="task-text">
+          <span class="task-name">{{ t.task.label }}</span>
+          {% if t.enabled %}<span class="task-desc">{{ t.task.description }}</span>
+          {% else %}<span class="task-desc">Off on this {{ MACHINE }}. Turn on: <code>sudo smctl tasks on {{ t.task.key }}</code></span>{% endif %}
+        </span>
+        {% if t.enabled %}<button class="btn btn-sm {% if t.task.key == 'reboot' %}btn-outline-danger{% else %}btn-outline-primary{% endif %}">{% icon "play" %} Run</button>{% endif %}
+      </form>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if server.actions %}<div class="task-head mt-3"><span class="task-title">Your actions</span></div>{% endif %}
   {% if server.actions %}
     <div class="action-cards">
     {% for a in server.actions %}
@@ -322,6 +351,11 @@
         <button class="btn btn-outline-danger">Run</button></div>
       <div class="form-text">Runs as the agent user. Every command is audited.</div>
     </form>
+    <div class="script-strip">
+      <span class="task-title">Scripts</span>
+      {% for s in scripts %}<a class="chip" href="{% url 'operations:script_run' s.pk %}?server={{ server.pk }}">{% icon "code" 12 %} {{ s.name }}</a>{% endfor %}
+      <a class="chip chip-ghost" href="{% if scripts %}{% url 'operations:script_list' %}{% else %}{% url 'operations:script_create' %}{% endif %}">{% if scripts %}All scripts →{% else %}{% icon "plus" 12 %} New script{% endif %}</a>
+    </div>
   {% endif %}
   <div id="action-output" class="mt-3"></div>
 </div></section>

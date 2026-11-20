@@ -228,7 +228,23 @@ class ServerDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
             from apps.operations.ssh_logins import mine
 
             ssh_logins = list(mine(self.request).filter(server=server))
+        scripts = []
+        if can_shell and server.shell_enabled and not self.request.htmx:
+            from apps.operations.models import Script
+
+            scripts = list(scoped(self.request, Script).only("pk", "name", "interpreter")[:12])
+        from apps.operations import server_tasks
+
+        user = self.request.user
+        tasks = [
+            {"task": t, "enabled": t.key in server.tasks_enabled,
+             "confirm": t.confirm.format(server=server.name)}
+            for t in server_tasks.TASKS.values()
+            if server_tasks.can_run(user, t.key)
+        ]  # fmt: skip
         ctx.update(
+            server_tasks=tasks,
+            package_manager_label=server_tasks.PACKAGE_MANAGERS.get(server.package_manager, ""),
             range_key=range_key,
             ranges=list(services.CHART_RANGES),
             charts=charts,
@@ -238,6 +254,7 @@ class ServerDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
             can_operate=self.request.user.has_perm("operations.add_job"),
             can_shell=can_shell,
             ssh_logins=ssh_logins,
+            scripts=scripts,
             can_admin=self.request.user.has_perm("fleet.change_server"),
             maintenance_window=maintenance.coverage(account=server.account_id).window_for_server(
                 server.pk
