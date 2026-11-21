@@ -1714,9 +1714,9 @@ kbd { font-family: var(--font-mono); font-size: .85em; padding: .05rem .4rem; bo
 .activity-card, .controls-card { margin-bottom: 1rem; }
 .day-nav { display: flex; align-items: center; gap: .4rem; }
 .day-nav-label { font-size: .85rem; font-weight: 600; min-width: 6.5rem; text-align: center; }
-.activity-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 1.5rem 2rem; padding: 1rem; }
+.activity-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.75rem; padding: 1rem; }
 .activity-total { font-family: var(--font-display); font-size: 1.6rem; font-weight: 650; letter-spacing: -.02em; color: var(--ink); }
-.week-bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: .35rem; height: 4.5rem; align-items: end; margin: .5rem 0 1rem; }
+.week-bars { display: grid; grid-template-columns: repeat(7, 1.75rem); gap: .5rem; height: 3.5rem; align-items: end; margin: .5rem 0 1rem; }
 .week-bar { display: flex; flex-direction: column; justify-content: flex-end; height: 100%; text-align: center; }
 .week-bar span { display: block; min-height: 2px; border-radius: 4px 4px 0 0; background: var(--surface-3); }
 .week-bar.is-current span { background: var(--accent); }
@@ -1734,9 +1734,6 @@ kbd { font-family: var(--font-mono); font-size: .85em; padding: .05rem .4rem; bo
 .controls-list li:last-child { border-bottom: 0; }
 .switch-row { display: flex; gap: .6rem; align-items: flex-start; padding: .35rem 0; }
 .switch-row .form-check-input { margin-top: .2rem; flex: none; }
-@media (max-width: 767.98px) {
-  .activity-grid { grid-template-columns: 1fr; }
-}
 
 /* ---------- My account ----------
    An identity header with security at a glance, then settings grouped by topic: a
