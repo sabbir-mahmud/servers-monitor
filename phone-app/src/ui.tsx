@@ -85,7 +85,11 @@ export function Row({ label, value, last }: { label: string; value: string; last
 }
 
 // React 19: `ref` is a plain prop, passed on to the TextInput with the rest.
-export function Field({ label, ...props }: TextInputProps & { label: string; ref?: Ref<TextInputInstance> }) {
+export function Field({
+  label,
+  style,
+  ...props
+}: TextInputProps & { label: string; ref?: Ref<TextInputInstance> }) {
   const c = useColors();
   return (
     <View style={styles.field}>
@@ -95,8 +99,8 @@ export function Field({ label, ...props }: TextInputProps & { label: string; ref
         placeholderTextColor={c.ink2}
         autoCapitalize="none"
         autoCorrect={false}
-        style={[styles.input, { color: c.ink, backgroundColor: c.surface, borderColor: c.line }]}
         {...props}
+        style={[styles.input, { color: c.ink, backgroundColor: c.surface, borderColor: c.line }, style]}
       />
     </View>
   );

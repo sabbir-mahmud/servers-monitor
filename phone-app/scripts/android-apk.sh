@@ -5,6 +5,9 @@
 #   scripts/android-apk.sh           build on EAS, then download it
 #   scripts/android-apk.sh --latest  download the newest finished build, no new build
 #
+# The relay login built into the app comes from eas.json's build profile "env" (the same
+# values as .env; see .env.example).
+#
 # The first build asks to create the Android signing key (EAS keeps it): say yes. Keep
 # using the same one, or phones can't update over the app they have.
 set -eu

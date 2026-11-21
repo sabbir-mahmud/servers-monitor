@@ -8,12 +8,22 @@
       "autoIncrement": true,
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_REDIS_URL": "https://fond-seal-219558.upstash.io",
+        "EXPO_PUBLIC_REDIS_TOKEN": "gwAAAAAAA1mmAAIGQHAyc20tYXBwEkfPo3HOb5AyHN4ONWKWOrG4RprsorLagII2YB3HW8tTqB3E7xZwgXRsACJYyazBLaMKM1e8kAz2uOyomC3Nvg",
+        "EXPO_PUBLIC_REDIS_PREFIX": "sm"
       }
     },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_REDIS_URL": "https://fond-seal-219558.upstash.io",
+        "EXPO_PUBLIC_REDIS_TOKEN": "gwAAAAAAA1mmAAIGQHAyc20tYXBwEkfPo3HOb5AyHN4ONWKWOrG4RprsorLagII2YB3HW8tTqB3E7xZwgXRsACJYyazBLaMKM1e8kAz2uOyomC3Nvg",
+        "EXPO_PUBLIC_REDIS_PREFIX": "sm"
       }
     }
   },

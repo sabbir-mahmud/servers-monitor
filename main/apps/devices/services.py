@@ -32,21 +32,143 @@ class PairingError(Exception):
 
 def new_pairing_code(device: Device) -> str:
     """A fresh code for this device; any earlier code stops working. The device keeps
-    checking in with its current token until a device pairs with the new code."""
-    code, code_hash = pairing.new_code()
-    device.pairing_code_hash = code_hash
-    device.save(update_fields=["pairing_code_hash"])
+    checking in with its current pairing until a device pairs with the new code.
+
+    Phones get a 6-digit code to type into the app, unique among codes that are out and
+    valid for 15 minutes; computers an 8-character one that doesn't expire."""
+    if device.platform not in PHONES:
+        code, code_hash = pairing.new_code()
+        device.pairing_code_hash, device.pairing_code_expires_at = code_hash, None
+    else:
+        now = timezone.now()
+        for _ in range(50):
+            code, code_hash = pairing.new_phone_code()
+            taken = Device.objects.filter(pairing_code_hash=code_hash).exclude(pk=device.pk)
+            if not taken.exists():
+                break
+            # An expired code still holds its digest: free it, or try another number.
+            if not taken.filter(pairing_code_expires_at__gt=now).exists():
+                taken.update(pairing_code_hash="", pairing_code_expires_at=None)
+                break
+        else:
+            raise PairingError("Couldn't make a unique code. Try again.", 503)
+        device.pairing_code_hash = code_hash
+        device.pairing_code_expires_at = now + timedelta(minutes=pairing.PHONE_CODE_MINUTES)
+    device.save(update_fields=["pairing_code_hash", "pairing_code_expires_at"])
     return code
 
 
 def cancel_pairing_code(device: Device) -> None:
     device.pairing_code_hash = ""
-    device.save(update_fields=["pairing_code_hash"])
+    device.pairing_code_expires_at = None
+    device.save(update_fields=["pairing_code_hash", "pairing_code_expires_at"])
+
+
+def device_json(device: Device) -> dict:
+    return {
+        "id": str(device.pk),
+        "name": device.name,
+        "platform": device.platform,
+        "account": device.account.name,
+        "person": device.person.name if device.person else None,
+    }
+
+
+def disclosure(device: Device, info: dict) -> str:
+    """Shown on the device before monitoring starts (store rules, and plain honesty).
+    It names exactly what that kind of device sends: computers send no location, and only
+    the agent on a child's or staff computer can be asked for activity and blocking."""
+    what = (
+        "CPU, memory, GPU, battery and storage use, network (Wi-Fi name), and system version"
+        if device.platform in COMPUTERS
+        else "battery, storage, network and location"
+    )
+    text = f"{device.account.name} will see this device's last online time, {what}."
+    agent = str(info.get("app_version", "")).startswith(AGENT_APP)
+    if agent and device.platform in COMPUTERS and device.controls_owner_ok:
+        if info.get("agent_mode") == "user":  # runs as this person: can't block sites
+            text += (" They can also turn on screen time (which apps you use, and for how "
+                     "long), websites visited (site names and time, not pages or "
+                     "searches) for your account, and this computer's location.")  # fmt: skip
+        else:
+            text += (" They can also turn on screen time (which apps are used, and for "
+                     "how long), websites visited (site names and time, not pages or "
+                     "searches), this computer's location, and blocking of adult or "
+                     "chosen websites on it.")  # fmt: skip
+    return text
+
+
+# --------------------------------------------------------------------------- phones
+#
+# Phones pair through the Redis relay and never reach this dashboard: the person types the
+# 6-digit code into the app, which sends it through the relay with the app's shared
+# pairing login, and the bridge answers there (apps/agent_api/relay.py "phone pairing",
+# bridge.py `handle_pairing`).
+
+
+def connected_name(device: Device) -> str:
+    """Who the phone shows it's connected as: the person it belongs to, else the user who
+    added it, else the account."""
+    if device.person_id:
+        return device.person.name
+    if device.created_by_id:
+        return device.created_by.display_name
+    return device.account.name
+
+
+@transaction.atomic
+def pair_phone(code: str, info: dict, secret_hex: str) -> tuple[Device, dict]:
+    """A phone typed `code` and sent the key it made for signing check-ins. Gives it its
+    check-in login; the code is used up and a phone paired before under this entry is cut
+    off. Returns (device, relay login). Raises PairingError."""
+    from apps.agent_api import relay
+    from apps.core import crypto
+
+    digits = "".join(ch for ch in str(code) if ch.isdigit())
+    if len(digits) != pairing.PHONE_CODE_LENGTH:
+        raise PairingError("Enter the 6-digit code from the dashboard.")
+    device = (
+        Device.objects.select_for_update()
+        .select_related("account", "person", "created_by")
+        .filter(pairing_code_hash=pairing.digest(digits), platform__in=PHONES)
+        .first()
+    )
+    now = timezone.now()
+    if (
+        device is None
+        or not device.pairing_code_expires_at
+        or device.pairing_code_expires_at <= now
+    ):
+        raise PairingError(
+            "That code isn't valid or has expired. Make a new one on the dashboard.", 404
+        )
+    _check_platform(device, info)
+    try:
+        login = relay.provision_device(device)  # sets device.relay_salt
+    except relay.RelayError as exc:
+        raise PairingError(f"This dashboard can't take phones right now: {exc}.", 503) from exc
+    device.relay_key_enc = crypto.encrypt(secret_hex)
+    device.token_hash = pairing.new_token()[1]  # marks it paired; the phone never sees one
+    device.pairing_code_hash = ""
+    device.pairing_code_expires_at = None
+    device.paired_at = device.last_seen_at = now
+    device.last_ip = None
+    _apply_info(device, info)
+    device.save()
+    from apps.audit.services import record
+
+    record(None, "device.pair", target=device.name, account=device.account,
+           platform=device.platform, model=device.model, via="relay")  # fmt: skip
+    return device, {k: login[k] for k in ("url", "token", "inbox")}
 
 
 def _device_for_code(code: str, info: dict, *, lock: bool) -> Device:
     """The device waiting for this code, checked against the platform asking for it."""
     normalized = pairing.normalize_code(code)
+    if len(normalized) == pairing.PHONE_CODE_LENGTH and normalized.isdigit():
+        raise PairingError(
+            "Phones pair in the NexGuard app, not this address. Update the app.", 410
+        )
     if len(normalized) != pairing.CODE_LENGTH:
         raise PairingError("Enter the 8-character code from the parent's dashboard.")
     devices = Device.objects.select_related("account", "person")
@@ -55,12 +177,19 @@ def _device_for_code(code: str, info: dict, *, lock: bool) -> Device:
     device = devices.filter(pairing_code_hash=pairing.digest(normalized)).first()
     if device is None:
         raise PairingError("That code isn't valid. Ask for a new one on the dashboard.", 404)
+    _check_platform(device, info)
+    if device.platform in PHONES:
+        raise PairingError("Phones pair in the NexGuard app, not this address. Update the app.",
+                           410)  # fmt: skip
+    return device
+
+
+def _check_platform(device: Device, info: dict) -> None:
     platform = str(info.get("platform", "")).lower()
     if platform and platform != device.platform:
         expected = Platform(device.platform).label
         raise PairingError(f"This code is for {_article(expected)} {expected}. Use it on that "
                            "device, or add this one separately.", 409)  # fmt: skip
-    return device
 
 
 def preview(code: str, info: dict) -> Device:
@@ -70,7 +199,7 @@ def preview(code: str, info: dict) -> Device:
 
 
 @transaction.atomic
-def pair(code: str, info: dict, ip: str | None) -> tuple[Device, str, dict | None]:
+def pair(code: str, info: dict, ip: str | None) -> tuple[Device, str]:
     """Exchange a pairing code for a device token. The code is used up; a device already
     paired under this entry (reset, or a replacement phone) loses its old token.
 
@@ -78,14 +207,6 @@ def pair(code: str, info: dict, ip: str | None) -> tuple[Device, str, dict | Non
     checks in through Upstash, never to this dashboard. If that can't be made, nothing
     changes and the code still works."""
     device = _device_for_code(code, info, lock=True)
-    relay_login = None
-    if device.platform in PHONES:
-        from apps.agent_api import relay
-
-        try:
-            relay_login = relay.provision_device(device)  # sets device.relay_salt
-        except relay.RelayError as exc:
-            raise PairingError(f"This dashboard can't take phones right now: {exc}.", 503) from exc
     raw, token_hash = pairing.new_token()
     now = timezone.now()
     device.token_hash = token_hash
@@ -98,7 +219,7 @@ def pair(code: str, info: dict, ip: str | None) -> tuple[Device, str, dict | Non
 
     record(None, "device.pair", target=device.name, account=device.account, from_ip=ip,
            platform=device.platform, model=device.model)  # fmt: skip
-    return device, raw, relay_login
+    return device, raw
 
 
 def _article(word: str) -> str:

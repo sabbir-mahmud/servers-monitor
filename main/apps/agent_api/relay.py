@@ -204,11 +204,16 @@ def unqueue_command(command) -> bool:
     return bool(client().lrem(keys(command.server)[0], 1, command_message(command)))
 
 
-def receive(server_ids, timeout: int, device_ids=()) -> tuple[str, str, dict] | None:
-    """Block until any agent or phone sends something. Returns ("server" or "device", its
-    id, message) or None."""
+def receive(
+    server_ids, timeout: int, device_ids=(), pairing: bool = False
+) -> tuple[str, str, dict] | None:
+    """Block until any agent or phone sends something. Returns ("server", "device" or
+    "pairing", its id ("" for pairing), message) or None. `pairing`: also listen for phones
+    asking to pair (while any phone has a code out)."""
     mapping = {key: ("server", pk) for key, pk in inbox_keys(server_ids).items()}
     mapping |= {device_inbox_key(pk): ("device", str(pk)) for pk in device_ids}
+    if pairing:
+        mapping[pair_inbox_key()] = ("pairing", "")
     if not mapping:
         time.sleep(min(timeout, 5))
         return None
@@ -287,3 +292,62 @@ def deprovision_device(device) -> None:
         client().delete(device_inbox_key(device.pk))
     except (redis.RedisError, RelayError) as exc:
         logger.warning("Could not remove the relay user for %s: %s", device.name, exc)
+
+
+# --------------------------------------------------------------------------- phone pairing
+#
+# Phones pair through the relay too: the app never talks to the dashboard. The app is
+# built with one shared, tightly limited login (`sm-app`, in its .env; make it with
+# `manage.py phone_app_login`). It may only RPUSH pairing requests to one inbox and GET
+# answers, each under a random key the phone picked:
+#
+#     <prefix>:pair:in             phone -> dashboard   {"t": "pair", "body": "…"}
+#     <prefix>:pair:out:<nonce>    dashboard -> phone   {"state": "paired" | "error", …}
+#
+# The request carries the 6-digit code the person typed; the answer carries the phone's
+# own check-in login (`sm-d-<id>`, above). Answers expire after a few minutes. The login
+# can't read the inbox, list keys or write answers, so holding it (anyone can unpack an
+# app) only lets someone guess codes, which the bridge limits and codes expire.
+
+APP_USERNAME = "sm-app"
+APP_COMMANDS = ("+rpush", "+get", "+ping")
+ANSWER_SECONDS = 10 * 60  # long enough for the phone to read it, then gone
+
+
+def pair_inbox_key() -> str:
+    return f"{settings.RELAY_KEY_PREFIX}:pair:in"
+
+
+def pair_answer_key(nonce: str) -> str:
+    return f"{settings.RELAY_KEY_PREFIX}:pair:out:{nonce}"
+
+
+def provision_app_login() -> dict:
+    """Create (or reset) the phone app's shared login. Returns what goes in the app's .env:
+    {"url", "token", "prefix"}. Resetting it stops apps built with the old token pairing
+    (phones already paired keep checking in with their own logins)."""
+    url = rest_url()
+    if not url:
+        raise RelayError(
+            "phones pair and check in through an Upstash Redis relay, and this dashboard's "
+            "REDIS_URL isn't Upstash"
+        )
+    try:
+        password = client().execute_command("ACL", "GENTOKEN", APP_USERNAME)
+        client().execute_command(
+            "ACL", "SETUSER", APP_USERNAME, "reset", "on", f">{password}", "resetchannels",
+            f"~{pair_inbox_key()}", f"~{pair_answer_key('*')}", "-@all", *APP_COMMANDS,
+        )  # fmt: skip
+        token = client().execute_command("ACL", "RESTTOKEN", APP_USERNAME, password)
+    except redis.RedisError as exc:
+        raise RelayError(f"could not create the phone app's login: {exc}") from exc
+    return {"url": url, "token": token, "prefix": settings.RELAY_KEY_PREFIX}
+
+
+def answer_pairing(nonce: str, answer: dict) -> None:
+    """Leave the answer where the phone polls for it. Raises RelayError."""
+    data = json.dumps(answer, separators=(",", ":"))
+    try:
+        client().set(pair_answer_key(nonce), data, ex=ANSWER_SECONDS)
+    except redis.RedisError as exc:
+        raise RelayError(f"could not answer the phone: {exc}") from exc

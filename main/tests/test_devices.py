@@ -13,6 +13,7 @@ from apps.devices.models import Device, DeviceLocation
 from apps.tenants.models import Person
 
 from .conftest import add_member, make_account
+from .phones import pair_phone
 
 pytestmark = pytest.mark.django_db
 
@@ -72,8 +73,8 @@ def test_parent_adds_a_phone_and_sees_the_code_once(client, parent, sara):
     for label in ("Windows", "Mac", "Linux", "Android", "iPhone or iPad"):
         assert label in page
     device, code, first = add_device(client, sara, with_page=True)
-    assert len(code) == 9 and code[4] == "-"
-    assert "<svg" in first and "Scan the QR code" in first  # for the phone app
+    assert len(code) == 7 and code.replace(" ", "").isdigit()  # "482 913", typed in the app
+    assert "Open NexGuard and enter this code" in first
     assert device.account == sara.account and device.person == sara and not device.is_paired
     assert code.replace("-", "") not in device.pairing_code_hash  # stored hashed
     again = client.get(reverse("devices:pair", args=[device.pk])).content.decode()
@@ -81,24 +82,12 @@ def test_parent_adds_a_phone_and_sees_the_code_once(client, parent, sara):
     assert AuditLog.objects.filter(action="device.create", target="Sara's phone").exists()
 
 
-def test_phone_pair_page_warns_when_the_phone_cant_reach_the_dashboard(
-    client, parent, sara, settings
-):
-    client.force_login(parent)
-    settings.DASHBOARD_URL = "http://127.0.0.1:8000"
-    page = add_device(client, sara, with_page=True)[2]
-    assert "A phone can't reach" in page
-    settings.DASHBOARD_URL = "http://192.168.1.20:8000"
-    page = add_device(client, sara, name="Sara's tablet", with_page=True)[2]
-    assert "A phone can't reach" not in page and "192.168.1.20" in page
-
-
 def test_child_card_lists_devices_with_their_state(client, parent, sara):
     client.force_login(parent)
     device, code = add_device(client, sara)
     page = client.get(reverse("tenants:people")).content.decode()
     assert "Sara&#x27;s phone" in page and "Waiting to pair" in page
-    api_pair(client, code)
+    pair_phone(device, code)
     page = client.get(reverse("tenants:people")).content.decode()
     assert "All devices online" in page
 
@@ -112,36 +101,39 @@ def test_device_names_are_unique_per_account(client, parent, sara):
 
 
 # --------------------------------------------------------------------------- pairing
+#
+# Over HTTP: the computer agent and the installer script. Phones pair through the relay
+# instead (test_phone_relay.py).
 
 
 def test_pairing_gives_a_token_and_uses_up_the_code(client, parent, sara):
     client.force_login(parent)
-    device, code = add_device(client, sara)
+    device, code = add_device(client, sara, platform="windows", name="Sara's PC")
     client.logout()  # the device has no session
-    resp = api_pair(client, code.lower().replace("-", " "))  # however it was typed
+    resp = api_pair(client, code.lower().replace("-", " "), platform="windows")  # however typed
     assert resp.status_code == 201
     body = resp.json()
     assert body["token"].startswith("ngd_") and body["device"]["person"] == "Sara"
-    assert body["checkin_seconds"] == 900 and "The Rahmans will see" in body["disclosure"]
+    assert body["checkin_seconds"] == 300 and "The Rahmans will see" in body["disclosure"]
     device.refresh_from_db()
     assert device.is_paired and device.model == "Pixel 9" and device.pairing_code_hash == ""
-    assert api_pair(client, code).status_code == 404  # single use
+    assert api_pair(client, code, platform="windows").status_code == 404  # single use
     assert AuditLog.objects.filter(action="device.pair", account=device.account).exists()
 
 
 def test_the_code_is_for_one_kind_of_device(client, parent, sara):
     client.force_login(parent)
-    _, code = add_device(client, sara, platform="ios", name="iPad")
+    _, code = add_device(client, sara, platform="macos", name="iMac")
     resp = api_pair(client, code, platform="windows")
-    assert resp.status_code == 409 and "iPhone or iPad" in resp.json()["error"]
-    assert api_pair(client, code, platform="ios").status_code == 201  # not used up
+    assert resp.status_code == 409 and "Mac" in resp.json()["error"]
+    assert api_pair(client, code, platform="macos").status_code == 201  # not used up
 
 
 def test_codes_do_not_expire(client, parent, sara):
     client.force_login(parent)
-    device, code = add_device(client, sara)
+    device, code = add_device(client, sara, platform="linux", name="Sara's laptop")
     Device.objects.filter(pk=device.pk).update(created_at=timezone.now() - timedelta(days=400))
-    assert api_pair(client, code).status_code == 201
+    assert api_pair(client, code, platform="linux").status_code == 201
 
 
 def test_bad_codes_and_guessing(client, settings):
@@ -154,16 +146,16 @@ def test_bad_codes_and_guessing(client, settings):
 
 def test_a_reset_device_is_paired_again_and_the_old_token_dies(client, parent, sara):
     client.force_login(parent)
-    device, code = add_device(client, sara)
-    old = api_pair(client, code).json()["token"]
+    device, code = add_device(client, sara, platform="windows", name="Sara's PC")
+    old = api_pair(client, code, platform="windows").json()["token"]
     assert api_checkin(client, old, {}).status_code == 200
     # Phone was reset: parent makes a new code. The old pairing keeps working meanwhile.
     resp = client.post(reverse("devices:pair", args=[device.pk]), {"action": "new_code"})
     page = client.get(resp["Location"]).content.decode()
-    assert "Pair Sara&#x27;s phone again" in page
+    assert "Pair Sara&#x27;s PC again" in page
     new_code = code_on(page)
     assert api_checkin(client, old, {}).status_code == 200
-    new = api_pair(client, new_code).json()["token"]
+    new = api_pair(client, new_code, platform="windows").json()["token"]
     assert api_checkin(client, old, {}).status_code == 401
     assert api_checkin(client, new, {}).status_code == 200
     assert Device.objects.count() == 1  # same entry, history kept
@@ -171,10 +163,10 @@ def test_a_reset_device_is_paired_again_and_the_old_token_dies(client, parent, s
 
 def test_a_new_code_cancels_the_previous_one(client, parent, sara):
     client.force_login(parent)
-    device, first = add_device(client, sara)
+    device, first = add_device(client, sara, platform="windows", name="Sara's PC")
     resp = client.post(reverse("devices:pair", args=[device.pk]), {"action": "new_code"})
     client.get(resp["Location"])
-    assert api_pair(client, first).status_code == 404
+    assert api_pair(client, first, platform="windows").status_code == 404
 
 
 # --------------------------------------------------------------------------- check-ins
@@ -182,22 +174,30 @@ def test_a_new_code_cancels_the_previous_one(client, parent, sara):
 
 @pytest.fixture
 def paired(client, parent, sara):
+    """A phone, paired and checking in through the relay (tests/phones.py)."""
     client.force_login(parent)
     device, code = add_device(client, sara)
-    token = api_pair(client, code).json()["token"]
-    return device, token
+    phone = pair_phone(device, code)
+    return phone.device, phone
+
+
+@pytest.fixture
+def computer(client, parent, sara):
+    """A computer agent: pairs and checks in over HTTP with a token."""
+    client.force_login(parent)
+    device, code = add_device(client, sara, platform="windows", name="Sara's PC")
+    return device, api_pair(client, code, platform="windows").json()["token"]
 
 
 def test_checkin_records_battery_storage_network_and_location(client, paired):
-    device, token = paired
-    resp = api_checkin(client, token, {
+    device, phone = paired
+    phone.checkin({
         "battery": {"percent": 42, "charging": False},
         "storage": {"free": 20 * 2**30, "total": 128 * 2**30},
         "network": {"type": "wifi", "name": "Home"},
         "location": {"lat": 23.810331, "lon": 90.412521, "accuracy": 12, "source": "gps"},
         "os_version": "Android 16.1",
     })  # fmt: skip
-    assert resp.status_code == 200 and resp.json()["checkin_seconds"] == 900
     device.refresh_from_db()
     assert (device.battery_percent, device.charging, device.network) == (42, False, "wifi")
     assert device.storage_used_percent == 84 and device.os_version == "Android 16.1"
@@ -209,39 +209,41 @@ def test_checkin_records_battery_storage_network_and_location(client, paired):
     assert "within 12 m" in page and "Home" in page
 
 
-def test_nonsense_is_ignored_not_fatal(client, paired):
-    device, token = paired
-    resp = api_checkin(client, token, {
+def test_nonsense_is_ignored_not_fatal(client, paired, computer):
+    device, phone = paired
+    phone.checkin({
         "battery": {"percent": 250, "charging": "yes"},
         "storage": {"free": 10, "total": 5},
         "network": {"type": "carrier-pigeon"},
         "location": {"lat": 123, "lon": 10},
         "model": {"not": "a string"},
     })  # fmt: skip
-    assert resp.status_code == 200
     device.refresh_from_db()
     assert device.battery_percent is None and device.charging is None
     assert device.storage_total is None and device.network == "" and device.latitude is None
     assert device.model == "" and not DeviceLocation.objects.exists()
     bad = client.post(reverse("device_api_checkin"), "[1,2]", content_type="application/json",
-                      HTTP_AUTHORIZATION=f"Bearer {token}")  # fmt: skip
+                      HTTP_AUTHORIZATION=f"Bearer {computer[1]}")  # fmt: skip
     assert bad.status_code == 400
 
 
 def test_old_or_future_fixes_are_clamped_to_now(client, paired):
-    device, token = paired
+    device, phone = paired
     future = (timezone.now() + timedelta(days=1)).isoformat()
-    api_checkin(client, token, {"location": {"lat": 1, "lon": 2, "at": future}})
+    phone.checkin({"location": {"lat": 1, "lon": 2, "at": future}})
     loc = DeviceLocation.objects.get()
     assert abs((loc.recorded_at - timezone.now()).total_seconds()) < 60
 
 
-def test_removed_device_is_told_to_pair_again(client, paired, parent):
-    device, token = paired
+def test_removed_device_is_told_to_pair_again(client, paired, computer, parent):
+    device, phone = paired
     client.force_login(parent)
-    api_checkin(client, token, {"location": {"lat": 1, "lon": 2}})
+    phone.checkin({"location": {"lat": 1, "lon": 2}})
     client.post(reverse("devices:delete", args=[device.pk]))
-    assert not Device.objects.exists() and not DeviceLocation.objects.exists()
+    assert not DeviceLocation.objects.exists()
+    pc, token = computer
+    client.post(reverse("devices:delete", args=[pc.pk]))
+    assert not Device.objects.exists()
     resp = api_checkin(client, token, {})
     assert resp.status_code == 401 and "Pair it again" in resp.json()["error"]
 
@@ -401,9 +403,9 @@ def test_tile_server_is_allowed_by_the_csp(client, parent):
 
 
 def test_child_page_shows_map_recent_places_and_devices(client, parent, paired, sara):
-    device, token = paired
-    api_checkin(client, token, {"location": {"lat": 23.7812, "lon": 90.4074, "accuracy": 20},
-                                "battery": {"percent": 9, "charging": False}})  # fmt: skip
+    device, phone = paired
+    phone.checkin({"location": {"lat": 23.7812, "lon": 90.4074, "accuracy": 20},
+                   "battery": {"percent": 9, "charging": False}})  # fmt: skip
     page = client.get(reverse("tenants:person_detail", args=[sara.pk])).content.decode()
     assert "Where Sara was last" in page and 'class="map-tile"' in page
     assert "23.7812, 90.4074" in page  # recent places
@@ -413,11 +415,9 @@ def test_child_page_shows_map_recent_places_and_devices(client, parent, paired, 
 
 
 def test_device_page_shows_timeline_and_vitals(client, paired):
-    device, token = paired
+    device, phone = paired
     for lat in (23.780, 23.781):  # ~110 m apart: both on the street-level map
-        api_checkin(
-            client, token, {"location": {"lat": lat, "lon": 90.4}, "battery": {"percent": 9}}
-        )
+        phone.checkin({"location": {"lat": lat, "lon": 90.4}, "battery": {"percent": 9}})
     page = client.get(reverse("devices:detail", args=[device.pk])).content.decode()
     assert "Today" in page and page.count('class="timeline-item"') == 2
     assert 'class="map-trail"' in page and "Battery at 9%" in page
@@ -425,9 +425,9 @@ def test_device_page_shows_timeline_and_vitals(client, paired):
 
 
 def test_maps_can_be_turned_off(client, paired, settings):
-    device, token = paired
+    device, phone = paired
     settings.MAP_TILE_URL = ""
-    api_checkin(client, token, {"location": {"lat": 23.78, "lon": 90.4}})
+    phone.checkin({"location": {"lat": 23.78, "lon": 90.4}})
     page = client.get(reverse("devices:detail", args=[device.pk])).content.decode()
     assert "map-tile" not in page and "23.780000, 90.400000" in page and "Open map" in page
 
@@ -447,8 +447,8 @@ def test_computers_without_location_skip_the_history_card(client, parent, sara):
 
 
 def test_people_list_searches_and_puts_problems_first(client, parent, family, paired):
-    device, token = paired
-    api_checkin(client, token, {"battery": {"percent": 5, "charging": False}})  # Sara: low
+    device, phone = paired
+    phone.checkin({"battery": {"percent": 5, "charging": False}})  # Sara: low
     Person.objects.create(account=family, kind="child", name="Abir")
     Person.objects.create(account=family, kind="child", name="Zayn")
     url = reverse("tenants:people")

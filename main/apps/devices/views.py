@@ -1,6 +1,5 @@
 import ipaddress
 from datetime import date, timedelta
-from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.contrib import messages
@@ -10,6 +9,7 @@ from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.views.generic import CreateView, DeleteView, DetailView, ListView, UpdateView
 
+from apps.agent_api.relay import rest_url as relay_rest_url
 from apps.audit.services import record
 from apps.core import crypto
 from apps.core.mixins import StaffViewMixin
@@ -23,9 +23,20 @@ from .models import COMPUTERS, Device, DeviceControls, DevicePlace, Place
 CODE_SESSION_KEY = "device-code:{}"
 
 
-def _remember_code(request, device, code):
-    """Shown on the next page load only; kept encrypted in the session until then."""
+def _new_code(request, device) -> None:
+    """A fresh code, shown on the next page load only; kept encrypted in the session until
+    then."""
+    try:
+        code = services.new_pairing_code(device)
+    except services.PairingError as exc:
+        messages.error(request, str(exc))
+        return
     request.session[CODE_SESSION_KEY.format(device.pk)] = crypto.encrypt(code)
+
+
+def _remembered_code(request, device) -> str | None:
+    stored = request.session.pop(CODE_SESSION_KEY.format(device.pk), None)
+    return crypto.decrypt(stored) if stored else None
 
 
 def _back_to(device) -> str:
@@ -56,8 +67,7 @@ class DeviceCreateView(StaffViewMixin, AccountScopedMixin, CreateView):
     def form_valid(self, form):
         form.instance.created_by = self.request.user
         device = form.save()
-        code = services.new_pairing_code(device)
-        _remember_code(self.request, device, code)
+        _new_code(self.request, device)
         record(self.request, "device.create", target=device.name, platform=device.platform,
                person=device.person.name if device.person else "")  # fmt: skip
         return redirect("devices:pair", pk=device.pk)
@@ -82,8 +92,7 @@ class DevicePairView(StaffViewMixin, AccountScopedMixin, DetailView):
         device = self.object
         code = None
         if self.request.GET.get("part") != "status":  # a poll must not use up the code
-            stored = self.request.session.pop(CODE_SESSION_KEY.format(device.pk), None)
-            code = crypto.decrypt(stored) if stored else None
+            code = _remembered_code(self.request, device)
         server = (settings.DASHBOARD_URL or self.request.build_absolute_uri("/")).rstrip("/")
         is_computer = device.platform in COMPUTERS
         if is_computer and code:
@@ -92,10 +101,10 @@ class DevicePairView(StaffViewMixin, AccountScopedMixin, DetailView):
         ctx.update(
             code=code,
             server_url=server,
-            qr=_qr(server, code) if code and not is_computer else "",
+            # Phones pair by typing the code into the app, which reaches only the relay.
+            phones_supported=bool(relay_rest_url()) if not is_computer else True,
+            code_expires_at=device.pairing_code_expires_at,
             **(_install_link(server, device.platform) if code and not is_computer else {}),
-            # The phone app can't reach the dashboard computer's own loopback address.
-            server_is_loopback=urlsplit(server).hostname in ("localhost", "127.0.0.1", "::1"),
             is_computer=is_computer,
             # Paired before and a new code is out: it's being moved to a new/reset device.
             repairing=device.paired_at is not None and bool(device.pairing_code_hash),
@@ -110,8 +119,7 @@ class DevicePairView(StaffViewMixin, AccountScopedMixin, DetailView):
             record(request, "device.code_cancel", target=device.name)
             messages.success(request, "Pairing code cancelled.")
             return redirect("devices:detail", pk=device.pk)
-        code = services.new_pairing_code(device)
-        _remember_code(request, device, code)
+        _new_code(request, device)
         record(request, "device.new_code", target=device.name)
         return redirect("devices:pair", pk=device.pk)
 
@@ -121,15 +129,6 @@ def _qr_svg(data: str, scale: int = 5) -> str:
 
     return segno.make(data, error="m").svg_inline(scale=scale, border=2, dark="#1d1d1f",
                                                   light="#ffffff")  # fmt: skip
-
-
-def _qr(server: str, code: str) -> str:
-    """What the NexGuard phone app scans: where to pair and with which code."""
-    from urllib.parse import urlencode
-
-    return _qr_svg(
-        "nexguard://pair?" + urlencode({"server": server, "code": code.replace("-", "")})
-    )
 
 
 def _install_link(server: str, platform: str) -> dict:

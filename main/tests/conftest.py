@@ -150,6 +150,7 @@ class FakeRedis:
 
     def __init__(self):
         self.lists: dict[str, list[str]] = {}
+        self.strings: dict[str, str] = {}  # SET/GET (expiry not modelled)
         self.users: dict[str, list] = {}
         self.tokens: set[str] = set()
         self.down = False
@@ -206,12 +207,33 @@ class FakeRedis:
                 return key, self.lists[key].pop(0)
         return None
 
+    def set(self, key, value, ex=None):
+        self._check()
+        self.strings[key] = value
+        return True
+
+    def get(self, key):
+        self._check()
+        return self.strings.get(key)
+
     def delete(self, *keys):
-        return sum(self.lists.pop(k, None) is not None for k in keys)
+        self._check()
+        return sum(
+            (self.lists.pop(k, None) is not None) | (self.strings.pop(k, None) is not None)
+            for k in keys
+        )
 
     def drain(self, key) -> list[dict]:
         items, self.lists[key] = self.lists.get(key, []), []
         return [json.loads(i) for i in items]
+
+
+@pytest.fixture(autouse=True)
+def fresh_pair_limit(monkeypatch):
+    """Wrong phone codes are counted per relay process: each test starts at zero."""
+    from apps.agent_api import bridge
+
+    monkeypatch.setattr(bridge, "pair_failures", bridge.FailureLimiter())
 
 
 @pytest.fixture(autouse=True)

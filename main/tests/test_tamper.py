@@ -70,7 +70,7 @@ def test_dropping_to_user_mode_is_reported(client, computer):
 
 def test_phone_unpaired_on_itself_and_location_off(client, parent, sara):
     device, paired = paired_phone(client, parent, sara)
-    login = paired["relay"]
+    login = paired.login
     long_ago()(device)
     handle_device(device, check_in(login, {"location": {"lat": 23.8, "lon": 90.4},
                                            "permissions": {"location": True}}))  # fmt: skip
@@ -87,5 +87,5 @@ def test_phone_unpaired_on_itself_and_location_off(client, parent, sara):
 
 def test_location_off_before_ever_sharing_is_not_tampering(client, parent, sara):
     device, paired = paired_phone(client, parent, sara)
-    handle_device(device, check_in(paired["relay"], {"permissions": {"location": False}}))
+    handle_device(device, check_in(paired.login, {"permissions": {"location": False}}))
     assert not tamper(device).exists()

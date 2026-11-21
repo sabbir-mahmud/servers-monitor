@@ -10,6 +10,7 @@ from apps.devices import services
 from apps.devices.models import Device, DeviceSample
 
 from . import test_devices
+from .phones import pair_phone
 from .test_devices import add_device, api_checkin, api_pair
 
 pytestmark = pytest.mark.django_db
@@ -58,9 +59,7 @@ def test_nonsense_health_is_dropped_and_a_missing_reading_clears_the_old_one(cli
 def test_phones_never_store_computer_health(client, parent, sara):
     client.force_login(parent)
     device, code = add_device(client, sara)  # an Android phone
-    token = api_pair(client, code).json()["token"]
-    api_checkin(client, token, HEALTH)
-    device.refresh_from_db()
+    device = pair_phone(device, code).checkin(HEALTH)  # through the relay, as the app does
     assert device.cpu_percent is None and device.memory_total is None
     assert device.samples.get().battery_percent == 64  # battery history still kept
 

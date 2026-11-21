@@ -36,7 +36,7 @@ def open_sos(device):
 
 def test_sos_opens_a_critical_alert_with_the_location(client, parent, sara):
     device, paired = paired_phone(client, parent, sara)
-    login = paired["relay"]
+    login = paired.login
     handle_device(device, sos(login))
     alert = open_sos(device).get()
     assert alert.severity == Severity.CRITICAL
@@ -49,14 +49,14 @@ def test_sos_opens_a_critical_alert_with_the_location(client, parent, sara):
 
 def test_sos_without_location_says_so(client, parent, sara):
     device, paired = paired_phone(client, parent, sara)
-    login = paired["relay"]
+    login = paired.login
     handle_device(device, sos(login, location=None))
     assert open_sos(device).get().message == "SOS from Sara"
 
 
 def test_im_ok_closes_it(client, parent, sara):
     device, paired = paired_phone(client, parent, sara)
-    login = paired["relay"]
+    login = paired.login
     handle_device(device, sos(login))
     handle_device(device, sos(login, cancel=True))
     assert not open_sos(device).exists()
@@ -64,7 +64,7 @@ def test_im_ok_closes_it(client, parent, sara):
 
 def test_forged_and_stale_sos_are_ignored(client, parent, sara):
     device, paired = paired_phone(client, parent, sara)
-    login = paired["relay"]
+    login = paired.login
     handle_device(device, sos(login, key="00" * 32))
     handle_device(device, sos(login, at=time.time() - 3600))
     assert not Alert.objects.exists()
@@ -78,7 +78,7 @@ def test_sos_is_sent_even_to_critical_only_channels_and_repeats(
     monkeypatch,
 ):
     device, paired = paired_phone(client, parent, sara)
-    login = paired["relay"]
+    login = paired.login
     sent = []
     monkeypatch.setattr(delivery, "send", lambda c, m, *_: sent.append(m.plain))
     c = Channel.objects.create(account=family, name="mum", kind="telegram", telegram_token="t",
@@ -92,7 +92,7 @@ def test_sos_is_sent_even_to_critical_only_channels_and_repeats(
 
 def test_pressed_again_after_acknowledgement_is_a_new_alert(client, parent, sara):
     device, paired = paired_phone(client, parent, sara)
-    login = paired["relay"]
+    login = paired.login
     handle_device(device, sos(login))
     first = open_sos(device).get()
     first.acknowledged_at = timezone.now()
@@ -103,7 +103,7 @@ def test_pressed_again_after_acknowledgement_is_a_new_alert(client, parent, sara
 
 def test_acknowledged_sos_closes_after_an_hour(client, parent, sara):
     device, paired = paired_phone(client, parent, sara)
-    login = paired["relay"]
+    login = paired.login
     handle_device(device, sos(login))
     open_sos(device).update(acknowledged_at=timezone.now() - timedelta(hours=2))
     sweep()

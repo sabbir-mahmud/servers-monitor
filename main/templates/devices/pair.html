@@ -72,20 +72,20 @@
           <p class="small text-body-secondary mt-2 mb-0">When it asks for location, allow it so you can see where the phone is.</p>
         </div></div>
         <div class="step"><span class="step-num"></span><div>
-          <h2>Scan the QR code, or enter the code</h2>
+          <h2>Open NexGuard and enter this code</h2>
+          {% if phones_supported %}
           <div class="pair-code" id="pair-code">{{ code }}</div>
-          <p class="small text-body-secondary mt-2 mb-1">Server: <code id="pair-server">{{ server_url }}</code>
-            <button type="button" class="btn btn-sm btn-link p-0 ms-1" data-copy="#pair-server">{% icon "copy" 13 %} <span data-copy-label>Copy</span></button></p>
-          <p class="small text-body-secondary mb-0">Shown once. Lost it? Make a new code below; this one stops working.</p>
-          {% if server_is_loopback %}<p class="small text-danger mt-2 mb-0">{% icon "alert" 13 %} A phone can't reach <code>{{ server_url }}</code>: that's this computer's own address. Open the dashboard by its network address (or set <code>DASHBOARD_URL</code>), then make a new code.</p>{% endif %}
+          <p class="small text-body-secondary mt-2 mb-0">Valid for 15 minutes{% if code_expires_at %} (until {{ code_expires_at|time:"H:i" }}){% endif %}, once. Expired or lost? Make a new code below. The app talks only to the relay, never to this dashboard.</p>
+          {% else %}
+          <p class="text-danger mb-0">{% icon "alert" 13 %} This dashboard can't pair phones yet: phones pair and report through an Upstash Redis relay. Set <code>REDIS_URL</code> to Upstash (or <code>RELAY_REST_URL</code>), then make a new code.</p>
+          {% endif %}
         </div></div>
         <div class="step"><span class="step-num"></span><div>
           <h2>Check what the app says</h2>
-          <p class="mb-0">It shows that {{ ACCOUNT.name }} will see the last online time, battery, storage, network and location. Once it's accepted, the device appears here.</p>
+          <p class="mb-0">Once connected, it shows that {{ ACCOUNT.name }} will see the last online time, battery, storage, network and location, and asks for location access. The device appears here as soon as it connects.</p>
         </div></div>
       </div>
     </div>
-    <div class="pair-qr" aria-label="QR code for the NexGuard app">{{ qr|safe }}<span class="small text-body-secondary">Scan with the NexGuard app</span></div>
   </div>
   {% else %}
   <p class="mb-3">{% if device.pairing_code_hash %}The pairing code was already shown. If you don't have it any more, make a new one; the old code stops working.{% elif device.is_paired %}This device is paired. If it was reset or replaced, make a new code and enter it on the device.{% else %}Make a pairing code to enter on the device.{% endif %}</p>

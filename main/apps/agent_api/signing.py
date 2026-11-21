@@ -64,15 +64,36 @@ def device_key(device, secret: str | None = None) -> bytes | None:
     return key_for(f"device:{device.pk}", device.relay_salt, secret)
 
 
+def _hmac_ok(key: bytes, body: str, sig: str) -> bool:
+    expected = hmac.new(key, body.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(sig, expected)
+
+
+def phone_key(device) -> bytes | None:
+    """The key a phone paired through the relay made itself (None for older pairings)."""
+    if not device.relay_key_enc:
+        return None
+    from apps.core import crypto
+
+    try:
+        return bytes.fromhex(crypto.decrypt(device.relay_key_enc))
+    except Exception:  # undecryptable (SECRET_KEY rotated without a fallback) or garbage
+        return None
+
+
 def verify_from_device(device, body: str, sig) -> bool:
     """Phone → dashboard. The phone signs the exact JSON text it sends (`body`), so nothing
-    depends on two languages serialising JSON the same way."""
-    if not isinstance(sig, str) or not device.relay_salt:
+    depends on two languages serialising JSON the same way. Phones paired through the relay
+    sign with their own key; older pairings with the salt-derived one."""
+    if not isinstance(sig, str):
+        return False
+    if device.relay_key_enc:
+        key = phone_key(device)
+        return key is not None and _hmac_ok(key, body, sig)
+    if not device.relay_salt:
         return False
     for secret in (settings.SECRET_KEY, *settings.SECRET_KEY_FALLBACKS):
-        key = device_key(device, secret)
-        expected = hmac.new(key, body.encode(), hashlib.sha256).hexdigest()
-        if hmac.compare_digest(sig, expected):
+        if _hmac_ok(device_key(device, secret), body, sig):
             return True
     return False
 

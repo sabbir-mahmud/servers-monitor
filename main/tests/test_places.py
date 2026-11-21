@@ -10,10 +10,11 @@ from apps.alerts import delivery
 from apps.alerts.models import Alert, AlertKind, Channel
 from apps.devices import places
 from apps.devices.forms import parse_location
-from apps.devices.models import Device, DevicePlace, Place
+from apps.devices.models import DevicePlace, Place
 
 from . import test_devices
-from .test_devices import add_device, api_checkin, api_pair
+from .phones import pair_phone
+from .test_devices import add_device
 
 pytestmark = pytest.mark.django_db
 family, parent, sara = test_devices.family, test_devices.parent, test_devices.sara
@@ -26,10 +27,11 @@ FAR = (23.830000, 90.410000)  # ~2.2 km
 
 @pytest.fixture
 def phone(client, parent, sara):
+    """A phone paired through the relay; checks in as the app does (tests/phones.py)."""
     client.force_login(parent)
     device, code = add_device(client, sara)
-    token = api_pair(client, code).json()["token"]
-    return Device.objects.get(pk=device.pk), token
+    app = pair_phone(device, code)
+    return app.device, app
 
 
 @pytest.fixture
@@ -39,10 +41,8 @@ def school(family, sara):
     return p
 
 
-def at(client, token, where, accuracy=15):
-    resp = api_checkin(client, token, {"location": {"lat": where[0], "lon": where[1],
-                                                    "accuracy": accuracy}})  # fmt: skip
-    assert resp.status_code == 200
+def at(app, where, accuracy=15):
+    app.checkin({"location": {"lat": where[0], "lon": where[1], "accuracy": accuracy}})
 
 
 def events(device):
@@ -51,70 +51,70 @@ def events(device):
 
 
 def test_first_fix_sets_state_quietly_then_arrive_and_leave(client, phone, school):
-    device, token = phone
-    at(client, token, NEARBY)
+    device, app = phone
+    at(app, NEARBY)
     assert events(device) == []  # already there when the place was drawn
     assert DevicePlace.objects.get(device=device, place=school).inside
-    at(client, token, FAR)
-    at(client, token, NEARBY)
+    at(app, FAR)
+    at(app, NEARBY)
     assert events(device) == ["Sara left School", "Sara arrived at School"]
 
 
 def test_edge_wobble_and_coarse_fixes_are_ignored(client, phone, school):
-    device, token = phone
-    at(client, token, NEARBY)
-    at(client, token, EDGE)
-    at(client, token, FAR, accuracy=5000)
+    device, app = phone
+    at(app, NEARBY)
+    at(app, EDGE)
+    at(app, FAR, accuracy=5000)
     assert events(device) == [] and DevicePlace.objects.get(device=device).inside
 
 
 def test_place_for_other_people_ignores_this_device(client, phone, school, family):
     from apps.tenants.models import Person
 
-    device, token = phone
+    device, app = phone
     school.people.add(Person.objects.create(account=family, kind="child", name="Rafi"))
-    at(client, token, NEARBY)
-    at(client, token, FAR)
+    at(app, NEARBY)
+    at(app, FAR)
     assert not DevicePlace.objects.exists() and events(device) == []
 
 
 def test_events_are_announced_once_and_never_resolved_or_reminded(
     client, phone, school, family, monkeypatch
 ):
-    device, token = phone
+    device, app = phone
     sent = []
     monkeypatch.setattr(delivery, "send", lambda c, m, *_: sent.append(m.plain))
     c = Channel.objects.create(account=family, name="mum", kind="telegram", telegram_token="t",
                                telegram_chat_id="1", repeat_minutes=1)  # fmt: skip
     Channel.objects.filter(pk=c.pk).update(created_at=timezone.now() - timedelta(hours=1))
-    at(client, token, NEARBY)
-    at(client, token, FAR)
+    at(app, NEARBY)
+    at(app, FAR)
     assert delivery.process() == 1
     assert sent[0].startswith("📍 Sara left School")
     assert delivery.process(now=timezone.now() + timedelta(minutes=5)) == 0
 
 
 def test_missed_arrival_opens_then_resolves_on_arrival(client, phone, school, sara):
-    device, token = phone
+    device, app = phone
     school.people.add(sara)
     now = timezone.localtime()
     school.arrive_by = time(0, 0)
     school.arrive_days = [now.weekday()]
     school.save()
-    at(client, token, FAR)  # far away all day
+    at(app, FAR)  # far away all day
     assert places.sweep() == 1
     assert places.sweep() == 0  # once a day
     alert = Alert.objects.get(kind=AlertKind.PLACE, is_event=False)
     assert alert.message == "Sara hasn't arrived at School (expected by 00:00)"
     assert alert.resolved_at is None
-    at(client, token, NEARBY)
+    at(app, NEARBY)
     alert.refresh_from_db()
     assert alert.resolved_at is not None
     assert events(device) == ["Sara arrived at School"]
 
 
 def test_no_missed_arrival_before_time_or_on_other_days(client, phone, school, sara):
-    device, token = phone
+    device, app = phone
     school.people.add(sara)
     school.arrive_by = time(23, 59, 59)
     school.arrive_days = list(range(7))

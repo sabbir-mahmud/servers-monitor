@@ -23,10 +23,9 @@
 Clients that send `Accept: text/plain` (the shell installer) get the same fields as
 `key=value` lines instead of JSON, nested objects flattened with `_` (`device_name=…`).
 
-Phones check in through the Redis relay instead (Upstash REST): pairing a phone also
-returns "relay": {"url", "token", "inbox", "key"}, its own Redis login allowed only to RPUSH
-signed check-ins to its inbox (apps/agent_api/relay.py, bridge.py `handle_device`).
-`/checkin` serves the computer agent and scripts.
+Phones never call this API: they pair and check in through the Redis relay (Upstash
+REST; apps/agent_api/relay.py, bridge.py `handle_pairing` and `handle_device`). A phone's
+code sent here gets 410. These endpoints serve the computer agent and scripts.
 
 Token auth only, never the session cookie, so these are CSRF-exempt safely. A 401 from
 check-in means the device was removed or paired again elsewhere: the app should forget
@@ -44,7 +43,6 @@ from apps.core.utils import client_ip
 from apps.users import throttle
 
 from . import activity, blocklist, services
-from .models import AGENT_APP, COMPUTERS
 
 MAX_BODY = 16 * 1024
 MAX_CHECKIN_BODY = 128 * 1024  # an agent's activity batch: at most 500 rows of ~150 bytes
@@ -92,16 +90,6 @@ def _body(request, limit: int = MAX_BODY) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def _device_json(device) -> dict:
-    return {
-        "id": str(device.pk),
-        "name": device.name,
-        "platform": device.platform,
-        "account": device.account.name,
-        "person": device.person.name if device.person else None,
-    }
-
-
 @csrf_exempt
 @require_POST
 def pair(request):
@@ -119,47 +107,24 @@ def pair(request):
             device = services.preview(code, data)
             return _respond(
                 request,
-                {"disclosure": _disclosure(device, data), "device": _device_json(device)},
+                {
+                    "disclosure": services.disclosure(device, data),
+                    "device": services.device_json(device),
+                },
             )
-        device, token, relay_login = services.pair(code, data, client_ip(request))
+        device, token = services.pair(code, data, client_ip(request))
     except services.PairingError as exc:
         return _error(request, exc.status, str(exc))
     return _respond(
         request,
         {
             "token": token,
-            "device": _device_json(device),
+            "device": services.device_json(device),
             "checkin_seconds": device.checkin_seconds,
-            "disclosure": _disclosure(device, data),
-            # Phones: check in by RPUSHing signed messages here (Upstash REST), not /checkin.
-            **({"relay": relay_login} if relay_login else {}),
+            "disclosure": services.disclosure(device, data),
         },
         status=201,
     )
-
-
-def _disclosure(device, info: dict) -> str:
-    """Shown on the device before monitoring starts (store rules, and plain honesty).
-    It names exactly what that kind of device sends: computers send no location, and only
-    the agent on a child's or staff computer can be asked for activity and blocking."""
-    what = (
-        "CPU, memory, GPU, battery and storage use, network (Wi-Fi name), and system version"
-        if device.platform in COMPUTERS
-        else "battery, storage, network and location"
-    )
-    text = f"{device.account.name} will see this device's last online time, {what}."
-    agent = str(info.get("app_version", "")).startswith(AGENT_APP)
-    if agent and device.platform in COMPUTERS and device.controls_owner_ok:
-        if info.get("agent_mode") == "user":  # runs as this person: can't block sites
-            text += (" They can also turn on screen time (which apps you use, and for how "
-                     "long), websites visited (site names and time, not pages or "
-                     "searches) for your account, and this computer's location.")  # fmt: skip
-        else:
-            text += (" They can also turn on screen time (which apps are used, and for "
-                     "how long), websites visited (site names and time, not pages or "
-                     "searches), this computer's location, and blocking of adult or "
-                     "chosen websites on it.")  # fmt: skip
-    return text
 
 
 @csrf_exempt
@@ -184,7 +149,7 @@ def checkin(request):
         {
             "checkin_seconds": device.checkin_seconds,
             "server_time": timezone.now().isoformat(),
-            "device": _device_json(device),
+            "device": services.device_json(device),
             "controls": _controls_json(device),
         },
     )

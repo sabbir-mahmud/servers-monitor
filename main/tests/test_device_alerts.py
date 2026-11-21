@@ -13,7 +13,8 @@ from apps.devices import services
 from apps.devices.models import Device
 
 from . import test_devices
-from .test_devices import add_device, api_checkin, api_pair
+from .phones import pair_phone
+from .test_devices import add_device
 
 pytestmark = pytest.mark.django_db
 family, parent, sara = test_devices.family, test_devices.parent, test_devices.sara
@@ -21,10 +22,11 @@ family, parent, sara = test_devices.family, test_devices.parent, test_devices.sa
 
 @pytest.fixture
 def phone(client, parent, sara):
+    """A phone paired through the relay; checks in as the app does (tests/phones.py)."""
     client.force_login(parent)
     device, code = add_device(client, sara)
-    token = api_pair(client, code).json()["token"]
-    return Device.objects.get(pk=device.pk), token
+    app = pair_phone(device, code)
+    return app.device, app
 
 
 @pytest.fixture
@@ -47,38 +49,38 @@ def open_alerts(device, kind):
 
 
 def test_low_battery_opens_then_resolves_when_charging(client, phone):
-    device, token = phone
-    api_checkin(client, token, {"battery": {"percent": 12, "charging": False}})
+    device, app = phone
+    app.checkin({"battery": {"percent": 12, "charging": False}})
     alert = open_alerts(device, AlertKind.BATTERY).get()
     assert alert.severity == Severity.WARNING and alert.message.startswith("Battery at 12%")
     assert alert.account_id == device.account_id
 
-    api_checkin(client, token, {"battery": {"percent": 4, "charging": False}})
+    app.checkin({"battery": {"percent": 4, "charging": False}})
     assert open_alerts(device, AlertKind.BATTERY).get().severity == Severity.CRITICAL
 
-    api_checkin(client, token, {"battery": {"percent": 5, "charging": True}})
+    app.checkin({"battery": {"percent": 5, "charging": True}})
     assert not open_alerts(device, AlertKind.BATTERY).exists()
 
 
 def test_battery_hysteresis(client, phone):
-    device, token = phone
-    api_checkin(client, token, {"battery": {"percent": 15, "charging": False}})
-    api_checkin(client, token, {"battery": {"percent": 18, "charging": False}})
+    device, app = phone
+    app.checkin({"battery": {"percent": 15, "charging": False}})
+    app.checkin({"battery": {"percent": 18, "charging": False}})
     assert open_alerts(device, AlertKind.BATTERY).exists()  # 18 is within 5 of the mark
-    api_checkin(client, token, {"battery": {"percent": 21, "charging": False}})
+    app.checkin({"battery": {"percent": 21, "charging": False}})
     assert not open_alerts(device, AlertKind.BATTERY).exists()
 
 
 def test_silent_device_opens_not_reporting_once_and_checkin_resolves(client, phone, settings):
-    device, token = phone
+    device, app = phone
     settings.DEVICE_OFFLINE_ALERT_HOURS = 4
-    api_checkin(client, token, {})
+    app.checkin({})
     Device.objects.filter(pk=device.pk).update(last_seen_at=timezone.now() - timedelta(hours=5))
     assert sweep()["devices_silent"] == 1
     assert sweep()["devices_silent"] == 0  # already open
     alert = open_alerts(device, AlertKind.DEVICE_OFFLINE).get()
     assert alert.message == "Sara's phone hasn't reported for 5 h"
-    api_checkin(client, token, {})
+    app.checkin({})
     assert not open_alerts(device, AlertKind.DEVICE_OFFLINE).exists()
 
 
@@ -89,11 +91,11 @@ def test_unpaired_and_recent_devices_never_alert(client, parent, sara):
 
 
 def test_device_alerts_are_announced_with_a_link(client, phone, outbox, settings, family):
-    device, token = phone
+    device, app = phone
     settings.DASHBOARD_URL = "https://watch.example"
     channel(family)
     channel(family, name="servers-only", include_devices=False)
-    api_checkin(client, token, {"battery": {"percent": 9, "charging": False}})
+    app.checkin({"battery": {"percent": 9, "charging": False}})
     assert delivery.process() == 1
     name, text = outbox[0]
     assert name == "mum" and "Battery low" in text and "Sara's phone · Sara" in text
@@ -101,22 +103,22 @@ def test_device_alerts_are_announced_with_a_link(client, phone, outbox, settings
 
 
 def test_other_accounts_never_hear_about_a_device(client, phone, outbox, account):
-    device, token = phone
+    device, app = phone
     channel(account, name="acme")
-    api_checkin(client, token, {"battery": {"percent": 9, "charging": False}})
+    app.checkin({"battery": {"percent": 9, "charging": False}})
     assert delivery.process() == 0
 
 
 def test_deleting_a_device_removes_its_alerts(client, phone):
-    device, token = phone
-    api_checkin(client, token, {"battery": {"percent": 9, "charging": False}})
+    device, app = phone
+    app.checkin({"battery": {"percent": 9, "charging": False}})
     device.delete()
     assert not Alert.objects.exists()
 
 
 def test_alert_list_and_api_show_the_device(client, phone, parent):
-    device, token = phone
-    api_checkin(client, token, {"battery": {"percent": 9, "charging": False}})
+    device, app = phone
+    app.checkin({"battery": {"percent": 9, "charging": False}})
     page = client.get(reverse("alerts:list")).content.decode()
     assert "Battery at 9%" in page and reverse("devices:detail", args=[device.pk]) in page
 

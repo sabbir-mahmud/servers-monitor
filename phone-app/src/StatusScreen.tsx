@@ -91,7 +91,7 @@ export function StatusScreen({ session, onUnpaired }: { session: Session; onUnpa
       sub.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per pairing
-  }, [session.token, session.checkinSeconds]);
+  }, [session.relay.token, session.checkinSeconds]);
 
   async function allowLocation() {
     const answer = await Location.requestForegroundPermissionsAsync();
@@ -157,12 +157,14 @@ export function StatusScreen({ session, onUnpaired }: { session: Session; onUnpa
             accessibilityElementsHidden
           />
           <Text style={[styles.title, { color: c.ink }]} accessibilityRole="header" numberOfLines={2}>
-            {d.name}
+            Connected
           </Text>
         </View>
+        <Text style={[styles.who, { color: c.ink }]} accessibilityLabel={`Connected as ${session.name}`}>
+          as {session.name}
+        </Text>
         <Muted>
-          Connected to {d.account}
-          {d.person ? `, for ${d.person}` : ''}. {status}.
+          “{d.name}” in {d.account}. {status}.
         </Muted>
         {result && !result.ok ? <ErrorText>{result.message}</ErrorText> : null}
 
@@ -191,7 +193,7 @@ export function StatusScreen({ session, onUnpaired }: { session: Session; onUnpa
 
         <Button label="Report now" busy={busy} onPress={() => void check()} />
         <Button label="Unpair this phone" kind="danger" disabled={busy} onPress={unpair} />
-        <Muted center>{session.server}</Muted>
+        <Muted center>Reports to {d.account} through the relay, never directly</Muted>
       </ScrollView>
     </SafeAreaView>
   );
@@ -204,4 +206,5 @@ const styles = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   dot: { width: 12, height: 12, borderRadius: 6 },
   title: { fontSize: type.title, fontWeight: '700', letterSpacing: -0.5, flexShrink: 1 },
+  who: { fontSize: type.body, fontWeight: '600', marginTop: -space.sm },
 });
