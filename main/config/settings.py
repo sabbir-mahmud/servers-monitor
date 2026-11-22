@@ -323,17 +323,18 @@ ADULT_BLOCKLIST_URL = config(
     "ADULT_BLOCKLIST_URL",
     default="https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts",
 )
-# The device agent builds (device-agent/build.sh) the connect command installs: without
-# them it can't connect a computer.
 # Free city-level IP database ({month} = 2026-11) for computers that can't report a precise
 # location. Fetched about monthly by the relay, looked up locally. "" turns it off.
 DEVICE_GEOIP_URL = config(
     "DEVICE_GEOIP_URL",
     default="https://download.db-ip.com/free/dbip-city-lite-{month}.mmdb.gz",
 )
-DEVICE_AGENT_DIR = Path(
-    config("DEVICE_AGENT_DIR", default=str(BASE_DIR.parent / "device-agent" / "dist"))
-)
+# The device agent builds (device-agent/build.sh) the connect command installs: without
+# them it can't connect a computer. When they're the ones next to the agent's source and Go
+# is installed, they're rebuilt whenever the source is newer (apps/devices/agentbuild.py).
+DEVICE_AGENT_SOURCE = BASE_DIR.parent / "device-agent"
+DEVICE_AGENT_DIR = Path(config("DEVICE_AGENT_DIR", default=str(DEVICE_AGENT_SOURCE / "dist")))
+DEVICE_AGENT_AUTOBUILD = config("DEVICE_AGENT_AUTOBUILD", default=True, cast=bool)
 # The NexGuard phone app's Android build (an EAS .apk; `make phone-app-apk` puts it here).
 # The phone pair page offers it as a direct download, newest file first.
 PHONE_APP_DIR = Path(config("PHONE_APP_DIR", default=str(BASE_DIR.parent / "phone-app" / "dist")))

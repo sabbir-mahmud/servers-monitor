@@ -62,7 +62,8 @@ copies this program into that folder and runs it as the person with
 service (`nexguard-agent`, or an autostart entry without systemd) or a sign-in task
 (*NexGuard agent*), the same thing the dashboard's one-line command sets up.
 It does health, screen time and websites for that person only, and never touches the
-hosts file. Serve the builds from the dashboard by running `./build.sh` (into `dist/`).
+hosts file. Serve the builds from the dashboard by running `./build.sh` (into `dist/`);
+a dashboard with Go installed rebuilds them by itself when the source is newer.
 
 **Log**: `logs/nexguard.log` next to the config, one JSON object per line (start, stop,
 each check-in, settings the dashboard switched on or off, errors), readable without

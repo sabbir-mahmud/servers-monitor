@@ -118,7 +118,8 @@ relay: paste the line again and the agent replaces it.)
 
 The one-line command installs the NexGuard agent (`device-agent/`) when the dashboard has
 builds of it (`device-agent/build.sh` writes them to `device-agent/dist/`, or set
-`DEVICE_AGENT_DIR`). It downloads the one for that computer, checks it against
+`DEVICE_AGENT_DIR`). Where Go is installed, the dashboard rebuilds them by itself when
+`device-agent/` changes (`DEVICE_AGENT_AUTOBUILD`). It downloads the one for that computer, checks it against
 `SHA256SUMS`, and asks for the computer's **administrator password** (sudo on a Mac or
 Linux, a permission prompt on Windows). It then runs as a protected system service: it
 reports health, screen time and websites, blocks websites when they're turned on (below),

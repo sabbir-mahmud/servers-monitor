@@ -41,6 +41,7 @@ def _clean_cache():
 def _no_forced_2fa(settings):
     """Most tests sign in as an Admin; 2FA enforcement has its own tests (test_two_factor)."""
     settings.REQUIRE_2FA_FOR_ADMINS = False
+    settings.DEVICE_AGENT_AUTOBUILD = False  # tests never rebuild the real agent builds
 
 
 @pytest.fixture

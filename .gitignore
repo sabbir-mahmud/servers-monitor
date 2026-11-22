@@ -16,3 +16,5 @@ geoip-city.mmdb*
 main/backups/
 # Device agent builds (device-agent/build.sh)
 device-agent/dist/
+device-agent/.dist-*/
+device-agent/.build.lock

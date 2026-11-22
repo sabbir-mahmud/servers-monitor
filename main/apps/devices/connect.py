@@ -24,7 +24,7 @@ from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import render
 from django.template.loader import render_to_string
 
-from . import pairing
+from . import agentbuild, pairing
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +131,8 @@ def relay_pair_url() -> str:
 
 def install_script(request, code, kind):
     code = clean_code(code)
+    # The agent download comes after the password prompt: rebuild meanwhile if needed.
+    agentbuild.refresh_in_background()
     template = {"sh": "devices/install/install.sh", "ps1": "devices/install/install.ps1"}[kind]
     body = render_to_string(
         template,
@@ -156,6 +158,7 @@ def agent_file(request, name):
     secret, and the pairing code is what lets it in."""
     if not AGENT_FILE_RE.match(name):
         raise Http404("Not an agent file.")
+    agentbuild.wait_until_fresh()
     path = Path(settings.DEVICE_AGENT_DIR) / name
     if not path.is_file():
         raise Http404("This dashboard has no agent build for that system.")
