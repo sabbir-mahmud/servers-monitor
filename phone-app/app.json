@@ -65,6 +65,14 @@
             "backgroundColor": "#111113"
           }
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "extraProguardRules": "# WorkManager (expo-background-task) creates its Room database by reflection: R8 must keep\n# the generated constructors, or the app crashes at start (NoSuchMethodException).\n-keep class * extends androidx.room.RoomDatabase { <init>(); }\n-keep class androidx.work.impl.WorkDatabase_Impl { *; }\n-keep class androidx.work.** { *; }\n# NexGuard's native module: its service and receivers are created by Android.\n-keep class expo.modules.nexguardguard.** { *; }"
+          }
+        }
       ]
     ],
     "scheme": "nexguard",
