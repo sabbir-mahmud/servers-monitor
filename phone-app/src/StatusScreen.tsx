@@ -18,7 +18,7 @@ import {
 import type { Report } from './report';
 import { clearSession, type Session } from './session';
 import { space, type, useColors } from './theme';
-import { Button, Card, ErrorText, Muted, Row, SosButton } from './ui';
+import { Button, Card, ErrorText, Logo, Muted, Row, SosButton } from './ui';
 
 function bytes(n: number): string {
   const gb = n / 1e9;
@@ -177,7 +177,7 @@ export function StatusScreen({ session, onUnpaired }: { session: Session; onUnpa
   return (
     <SafeAreaView style={[styles.fill, { backgroundColor: c.bg }]}>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={[styles.brand, { color: c.accent }]}>NexGuard</Text>
+        <Logo />
         <View style={styles.head}>
           <View
             style={[styles.dot, { backgroundColor: result && !result.ok ? c.bad : c.good }]}
@@ -241,7 +241,6 @@ export function StatusScreen({ session, onUnpaired }: { session: Session; onUnpa
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   content: { padding: space.xl, gap: space.lg, paddingBottom: space.xxl },
-  brand: { fontSize: type.small, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase', marginTop: space.lg },
   head: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   dot: { width: 12, height: 12, borderRadius: 6 },
   title: { fontSize: type.title, fontWeight: '700', letterSpacing: -0.5, flexShrink: 1 },

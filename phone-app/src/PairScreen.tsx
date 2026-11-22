@@ -15,7 +15,7 @@ import { SetupScreen } from './SetupScreen';
 import { deviceInfo } from './report';
 import { saveSession, type Session } from './session';
 import { space, type, useColors } from './theme';
-import { Button, ErrorText, Field, Muted } from './ui';
+import { Button, ErrorText, Field, Logo, Muted } from './ui';
 
 function message(error: unknown): string {
   return error instanceof ApiError || error instanceof Error ? error.message : 'Something went wrong.';
@@ -89,7 +89,7 @@ export function PairScreen({ onPaired }: { onPaired: (session: Session) => void 
     <SafeAreaView style={[styles.fill, { backgroundColor: c.bg }]}>
       <KeyboardAvoidingView style={styles.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <Text style={[styles.brand, { color: c.accent }]}>NexGuard</Text>
+          <Logo />
           <Text style={[styles.title, { color: c.ink }]} accessibilityRole="header">
             Connect this phone
           </Text>
@@ -130,7 +130,6 @@ export function PairScreen({ onPaired }: { onPaired: (session: Session) => void 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   content: { padding: space.xl, gap: space.lg, paddingBottom: space.xxl },
-  brand: { fontSize: type.small, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase', marginTop: space.lg },
   title: { fontSize: type.title, fontWeight: '700', letterSpacing: -0.5 },
   code: { fontSize: 28, letterSpacing: 6, textAlign: 'center', fontVariant: ['tabular-nums'] },
 });

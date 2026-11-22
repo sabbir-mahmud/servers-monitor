@@ -1,29 +1,30 @@
-// Colours and spacing, light and dark, in step with the dashboard's look.
+// Colours and spacing, light and dark: the dashboard's own (main/static/css/app.css), so
+// the app and the dashboard look like one product. Brand blue is the logo's #4a6cf0.
 import { useColorScheme } from 'react-native';
 
 const light = {
-  bg: '#f5f5f7',
+  bg: '#f3f3f0',
   surface: '#ffffff',
   ink: '#1d1d1f',
-  ink2: '#6e6e73',
-  line: '#e5e5ea',
-  accent: '#0a66d8',
+  ink2: '#55555b',
+  line: '#e3e2dc',
+  accent: '#3b62d9',
   onAccent: '#ffffff',
-  good: '#1f8a4c',
-  bad: '#c62828',
+  good: '#2f9e5b',
+  bad: '#d24848',
   scrim: 'rgba(0,0,0,0.55)',
 };
 
 const dark: typeof light = {
-  bg: '#000000',
-  surface: '#1c1c1e',
-  ink: '#f5f5f7',
-  ink2: '#a1a1a6',
-  line: '#2c2c2e',
-  accent: '#3d8bfd',
-  onAccent: '#ffffff',
-  good: '#34c76f',
-  bad: '#ff6b6b',
+  bg: '#111113',
+  surface: '#18181b',
+  ink: '#e7e7ea',
+  ink2: '#a5a5ad',
+  line: '#28282d',
+  accent: '#7d96f5',
+  onAccent: '#0f1430',
+  good: '#4cbd78',
+  bad: '#ec6a6a',
   scrim: 'rgba(0,0,0,0.65)',
 };
 

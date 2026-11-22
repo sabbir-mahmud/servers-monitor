@@ -1,7 +1,8 @@
-// Small shared pieces: buttons, cards, rows, fields.
+// Small shared pieces: the logo, buttons, cards, rows, fields.
 import type { ReactNode, Ref } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -120,7 +121,21 @@ export function ErrorText({ children }: { children: ReactNode }) {
   );
 }
 
+/** The NexGuard logo (the dashboard's, scripts/brand-assets.py) and name, atop a screen. */
+export function Logo() {
+  const c = useColors();
+  return (
+    <View style={styles.logo} accessibilityRole="header" accessibilityLabel="NexGuard">
+      <Image source={require('../assets/logo.png')} style={styles.logoMark} />
+      <Text style={[styles.logoText, { color: c.ink }]}>NexGuard</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  logo: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16 },
+  logoMark: { width: 32, height: 32, borderRadius: 8 },
+  logoText: { fontSize: 18, fontWeight: '700', letterSpacing: -0.3 },
   sosWrap: { alignItems: 'center', gap: space.sm },
   sos: { width: 112, height: 112, borderRadius: 56, alignItems: 'center', justifyContent: 'center' },
   sosText: { fontSize: 28, fontWeight: '800', letterSpacing: 1 },

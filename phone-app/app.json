@@ -12,7 +12,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#4a6cf0",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -52,6 +52,19 @@
           "isAndroidBackgroundLocationEnabled": true,
           "locationAlwaysAndWhenInUsePermission": "NexGuard shares this phone’s location with the account you paired it with, as shown before you allowed it."
         }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 120,
+          "resizeMode": "contain",
+          "backgroundColor": "#f3f3f0",
+          "dark": {
+            "image": "./assets/splash-icon.png",
+            "backgroundColor": "#111113"
+          }
+        }
       ]
     ],
     "scheme": "nexguard",
@@ -60,6 +73,7 @@
         "projectId": "2a54611e-236e-4a24-b771-7dc748a6a02c"
       }
     },
-    "owner": "nexguard"
+    "owner": "nexguard",
+    "primaryColor": "#4a6cf0"
   }
 }
