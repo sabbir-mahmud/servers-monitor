@@ -151,7 +151,8 @@ class FakeRedis:
 
     def __init__(self):
         self.lists: dict[str, list[str]] = {}
-        self.strings: dict[str, str] = {}  # SET/GET (expiry not modelled)
+        self.strings: dict[str, str] = {}  # SET/GET (expiry recorded, not enforced)
+        self.expiry: dict[str, int] = {}
         self.users: dict[str, list] = {}
         self.tokens: set[str] = set()
         self.down = False
@@ -211,6 +212,8 @@ class FakeRedis:
     def set(self, key, value, ex=None):
         self._check()
         self.strings[key] = value
+        if ex is not None:
+            self.expiry[key] = ex
         return True
 
     def get(self, key):

@@ -6,10 +6,11 @@
 import * as BackgroundTask from 'expo-background-task';
 import * as TaskManager from 'expo-task-manager';
 
+import { guard } from '../modules/nexguard-guard';
 import { ApiError } from './api';
-import { pushCheckin, sealCheckin, sealSos } from './relay';
+import { pushCheckin, readSettings, sealCheckin, sealSos } from './relay';
 import { collectReport, location, type Report } from './report';
-import { clearSession, loadSession } from './session';
+import { clearSession, loadSession, saveSession, type Session } from './session';
 
 export const BACKGROUND_TASK = 'nexguard-checkin';
 
@@ -33,19 +34,61 @@ export function checkinNow(): Promise<CheckinResult | null> {
 async function run(): Promise<CheckinResult | null> {
   const session = await loadSession();
   if (!session) return null;
+  if (guard?.wasUnpaired()) {
+    // The filter service heard first that it was removed on the dashboard.
+    await forget();
+    return { ok: false, at: new Date(), message: 'This phone was removed on the dashboard.', unpaired: true };
+  }
   const report = await collectReport();
+  // Android controls: what's new since the last check-in that got through, and what the
+  // service noticed was turned off but couldn't tell itself.
+  const c = session.controls ?? {};
+  const raw = guard?.takeActivity(c.screen_time === true, c.web_activity === true) ?? null;
+  const activity = raw ? (JSON.parse(raw) as { batch: string }) : null;
+  const tamper = guard?.takeTamper() ?? [];
+  const full: Report = {
+    ...report,
+    ...(activity ? { activity } : {}),
+    ...(tamper.length ? { tamper } : {}),
+    ...(guard ? { config: session.settingsDigest } : {}),
+  };
   try {
-    await pushCheckin(session.relay, sealCheckin(session.relay, report));
-    return { ok: true, at: new Date(), report };
+    await pushCheckin(session.relay, sealCheckin(session.relay, full));
+    if (activity) guard?.commitActivity(activity.batch);
+    await followSettings(session);
+    return { ok: true, at: new Date(), report: full };
   } catch (error) {
     const unpaired = error instanceof ApiError && error.status === 401;
-    if (unpaired) {
-      await clearSession();
-      await stopBackgroundCheckins();
-    }
+    if (unpaired) await forget();
     const message = error instanceof Error ? error.message : 'The check-in failed.';
     return { ok: false, at: new Date(), message, unpaired };
   }
+}
+
+/** Removed on the dashboard (or paired again elsewhere): forget the pairing, stop the
+ * filter and release removal protection, so NexGuard can be uninstalled. */
+async function forget(): Promise<void> {
+  guard?.stop();
+  await clearSession();
+  await stopBackgroundCheckins();
+}
+
+/** After a check-in: the dashboard may have left new settings. Hand them to the filter
+ * service and remember which ones this phone has. */
+async function followSettings(session: Session): Promise<void> {
+  if (!guard) return;
+  const settings = await readSettings(session.relay).catch((error: unknown) => {
+    if (error instanceof ApiError && error.status === 401) throw error;
+    return null;
+  });
+  if (!settings || settings.digest === session.settingsDigest) return;
+  guard.update(JSON.stringify(settings.controls));
+  await saveSession({
+    ...session,
+    settingsDigest: settings.digest,
+    controls: settings.controls,
+    checkinSeconds: settings.checkinSeconds,
+  });
 }
 
 /** The SOS button: tells everyone on the account at once, with where the phone is. With

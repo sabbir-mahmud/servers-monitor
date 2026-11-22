@@ -12,6 +12,11 @@ export type Session = {
   name: string; // who it's connected as (shown on the status screen)
   disclosure: string; // what the account sees, shown when asking for permissions
   permissionsAsked: boolean; // the permissions step after connecting is done
+  // Controls can be turned on for this phone (a child's or staff member's, on Android):
+  // then it can't be unpaired from the phone, only removed on the dashboard.
+  controlled: boolean;
+  settingsDigest: string; // the dashboard's settings this phone has ("" = none yet)
+  controls: Record<string, unknown> | null; // what they turn on
 };
 
 // v3: paired through the relay. v2 (paired over HTTP by an older app, which also kept the
@@ -35,13 +40,23 @@ function parse(raw: string | null): Session | null {
   return {
     device: value.device,
     checkinSeconds: typeof value.checkinSeconds === 'number' ? value.checkinSeconds : 900,
-    relay: { url: relay.url, token: relay.token, inbox: relay.inbox, key: relay.key },
+    relay: {
+      url: relay.url,
+      token: relay.token,
+      inbox: relay.inbox,
+      key: relay.key,
+      ...(typeof relay.config === 'string' ? { config: relay.config } : {}),
+      ...(typeof relay.command === 'string' ? { command: relay.command } : {}),
+    },
     name:
       typeof value.name === 'string' && value.name
         ? value.name
         : (value.device.person ?? value.device.account),
     disclosure: typeof value.disclosure === 'string' ? value.disclosure : '',
     permissionsAsked: value.permissionsAsked !== false, // older pairings asked when pairing
+    controlled: value.controlled === true,
+    settingsDigest: typeof value.settingsDigest === 'string' ? value.settingsDigest : '',
+    controls: value.controls && typeof value.controls === 'object' ? value.controls : null,
   };
 }
 

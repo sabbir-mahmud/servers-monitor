@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Removal protection only: while NexGuard is a device admin, Android won't uninstall it.
+     It asks for no policy that could lock, wipe or watch the phone. -->
+<device-admin>
+  <uses-policies />
+</device-admin>

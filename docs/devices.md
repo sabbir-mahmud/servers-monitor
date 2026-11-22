@@ -34,46 +34,61 @@ The pair page has the same steps under *Do it from here*.
 
 ## Add a phone (Android or iPhone)
 
-Phones use the NexGuard phone app ([phone-app/](../phone-app/README.md), Expo SDK 58,
-built with EAS).
-
-1. **Devices → Add device**, pick Android or iPhone, give it a name. The pair page shows
-   two QR codes: one for the phone's camera to install the app, and one for the app to
-   pair (`nexguard://pair?server=…&code=…`), with the code.
+1. **Devices → Add device**, pick Android or iPhone, give it a name. The pair page shows a
+   6-digit code (it works once, for 15 minutes) and a QR code to install the app.
 2. Install the app:
-   - **Android:** the dashboard serves the app itself at `/d/app/NexGuard.apk`, the newest
-     `.apk` in `PHONE_APP_DIR`. Run `make phone-app-apk` to fill it. Android asks once to
-     allow installing from the browser.
+   - **Android:** the dashboard serves it at `/d/app/NexGuard.apk`, the newest `.apk` in
+     `PHONE_APP_DIR` (put your build there). Android asks once to allow installing from
+     the browser.
    - **iPhone:** Apple doesn't allow installing from a download. The pair page links to
      `IOS_APP_URL`, NexGuard's TestFlight public link or App Store page.
-3. Open NexGuard and choose **Scan the QR code**, or type the dashboard address and the
-   code.
-4. It shows what the account will see (last online time, battery, storage, network and
-   location) and pairs only on **Allow**. Then it asks once for location; without it,
-   everything else is still shared.
+3. Open NexGuard and type the code. It shows who will see the phone and what they can turn
+   on (a preview: the code stays valid), then asks for each permission it needs, one at a
+   time, saying why. Only then does it connect. Saying no to a permission still connects;
+   the device page shows what's missing.
 
-**Phones check in through the Redis relay, not to the dashboard.** Pairing gives the phone
-its own Upstash login, allowed only to push signed check-ins to its own list. The relay
-process (`manage.py relay`) picks them up. So a phone keeps reporting from anywhere, on
-mobile data or another Wi-Fi, while the dashboard stays private. This needs an Upstash
-`REDIS_URL`: without one, pairing a phone fails and says why. See
+**Phones never talk to the dashboard.** Pairing, check-ins, SOS, settings and commands all
+go through the Upstash Redis relay (HTTPS REST): the app pairs with a built-in login that
+can only send pairing requests, and gets its own login, allowed only to push signed
+check-ins to `sm:d:<id>:in` and read its signed settings (`:cfg`) and commands (`:cmd`).
+So a phone reports from anywhere while the dashboard stays private. This needs an Upstash
+`REDIS_URL` and the relay process (`manage.py relay`) running. See
 [architecture.md](architecture.md#the-relay-protocol).
 
-Only pairing talks to the dashboard, so the phone must reach the dashboard's address once,
-while you set it up. If the dashboard runs on
-`127.0.0.1`, the pair page warns that a phone can't use it: open the dashboard by its
-network address, or set `DASHBOARD_URL`.
+**When it reports.** When it opens, at the dashboard's interval while open, and from the
+background when Android or iOS allows it (at most every 15 minutes). In **Expo Go** nothing
+runs in the background, and there are no Android controls (below).
 
-**When it reports.** It reports when it opens, every 15 minutes while open (or at the
-dashboard's interval), and each time it comes back to the front. The EAS builds also
-check in from the background (`expo-background-task`). When you run the app in **Expo Go**
-during development, it skips that: Expo Go runs nothing in the background. The system runs that at
-most every 15 minutes, and less often when it's saving battery. Location comes from the
-check-in itself (while in use), never from continuous background tracking.
+### Android controls (NexGuard 1.2)
 
-**Unpairing.** *Unpair this phone* in the app forgets the token there. Removing the
-device on the dashboard makes its next check-in fail with 401, and the app then goes
-back to the pairing screen by itself.
+For a child's or staff member's Android phone, or your own in a solo account, **Controls**
+on the device page turns on the same things as on a computer:
+
+| | How on the phone |
+|---|---|
+| **Screen time** | Minutes per app per day, from Android's usage statistics ("Usage access" for NexGuard). |
+| **Websites visited** | The sites browsers look up (Chrome, Firefox, Edge, Samsung Internet, Brave and others), reduced to the site (`m.youtube.com` → `youtube.com`). Never pages or searches. Android 10 or newer. Time is approximate: a minute with a lookup counts as a minute there. |
+| **Block adult websites** | DNS goes to Cloudflare's family resolver (1.1.1.3) instead of 1.1.1.1. |
+| **SafeSearch, Also block / Always allow** | Answered on the phone; a site covers every name under it. |
+| **Beep** | The device page's **Beep** rings the phone loudly for 30 seconds, even on silent, within about 30 seconds while it's online. |
+| **Removal protection** | NexGuard is a *device admin*, so Android won't uninstall it. It can't be unpaired in the app either: only by deleting the device on the dashboard, which releases the protection so the app can be removed. |
+
+Websites and blocking use a **website filter**: a VPN on the phone that routes only its own
+DNS server address, so it sees name lookups and nothing else. A notification shows while
+NexGuard runs. It checks the dashboard for a beep every 30 seconds (about 2,900 relay
+requests a day per phone).
+
+**Turned off on the phone** raises an alert at once: removal protection switched off
+(Settings → Security → Device admin apps), the filter turned off or replaced by another VPN,
+Private DNS set (which gets around the filter), usage access or notifications taken away.
+
+Limits worth knowing:
+- Removal protection can be turned off by whoever holds the phone; that's Android's rule
+  for apps that aren't set up as a managed device. The dashboard is told when it happens.
+- A browser's own secure DNS (set by hand in Chrome or Firefox) gets around the filter and
+  can't be detected. Private windows still look names up, so they are recorded.
+- iPhones get location, battery and SOS only: Apple allows screen time and blocking only
+  through Family Controls, which needs Apple's approval.
 
 ## What gets installed
 

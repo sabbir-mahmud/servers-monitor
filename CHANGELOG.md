@@ -11,6 +11,19 @@ The project is now **NexGuard**: one install serves many separate accounts. Agen
 working without an upgrade (`server-monitor-agent`, `smctl` and the relay keys keep their
 names); upgrading gets the relay backlog fixes below.
 
+### Added
+
+- **Android phone controls (NexGuard app 1.2).** A child's or staff member's Android
+  phone (or your own, solo) gets screen time, websites visited, adult-site blocking,
+  SafeSearch and block/allow lists, like a computer, plus **Beep** (rings for 30 s, even
+  on silent) and removal protection (a device admin: it can't be uninstalled, or unpaired
+  in the app, until the device is deleted on the dashboard). Websites and blocking use an
+  on-phone DNS filter (a VPN that sees only name lookups); adult blocking uses Cloudflare's
+  family resolver. Turning a protection off on the phone raises an alert at once. The app
+  now shows who will see the phone and asks for every permission **before** pairing.
+  Still only through the relay: phones read signed settings and commands from
+  `sm:d:<id>:cfg` / `:cmd`. iPhones keep location, battery and SOS.
+
 ### Changed
 
 - **Computers check in through the Redis relay, and the device HTTP API is gone.**

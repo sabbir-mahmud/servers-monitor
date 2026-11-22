@@ -38,8 +38,9 @@ its own ACL user `sm-d-<device id>`:
 
 ```
 sm:d:<device id>:in    device → dashboard   ci (check-in), sos (phones)
-sm:d:<device id>:cfg   dashboard → device   settings: interval, controls (computers; SET/GET)
+sm:d:<device id>:cfg   dashboard → device   settings: interval, controls (SET/GET)
 sm:d:<device id>:bl    dashboard → device   blocklist, gzipped (computers; SET/GET)
+sm:d:<device id>:cmd   dashboard → device   a beep (Android; SET EX 600, polled every 30 s)
 sm:pair:in             device → dashboard   pair requests (shared pairing logins)
 sm:pair:out:<nonce>    dashboard → device   pairing answers, under a name the device picked
 ```
@@ -47,7 +48,8 @@ sm:pair:out:<nonce>    dashboard → device   pairing answers, under a name the 
 - **Computers** (the Go agent) speak the Redis protocol, like server agents, so any Redis
   works. Their user may `RPUSH` to `…:in` and `GET` `…:cfg` and `…:bl`. **Phones** can't
   open a Redis connection, so they use Upstash's HTTPS REST API (`ACL RESTTOKEN`, an
-  Upstash extension) and may only `RPUSH`; phones need Upstash.
+  Upstash extension) and may `RPUSH` to `…:in` and `GET` `…:cfg` and `…:cmd`; phones need
+  Upstash. A phone paired before 1.2 is given the reads at its first check-in from 1.2.
 - **Pairing.** The device pushes `{"t":"pair","body":"{at, nonce, code, secret, info}"}`
   with a shared pairing login (`sm-app` built into the phone app, `sm-pc` in the install
   scripts the dashboard serves), allowed only `RPUSH` to `sm:pair:in` and `GET` on
@@ -67,6 +69,12 @@ sm:pair:out:<nonce>    dashboard → device   pairing answers, under a name the 
   check-in says it has (`config`, a digest), and its blocklist when the version differs
   from `blocking_applied`. Saving Controls writes them at once. The agent `GET`s both after
   each check-in and ignores anything not signed with its key.
+- **Android phones** get their settings like computers, but with the block and allow lists
+  inline (no `:bl`): their DNS filter matches whole domains and sends adult blocking to a
+  family resolver. Commands (`{"id","kind":"beep","at"}`) are signed the same way and run
+  once per id. A phone's filter service also pushes `{"report": {"partial": true,
+  "tamper": [...]}}` the moment a protection is turned off; the relay process applies only
+  the tamper codes, without touching the readings or the 30 s limit.
 - Pairing again resets the user and the key, which cuts off the old device. Removing the
   device deletes the user, so its next push is refused (`WRONGPASS` or a 401), and it
   forgets its pairing.

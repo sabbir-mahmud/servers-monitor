@@ -30,6 +30,28 @@ LOW_BATTERY = 15  # percent, not charging
 
 # app_version prefix the Go device agent reports (device-agent/internal/collect).
 AGENT_APP = "nexguard-agent "
+# The phone app's (phone-app/src/report.ts), and the first version with Android controls:
+# screen time, websites and blocking through its DNS filter, beep, removal protection.
+PHONE_APP = "nexguard-phone "
+PHONE_CONTROLS_VERSION = (1, 2)
+
+
+def phone_app_version(app_version: str) -> tuple[int, ...]:
+    """(1, 2, 0) from "nexguard-phone 1.2.0"; () for anything else, including Expo Go's
+    "1.2.0-nocontrols"."""
+    if not app_version.startswith(PHONE_APP):
+        return ()
+    pieces = app_version[len(PHONE_APP) :].strip().split(".")
+    if not 1 <= len(pieces) <= 3 or not all(p.isdigit() for p in pieces):
+        return ()  # e.g. "1.2.0-nocontrols": a build without the Android controls
+    return tuple(int(p) for p in pieces)
+
+
+def phone_has_controls(app_version: str) -> bool:
+    found = phone_app_version(app_version)
+    return bool(found) and found >= PHONE_CONTROLS_VERSION
+
+
 # Whose computers can have screen time, web activity and blocking (Person.kind values).
 CONTROLLED_PEOPLE = ("child", "staff")
 
@@ -269,13 +291,26 @@ class Device(Machine):
         adult's computer this is how stalkerware is abused. Only the agent: it runs as a
         service the user can't remove, and only it can read other users' browsers or edit
         the hosts file."""
-        if self.platform not in COMPUTERS:
-            return "Only for Windows, Mac and Linux computers."
+        if self.platform == Platform.IOS:
+            return "Screen time, websites and blocking are Android only."
+        if self.platform not in COMPUTERS and self.platform != Platform.ANDROID:
+            return "Only for Windows, Mac and Linux computers and Android phones."
+        kind = "phone" if self.platform == Platform.ANDROID else "computer"
         if not self.controls_owner_ok:
-            return "Only for a child's or a staff member's computer."
+            return f"Only for a child's or a staff member's {kind}."
+        if self.platform == Platform.ANDROID:
+            if self.app_version and not phone_has_controls(self.app_version):
+                return "Needs NexGuard 1.2 or newer on the phone: update the app."
+            return ""
         if not self.app_version.startswith(AGENT_APP):
             return "Needs the NexGuard agent: pair this computer again with the one-line command."
         return ""
+
+    @property
+    def can_beep(self) -> bool:
+        """The dashboard can make it ring: a paired Android phone with the 1.2 app."""
+        return (self.platform == Platform.ANDROID and bool(self.relay_salt)
+                and phone_has_controls(self.app_version))  # fmt: skip
 
     @property
     def controls_owner_ok(self) -> bool:

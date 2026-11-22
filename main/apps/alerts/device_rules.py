@@ -89,6 +89,14 @@ BYE = {
 }
 TAMPER_EVENTS = {
     "hosts_edited": "Someone changed the blocked-sites list on {who}; NexGuard put it back",
+    # Android phones (the app's filter service notices, and tells at once)
+    "admin_off": "NexGuard's removal protection was turned off on {who}: it can now be uninstalled",
+    "vpn_off": "NexGuard's website filter was turned off on {who} (another VPN, or it was "
+    "switched off): sites aren't blocked or recorded",
+    "private_dns": "Private DNS was set on {who}, which gets around NexGuard's website filter",
+    "usage_access_off": "Usage access was taken away from NexGuard on {who}: screen time "
+    "isn't recorded",
+    "notifications_off": "Notifications were turned off for NexGuard on {who}: it can't beep",
 }
 
 

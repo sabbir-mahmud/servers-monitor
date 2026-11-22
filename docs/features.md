@@ -212,7 +212,7 @@ See [devices.md](devices.md#add-a-phone-android-or-iphone) and
 | Machine | Talks to | How |
 |---|---|---|
 | Servers | Redis relay | Two lists per server (`sm:a:<id>:cmd` / `:in`), its own Redis user, signed messages |
-| Phones | Redis relay (Upstash REST) | Its own Redis user that can only push to `sm:d:<id>:in`, signed check-ins; pairs through the relay too |
+| Phones | Redis relay (Upstash REST) | Its own Redis user: pushes signed check-ins to `sm:d:<id>:in`, reads signed settings (`:cfg`) and beeps (`:cmd`, Android); pairs through the relay |
 | Computers | Redis relay | Its own Redis user: pushes signed check-ins to `sm:d:<id>:in`, reads signed settings (`:cfg`) and blocklist (`:bl`); pairs through the relay |
 
 No machine needs a route to the dashboard: both sides dial out to Redis, and the dashboard

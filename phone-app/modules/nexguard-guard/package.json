@@ -1,0 +1,7 @@
+{
+  "name": "nexguard-guard",
+  "version": "1.2.0",
+  "private": true,
+  "main": "index.ts",
+  "description": "NexGuard's Android controls: screen time, website filter, beep, removal protection"
+}

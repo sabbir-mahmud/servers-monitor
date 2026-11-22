@@ -198,8 +198,29 @@ class DeviceDetailView(StaffViewMixin, AccountScopedMixin, DetailView):
 BLOCK_FIELDS = ("block_adult", "safe_search", "blocked_domains", "allowed_domains")
 
 
+class DeviceBeepView(StaffViewMixin, AccountScopedMixin, DetailView):
+    """POST: make an Android phone ring loudly for 30 s, even on silent, to find it."""
+
+    permission_required = "devices.change_device"
+    model = Device
+    http_method_names = ["post"]
+
+    def post(self, request, pk):
+        device = self.get_object()
+        try:
+            services.beep(device)
+        except services.CommandError as exc:
+            messages.error(request, str(exc))
+        else:
+            record(request, "device.beep", target=device.name)
+            messages.success(request, f"{device.name} will ring within about 30 seconds, if "
+                             "it's online. It rings for 30 seconds, even on silent.")  # fmt: skip
+        return redirect("devices:detail", pk=device.pk)
+
+
 class DeviceControlsView(StaffViewMixin, AccountScopedMixin, UpdateView):
-    """Screen time, websites and blocking for a child's or staff member's computer."""
+    """Screen time, websites and blocking for a child's or staff member's computer or
+    Android phone."""
 
     permission_required = "devices.change_device"
     model = Device
@@ -212,7 +233,10 @@ class DeviceControlsView(StaffViewMixin, AccountScopedMixin, UpdateView):
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(
-            DEVICE_ACTIVITY_DAYS=settings.DEVICE_ACTIVITY_DAYS, live=self._live(), **kwargs
+            DEVICE_ACTIVITY_DAYS=settings.DEVICE_ACTIVITY_DAYS,
+            live=self._live(),
+            kind="phone" if self.object.is_phone else "computer",
+            **kwargs,
         )
 
     def _live(self) -> dict:

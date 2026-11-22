@@ -1,9 +1,12 @@
-// Paired: what this phone reports, when it last did, and a way to stop.
+// Paired: what this phone reports, when it last did, and a way to stop. A phone with
+// controls (a child's or staff member's Android phone) can't be unpaired here: only on the
+// dashboard, which then releases removal protection so NexGuard can be uninstalled.
 import * as Location from 'expo-location';
 import { useEffect, useState } from 'react';
 import { Alert, AppState, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { guard, type GuardPermission, type GuardStatus } from '../modules/nexguard-guard';
 import {
   backgroundAvailable,
   checkinNow,
@@ -49,8 +52,25 @@ function readings(r: Report | undefined, locationOn: boolean) {
   ];
 }
 
+/** Protections that are off on a controlled phone, and the screen that turns each on. */
+function missing(s: GuardStatus | null, controls: Record<string, unknown> | null) {
+  if (!s) return [];
+  const out: { label: string; open: GuardPermission }[] = [];
+  const filtering = !!controls && Object.entries(controls).some(
+    ([k, v]) => k !== 'location' && k !== 'screen_time' && (v === true || (Array.isArray(v) && v.length > 0) || (typeof v === 'object' && v !== null && Object.keys(v).length > 0)),
+  );
+  if (controls?.screen_time === true && !s.usage) out.push({ label: 'Screen time needs usage access', open: 'usage' });
+  if (filtering && !s.vpn) out.push({ label: 'The website filter is off', open: 'vpn' });
+  if (!s.admin) out.push({ label: 'Removal protection is off', open: 'admin' });
+  if (!s.notifications) out.push({ label: 'Notifications are off: it can’t ring', open: 'notifications' });
+  if (!s.battery) out.push({ label: 'Android may put NexGuard to sleep', open: 'battery' });
+  if (s.privateDns) out.push({ label: 'Private DNS gets around the filter: set it to Automatic', open: 'network' });
+  return out;
+}
+
 export function StatusScreen({ session, onUnpaired }: { session: Session; onUnpaired: () => void }) {
   const c = useColors();
+  const [guardStatus, setGuardStatus] = useState<GuardStatus | null>(guard?.status() ?? null);
   const [result, setResult] = useState<CheckinResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [locationOn, setLocationOn] = useState(true);
@@ -62,8 +82,14 @@ export function StatusScreen({ session, onUnpaired }: { session: Session; onUnpa
     const r = await checkinNow();
     const perm = await Location.getForegroundPermissionsAsync().catch(() => null);
     setLocationOn(!!perm?.granted);
+    if (guard) setGuardStatus(guard.status());
     if (r === null || (!r.ok && r.unpaired)) {
-      if (r && !r.ok) Alert.alert('Not paired any more', r.message);
+      if (r && !r.ok) {
+        Alert.alert(
+          'Not paired any more',
+          session.controlled ? `${r.message} NexGuard can be uninstalled now.` : r.message,
+        );
+      }
       onUnpaired();
       return;
     }
@@ -130,6 +156,7 @@ export function StatusScreen({ session, onUnpaired }: { session: Session; onUnpa
           style: 'destructive',
           onPress: async () => {
             await sayGoodbye();
+            guard?.stop();
             await stopBackgroundCheckins();
             await clearSession();
             onUnpaired();
@@ -191,8 +218,20 @@ export function StatusScreen({ session, onUnpaired }: { session: Session; onUnpa
           onOk={() => void sendHelp(true)}
         />
 
+        {session.controlled
+          ? missing(guardStatus, session.controls).map((m) => (
+              <Button key={m.label} label={m.label} kind="secondary" hint="Opens the setting that fixes this" onPress={() => guard?.open(m.open)} />
+            ))
+          : null}
+
         <Button label="Report now" busy={busy} onPress={() => void check()} />
-        <Button label="Unpair this phone" kind="danger" disabled={busy} onPress={unpair} />
+        {session.controlled ? (
+          <Muted center>
+            Only {d.account} can remove NexGuard from this phone, on their dashboard.
+          </Muted>
+        ) : (
+          <Button label="Unpair this phone" kind="danger" disabled={busy} onPress={unpair} />
+        )}
         <Muted center>Reports to {d.account} through the relay, never directly</Muted>
       </ScrollView>
     </SafeAreaView>

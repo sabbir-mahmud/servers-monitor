@@ -13,12 +13,12 @@
       <span class="acct-avatar acct-avatar-org ctl-device" aria-hidden="true">{% icon "laptop" 30 %}</span>
       <div class="acct-id">
         <h1 class="acct-name">Controls</h1>
-        <p class="acct-email">What {{ SITE_NAME }} records and blocks on {{ device.name }}{% if device.person %}, {{ device.person.name }}'s computer{% endif %}.</p>
+        <p class="acct-email">What {{ SITE_NAME }} records and blocks on {{ device.name }}{% if device.person %}, {{ device.person.name }}'s {{ kind }}{% endif %}.</p>
         <div class="meta-row">
           <span class="chip">{{ device.get_platform_display }}</span>
           {% if device.controls_allowed %}
           <span class="sep" aria-hidden="true"></span>
-          <span>{% if device.can_block %}Protected service{% else %}Installed without an administrator{% endif %}</span>
+          <span>{% if device.is_phone %}Protected app{% elif device.can_block %}Protected service{% else %}Installed without an administrator{% endif %}</span>
           <span class="sep" aria-hidden="true"></span>
           {% if live.pending %}<span class="ctl-sync is-pending">{% icon "clock" 13 %} Waiting for {{ device.name }} to pick up your last change</span>
           {% else %}<span class="ctl-sync">{% icon "check" 13 %} In effect since the check-in {{ device.last_seen_at|ago }}</span>{% endif %}
@@ -91,7 +91,7 @@
           <span class="acct-row-icon">{% icon "globe" 18 %}</span>
           <span class="acct-row-text">
             <span class="acct-row-title">Websites visited</span>
-            <span class="acct-row-sub">Site names with visits and time, like youtube.com. Never pages or searches.{% if device.platform == "macos" %} Needs Full Disk Access on a Mac.{% endif %}</span>
+            <span class="acct-row-sub">Site names with visits and time, like youtube.com. Never pages or searches.{% if device.is_phone %} From the sites the phone's browsers look up (Android 10 or newer).{% endif %}{% if device.platform == "macos" %} Needs Full Disk Access on a Mac.{% endif %}</span>
             {% if c.web_activity %}{% if device.web_no_access %}<span class="ctl-status is-warn">{% icon "alert" 13 %} Can't read {{ device.web_no_access|join:", " }}: give {{ SITE_NAME }} Full Disk Access in System Settings → Privacy &amp; Security.</span>
             {% else %}<span class="ctl-status">{% icon "globe" 13 %} {% if live.sites_today %}{{ live.sites_today }} site{{ live.sites_today|pluralize }} today{% else %}Nothing yet today{% endif %}</span>{% endif %}{% endif %}
           </span>
@@ -101,9 +101,9 @@
           <span class="acct-row-icon">{% icon "map-pin" 18 %}</span>
           <span class="acct-row-text">
             <span class="acct-row-title">Location</span>
-            <span class="acct-row-sub">{% if device.platform == "macos" %}The town its internet connection is in, every few minutes. A Mac doesn't share a precise position with background apps.{% else %}Every few minutes, from Wi-Fi when the computer's location service is on; otherwise the town its internet connection is in.{% endif %}</span>
+            <span class="acct-row-sub">{% if device.is_phone %}From the phone's GPS and Wi-Fi, when the app is allowed location "all the time".{% elif device.platform == "macos" %}The town its internet connection is in, every few minutes. A Mac doesn't share a precise position with background apps.{% else %}Every few minutes, from Wi-Fi when the computer's location service is on; otherwise the town its internet connection is in.{% endif %}</span>
             {% if c.location %}{% if device.location_at %}<span class="ctl-status">{% icon "map-pin" 13 %} Updated {{ device.location_at|ago }} · {% if live.location_source == "ip" %}town only{% else %}from Wi-Fi{% endif %}</span>
-            {% elif not live.public_ip %}<span class="ctl-status is-warn">{% icon "alert" 13 %} No position yet: it checks in through the relay, so the dashboard can't place it by its internet address{% if device.platform == "macos" %}, and a Mac doesn't share its own{% else %}; turn on the computer's location service{% endif %}.</span>
+            {% elif not live.public_ip and not device.is_phone %}<span class="ctl-status is-warn">{% icon "alert" 13 %} No position yet: it checks in through the relay, so the dashboard can't place it by its internet address{% if device.platform == "macos" %}, and a Mac doesn't share its own{% else %}; turn on the computer's location service{% endif %}.</span>
             {% else %}<span class="ctl-status">{% icon "clock" 13 %} Waiting for the first position</span>{% endif %}{% endif %}
           </span>
           <span class="form-check form-switch ctl-switch">{{ form.location }}</span>
@@ -115,7 +115,7 @@
     <section class="acct-section" id="block" aria-labelledby="block-title">
       <div class="acct-section-head">
         <h2 class="acct-section-title" id="block-title">Block</h2>
-        <p class="acct-section-sub">On this computer, in every browser, for everyone who uses it.</p>
+        <p class="acct-section-sub">{% if device.is_phone %}On this phone, in every browser and app, through NexGuard's website filter. Adult sites are blocked by a family DNS service (Cloudflare 1.1.1.3).{% else %}On this computer, in every browser, for everyone who uses it.{% endif %}</p>
       </div>
       {% if not device.can_block %}
       <div class="card acct-list">
@@ -172,11 +172,11 @@
       <div class="card acct-list">
         <div class="acct-row">
           <span class="acct-row-icon">{% icon "eye" 18 %}</span>
-          <div class="acct-row-text">{% if device.account.kind == "solo" %}<div class="acct-row-title">Only you see this</div><div class="acct-row-sub">It's your account: nobody else can see this computer's activity or location.</div>{% else %}<div class="acct-row-title">The person was told</div><div class="acct-row-sub">Pairing showed what can be turned on, and the agent stays visible on the computer.</div>{% endif %}</div>
+          <div class="acct-row-text">{% if device.account.kind == "solo" %}<div class="acct-row-title">Only you see this</div><div class="acct-row-sub">It's your account: nobody else can see this {{ kind }}'s activity or location.</div>{% else %}<div class="acct-row-title">The person was told</div><div class="acct-row-sub">Pairing showed what can be turned on, and {% if device.is_phone %}the app stays visible on the phone, with a notification while it filters{% else %}the agent stays visible on the computer{% endif %}.</div>{% endif %}</div>
         </div>
         <div class="acct-row">
           <span class="acct-row-icon">{% icon "info" 18 %}</span>
-          <div class="acct-row-text"><div class="acct-row-title">Limits</div><div class="acct-row-sub">Private windows aren't recorded. A VPN or a browser's own secure DNS can get around blocking, and an administrator on the computer can undo it.</div></div>
+          <div class="acct-row-text"><div class="acct-row-title">Limits</div><div class="acct-row-sub">{% if device.is_phone %}Another VPN app, Private DNS or a browser's own secure DNS can get around the filter, and removal protection can be turned off in the phone's settings: each of these raises an alert here.{% else %}Private windows aren't recorded. A VPN or a browser's own secure DNS can get around blocking, and an administrator on the computer can undo it.{% endif %}</div></div>
         </div>
       </div>
     </section>

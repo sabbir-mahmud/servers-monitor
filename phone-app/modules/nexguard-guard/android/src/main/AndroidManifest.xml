@@ -1,0 +1,54 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:tools="http://schemas.android.com/tools">
+
+  <!-- Screen time: the person grants "Usage access" for NexGuard in Settings. -->
+  <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+  <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+  <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+  <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+  <uses-permission android:name="android.permission.VIBRATE" />
+  <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+  <application>
+    <!-- The website filter (a local VPN that only sees DNS lookups), the 30 s command
+         check and the protection checks. Always shows a notification while it runs. -->
+    <service
+      android:name="expo.modules.nexguardguard.GuardService"
+      android:exported="false"
+      android:foregroundServiceType="specialUse"
+      android:permission="android.permission.BIND_VPN_SERVICE">
+      <intent-filter>
+        <action android:name="android.net.VpnService" />
+      </intent-filter>
+      <property
+        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="Parental controls: website filter and find-my-phone, set up by the person" />
+    </service>
+
+    <receiver
+      android:name="expo.modules.nexguardguard.AdminReceiver"
+      android:exported="true"
+      android:label="NexGuard removal protection"
+      android:permission="android.permission.BIND_DEVICE_ADMIN">
+      <meta-data
+        android:name="android.app.device_admin"
+        android:resource="@xml/nexguard_device_admin" />
+      <intent-filter>
+        <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+      </intent-filter>
+    </receiver>
+
+    <receiver android:name="expo.modules.nexguardguard.BootReceiver" android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+        <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+      </intent-filter>
+    </receiver>
+
+    <receiver android:name="expo.modules.nexguardguard.BeepStopReceiver" android:exported="false" />
+  </application>
+</manifest>

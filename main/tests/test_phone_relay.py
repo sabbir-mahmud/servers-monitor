@@ -85,14 +85,21 @@ def test_pairing_through_the_relay(client, parent, sara, fake_relay):
     device, phone = paired_phone(client, parent, sara)
     state = phone.state
     assert state["relay"] == {"url": "https://relay.test", "token": f"rest_sm-d-{device.pk}",
-                              "inbox": f"sm:d:{device.pk}:in"}  # fmt: skip
+                              "inbox": f"sm:d:{device.pk}:in", "config": f"sm:d:{device.pk}:cfg",
+                              "command": f"sm:d:{device.pk}:cmd"}  # fmt: skip
     assert "key" not in state["relay"]  # the phone made its own; it never travels back
     assert state["name"] == "Sara" and state["device"]["person"] == "Sara"
     assert "The Rahmans will see" in state["disclosure"] and state["checkin_seconds"] == 900
     assert device.is_paired and device.pairing_code_hash == "" and device.model == "Pixel 9"
     assert device.relay_key_enc and phone.key.hex() not in device.relay_key_enc  # encrypted
     rules = fake_relay.users[f"sm-d-{device.pk}"]
-    assert {r for r in rules if r.startswith("+")} == {"+rpush", "+ping"}  # push only
+    # Push to its inbox; read only its own settings and commands.
+    assert {r for r in rules if r.startswith("+")} == {"+rpush", "+get", "+ping"}
+    assert {r for r in rules if r.startswith("~")} == {
+        f"~sm:d:{device.pk}:in",
+        f"~sm:d:{device.pk}:cfg",
+        f"~sm:d:{device.pk}:cmd",
+    }
     from apps.audit.models import AuditLog
 
     assert AuditLog.objects.filter(action="device.pair", target=device.name).exists()

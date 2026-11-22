@@ -8,7 +8,13 @@ import * as Location from 'expo-location';
 import * as Network from 'expo-network';
 import { Platform } from 'react-native';
 
-export const APP_VERSION = `nexguard-phone ${Application.nativeApplicationVersion ?? '1.0.0'}`;
+import { guard } from '../modules/nexguard-guard';
+
+// Expo Go reports its own version, and has none of the Android controls: say so, so the
+// dashboard doesn't offer them (it only accepts a plain "1.2.0").
+export const APP_VERSION = guard
+  ? `nexguard-phone ${Application.nativeApplicationVersion ?? '1.0.0'}`
+  : `nexguard-phone ${Application.nativeApplicationVersion ?? '1.0.0'}-nocontrols`;
 
 /** Who this phone is, sent when pairing and with each check-in. */
 export function deviceInfo() {
@@ -27,7 +33,12 @@ export type Report = ReturnType<typeof deviceInfo> & {
   network?: { type: 'wifi' | 'cellular' | 'ethernet' | 'none' };
   location?: { lat: number; lon: number; accuracy?: number; at: string; source: 'gps' };
   // Whether location is allowed: turning it off is reported, so it isn't silently lost.
-  permissions?: { location: boolean };
+  permissions?: { location: boolean; [name: string]: boolean };
+  // Android controls (modules/nexguard-guard): new screen time and websites, protections
+  // the filter service saw turned off, and which dashboard settings this phone has.
+  activity?: object;
+  tamper?: string[];
+  config?: string;
 };
 
 async function battery(): Promise<Report['battery']> {
@@ -79,6 +90,19 @@ export async function location(): Promise<Report['location']> {
   };
 }
 
+/** What the dashboard can show as missing on an Android phone with NexGuard 1.2. */
+function guardPermissions(): Record<string, boolean> {
+  if (!guard) return {};
+  const s = guard.status();
+  return {
+    usage_access: s.usage,
+    filter: s.running && s.vpn,
+    notifications: s.notifications,
+    removal_protection: s.admin,
+    private_dns: s.privateDns,
+  };
+}
+
 const settle = <T,>(work: () => Promise<T> | T): Promise<T | undefined> =>
   Promise.resolve()
     .then(work)
@@ -92,6 +116,6 @@ export async function collectReport(): Promise<Report> {
     settle(location),
     settle(() => Location.getForegroundPermissionsAsync()),
   ]);
-  const permissions = perm ? { location: perm.granted } : undefined;
+  const permissions = perm ? { location: perm.granted, ...guardPermissions() } : undefined;
   return { ...deviceInfo(), battery: b, storage: s, network: n, location: l, permissions };
 }

@@ -248,13 +248,15 @@ def receive(
 #     <prefix>:d:<device id>:in    device -> dashboard   ci (check-in), sos
 #     <prefix>:d:<device id>:cfg   dashboard -> device   settings (computers; SET, the device GETs)
 #     <prefix>:d:<device id>:bl    dashboard -> device   blocklist (computers; SET, gzip)
+#     <prefix>:d:<device id>:cmd   dashboard -> device   one-off command (Android: beep; SET EX)
 #
 # Computers connect with the Redis protocol, like server agents, so any Redis 6+ works. A
 # phone app can't open a Redis connection, so it uses Upstash's HTTPS REST API with a REST
 # token from `ACL RESTTOKEN` (an Upstash extension); phones need Upstash. Everything either
 # side writes is signed with the key the device made when it paired, which Redis never sees.
 
-PHONE_COMMANDS = ("+rpush", "+ping")
+PHONE_COMMANDS = ("+rpush", "+get", "+ping")
+COMMAND_SECONDS = 10 * 60  # a beep nobody picked up in 10 minutes is stale
 COMPUTER_COMMANDS = ("+rpush", "+get", "+ping")
 
 
@@ -274,6 +276,15 @@ def device_blocklist_key(device_id) -> str:
     return f"{settings.RELAY_KEY_PREFIX}:d:{device_id}:bl"
 
 
+def device_command_key(device_id) -> str:
+    return f"{settings.RELAY_KEY_PREFIX}:d:{device_id}:cmd"
+
+
+def _phone_keys(device) -> tuple[str, str, str]:
+    return (device_inbox_key(device.pk), device_config_key(device.pk),
+            device_command_key(device.pk))  # fmt: skip
+
+
 def rest_url() -> str:
     """Where phones reach the relay over HTTPS: RELAY_REST_URL, or the Upstash host in
     REDIS_URL. Empty when this dashboard's Redis has no REST API."""
@@ -284,10 +295,11 @@ def rest_url() -> str:
 
 
 def provision_device(device) -> dict:
-    """Create (or reset) the phone's ACL user with a fresh password and REST token. Returns
-    what the phone needs: {"url", "token", "inbox"}. Sets `device.relay_salt` (the caller
-    saves it), which marks the device as one the bridge listens to. Resetting cuts off a
-    phone that had the old token."""
+    """Create (or reset) the phone's ACL user with a fresh password and REST token: RPUSH to
+    its inbox, GET its settings and commands. Returns what the phone needs: {"url", "token",
+    "inbox", "config", "command"}. Sets `device.relay_salt` (the caller saves it), which
+    marks the device as one the bridge listens to. Resetting cuts off a phone that had the
+    old token."""
     url = rest_url()
     if not url:
         raise RelayError(
@@ -295,17 +307,30 @@ def provision_device(device) -> dict:
             "isn't Upstash"
         )
     device.relay_salt = signing.new_salt()
-    user, inbox = device_username(device), device_inbox_key(device.pk)
+    user, keys_ = device_username(device), _phone_keys(device)
     try:
         password = client().execute_command("ACL", "GENTOKEN", user)
         client().execute_command(
             "ACL", "SETUSER", user, "reset", "on", f">{password}", "resetchannels",
-            f"~{inbox}", "-@all", *PHONE_COMMANDS,
+            *(f"~{k}" for k in keys_), "-@all", *PHONE_COMMANDS,
         )  # fmt: skip
         token = client().execute_command("ACL", "RESTTOKEN", user, password)
     except redis.RedisError as exc:
         raise RelayError(f"could not create the phone's Redis user: {exc}") from exc
-    return {"url": url, "token": token, "inbox": inbox}
+    return {"url": url, "token": token, "inbox": keys_[0], "config": keys_[1],
+            "command": keys_[2]}  # fmt: skip
+
+
+def upgrade_phone_login(device) -> None:
+    """A phone paired before phones could read settings and commands: let its existing
+    user GET them too, keeping its password (and token). Idempotent."""
+    try:
+        client().execute_command(
+            "ACL", "SETUSER", device_username(device),
+            *(f"~{k}" for k in _phone_keys(device)), *PHONE_COMMANDS,
+        )  # fmt: skip
+    except redis.RedisError as exc:
+        raise RelayError(f"could not update {device.name}'s Redis user: {exc}") from exc
 
 
 def provision_computer(device) -> dict:
@@ -333,7 +358,7 @@ def deprovision_device(device) -> None:
         client().execute_command("ACL", "DELUSER", device_username(device))
         client().delete(
             device_inbox_key(device.pk), device_config_key(device.pk),
-            device_blocklist_key(device.pk),
+            device_blocklist_key(device.pk), device_command_key(device.pk),
         )  # fmt: skip
     except (redis.RedisError, RelayError) as exc:
         logger.warning("Could not remove the relay user for %s: %s", device.name, exc)
@@ -353,11 +378,22 @@ def config_digest(body: str) -> str:
 
 
 def publish_config(device, body: str) -> None:
-    """Leave the computer's settings (JSON text) where it GETs them at each check-in."""
+    """Leave the device's settings (JSON text) where it GETs them at each check-in."""
     try:
         client().set(device_config_key(device.pk), _sealed_for(device, body))
     except redis.RedisError as exc:
         raise RelayError(f"could not update {device.name}'s settings: {exc}") from exc
+
+
+def publish_command(device, command: dict) -> None:
+    """A one-off command for an Android phone (`{"id", "kind", "at"}`), signed. The phone
+    polls for it every 30 s and runs each id once; it expires unread after 10 minutes."""
+    body = json.dumps(command, sort_keys=True, separators=(",", ":"))
+    try:
+        client().set(device_command_key(device.pk), _sealed_for(device, body),
+                     ex=COMMAND_SECONDS)  # fmt: skip
+    except redis.RedisError as exc:
+        raise RelayError(f"could not send {device.name} the command: {exc}") from exc
 
 
 def publish_blocklist(device, version: str, lines: list[str]) -> None:

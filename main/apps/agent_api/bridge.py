@@ -223,8 +223,9 @@ def handle_device(device: Device, message: dict) -> None:
     """Apply one message from a computer or phone: {"t": "ci" | "sos", "body": "<JSON
     text>", "sig": "<hex>"}. A check-in's body is {"at": <unix time>, "report": {…}}; an
     SOS's (phones) is {"at": …, "location": {…}, "cancel": false}. The device signs the
-    body text itself. After a computer's check-in its settings in the relay are brought
-    up to date. Never raises on bad input."""
+    body text itself. After a computer's or Android phone's check-in its settings in the
+    relay are brought up to date. A phone's `{"partial": true, "tamper": […]}` report only
+    tells that a protection was turned off. Never raises on bad input."""
     usage.count_agent_message(message.get("t"))
     body, sig, kind = message.get("body"), message.get("sig"), message.get("t")
     if kind not in ("ci", "sos") or not isinstance(body, str):
@@ -249,13 +250,14 @@ def handle_device(device: Device, message: dict) -> None:
         and device.last_seen_at != device.paired_at  # the first check-in right after pairing
         and (timezone.now() - device.last_seen_at).total_seconds() < 30
     )
-    if "bye" in report or not recent:  # at most one stored check-in per 30 s
+    partial = report.get("partial") is True  # a phone telling at once: protection turned off
+    if "bye" in report or partial or not recent:  # at most one stored check-in per 30 s
         try:
             device_services.checkin(device, report, None)
         except (ValueError, TypeError, ValidationError) as exc:
             logger.warning("Unusable check-in from device %s: %s", device.name, exc)
             return
-    if "bye" not in report:
+    if "bye" not in report and not partial:
         # Even for one not stored: it says which settings it has, and they may be stale.
         device_services.publish_settings(device, report)
 
@@ -346,6 +348,9 @@ def handle_pairing(message: dict) -> None:
             "state": "preview",
             "device": device_services.device_json(device),
             "disclosure": device_services.disclosure(device, info),
+            # Android: whether controls can be turned on, so the app asks for their
+            # permissions before pairing (and doesn't when they can't).
+            "controls": device_services.phone_controls_possible(device, info),
         })  # fmt: skip
         return
     try:

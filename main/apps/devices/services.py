@@ -20,6 +20,7 @@ from .models import (
     DeviceSample,
     LocationSource,
     Platform,
+    phone_has_controls,
 )
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,11 @@ def disclosure(device: Device, info: dict) -> str:
         else "battery, storage, network and location"
     )
     text = f"{device.account.name} will see this device's last online time, {what}."
+    if device.platform == Platform.ANDROID and phone_controls_possible(device, info):
+        text += (" They can also turn on screen time (which apps are used, and for how "
+                 "long), websites visited (site names, not pages or searches), blocking of "
+                 "adult or chosen websites, and making this phone ring. NexGuard can't be "
+                 "uninstalled until it's removed on the dashboard.")  # fmt: skip
     agent = str(info.get("app_version", "")).startswith(AGENT_APP)
     if agent and device.platform in COMPUTERS and device.controls_owner_ok:
         if info.get("agent_mode") == "user":  # runs as this person: can't block sites
@@ -162,9 +168,19 @@ def _article(word: str) -> str:
 
 
 def preview(code: str, info: dict) -> Device:
-    """Who would see this computer, before anything is stored: the agent asks its user
-    first and pairs only on a yes. The code stays valid either way."""
+    """Who would see this device, before anything is stored: the agent (or the phone app)
+    asks its user first and pairs only on a yes. The code stays valid either way."""
     return _device_for_code(code, info, lock=False)
+
+
+def phone_controls_possible(device: Device, info: dict) -> bool:
+    """Whether this phone, with the app asking, can be given controls once paired: the
+    app then asks for the permissions they need before pairing, and only then."""
+    return (
+        device.platform == Platform.ANDROID
+        and device.controls_owner_ok
+        and phone_has_controls(str(info.get("app_version", "")))
+    )
 
 
 @transaction.atomic
@@ -197,16 +213,18 @@ def pair_device(code: str, info: dict, secret_hex: str) -> tuple[Device, dict]:
 
     record(None, "device.pair", target=device.name, account=device.account,
            platform=device.platform, model=device.model, via="relay")  # fmt: skip
-    if device.platform in COMPUTERS:
+    if device.platform in COMPUTERS or device.platform == Platform.ANDROID:
         publish_settings(device)
     return device, login
 
 
 # --------------------------------------------------------------------------- settings
 #
-# A computer's settings (how often to check in, what to collect, which blocklist) wait for
-# it in the relay; it GETs them at each check-in and echoes back which it has, so they are
-# only rewritten when they change.
+# A computer's or Android phone's settings (how often to check in, what to collect, what to
+# block) wait for it in the relay; it GETs them at each check-in and echoes back which it
+# has, so they are only rewritten when they change. Computers get a blocklist of hosts
+# lines (`:bl`); phones get their lists inline, since their DNS filter matches whole
+# domains and sends adult blocking to a family DNS resolver instead of a 77,000-name list.
 
 
 def controls_json(device: Device) -> dict | None:
@@ -217,6 +235,8 @@ def controls_json(device: Device) -> dict | None:
     from . import activity, blocklist
 
     controls = activity.controls_for(device)
+    if device.platform == Platform.ANDROID:
+        return _phone_controls(controls)
     return {
         "screen_time": bool(controls and controls.screen_time),
         "web_activity": bool(controls and controls.web_activity),
@@ -226,8 +246,32 @@ def controls_json(device: Device) -> dict | None:
     }
 
 
+def _phone_controls(controls) -> dict:
+    from . import blocklist, domains
+
+    blocking = bool(controls and controls.blocking)
+    allowed = sorted(set(domains.parse_list(controls.allowed_domains))) if blocking else []
+    blocked = (sorted(set(domains.parse_list(controls.blocked_domains)) - set(allowed))
+               if blocking else [])  # fmt: skip
+    safe = {}
+    if blocking and controls.safe_search:
+        for target, names in sorted(blocklist.SAFE_SEARCH.items()):
+            kept = [n for n in names if n not in allowed]
+            if kept:
+                safe[target] = kept
+    return {
+        "screen_time": bool(controls and controls.screen_time),
+        "web_activity": bool(controls and controls.web_activity),
+        "location": bool(controls and controls.location),
+        "block_adult": bool(blocking and controls.block_adult),
+        "safe_search": safe,  # {"forcesafesearch.google.com": ["www.google.com", …]}
+        "blocked": sorted(set(blocked) | (set(blocklist.ALWAYS) if blocking else set())),
+        "allowed": allowed,
+    }
+
+
 def settings_body(device: Device) -> str:
-    """The settings as the exact JSON text the computer is sent (and the signature is of)."""
+    """The settings as the exact JSON text the device is sent (and the signature is of)."""
     return json.dumps(
         {"checkin_seconds": device.checkin_seconds, "device": device_json(device),
          "controls": controls_json(device)},
@@ -247,7 +291,12 @@ def publish_settings(device: Device, report: dict | None = None) -> None:
     tries again."""
     from apps.agent_api import relay
 
-    if device.platform not in COMPUTERS or not device.relay_salt:
+    if not device.relay_salt:
+        return
+    if device.platform == Platform.ANDROID:
+        _publish_phone_settings(device, report)
+        return
+    if device.platform not in COMPUTERS:
         return
     from . import activity, blocklist
 
@@ -267,7 +316,58 @@ def publish_settings(device: Device, report: dict | None = None) -> None:
         logger.warning("Couldn't update %s's settings in the relay: %s", device.name, exc)
 
 
+def _publish_phone_settings(device: Device, report: dict | None) -> None:
+    """Android: only the app that can read settings is sent them. A phone paired before
+    phones could read them gets that permission once (remembered here for a day)."""
+    from django.core.cache import cache
+
+    from apps.agent_api import relay
+
+    app_version = str((report or {}).get("app_version") or device.app_version)
+    if not phone_has_controls(app_version):
+        return
+    body = settings_body(device)
+    try:
+        upgraded = f"relay.phone_acl:{device.pk}:{device.relay_salt}"
+        if not cache.get(upgraded):
+            relay.upgrade_phone_login(device)
+            cache.set(upgraded, True, 24 * 3600)
+        if report is None or report.get("config") != relay.config_digest(body):
+            relay.publish_config(device, body)
+    except relay.RelayError as exc:
+        logger.warning("Couldn't update %s's settings in the relay: %s", device.name, exc)
+
+
+class CommandError(Exception):
+    pass
+
+
+def beep(device: Device) -> None:
+    """Make an Android phone ring loudly (even on silent) for 30 s, to find it. It hears
+    within about 30 s while it's online. Raises CommandError with what to tell the user."""
+    import uuid
+
+    from apps.agent_api import relay
+
+    if not device.can_beep:
+        raise CommandError("Only a paired Android phone with NexGuard 1.2 or newer can beep.")
+    command = {"id": uuid.uuid4().hex, "kind": "beep", "at": int(timezone.now().timestamp())}
+    try:
+        relay.publish_command(device, command)
+    except relay.RelayError as exc:
+        raise CommandError(f"Couldn't reach the relay: {exc}") from exc
+
+
 def checkin(device: Device, report: dict, ip: str | None) -> None:
+    if report.get("partial") is True:
+        # The phone's filter service telling at once that a protection was turned off: no
+        # readings in it, so nothing else on the device changes.
+        from apps.alerts import device_rules
+
+        tamper = [str(t)[:30] for t in (report.get("tamper") or [])[:10]
+                  if isinstance(t, str)]  # fmt: skip
+        device_rules.evaluate_checkin(device, {"tamper": tamper}, device.agent_mode)
+        return
     if report.get("bye") is not None:
         # The agent is being uninstalled, or the phone unpaired on itself: no readings in
         # it, only the news.

@@ -16,6 +16,7 @@
   </div>
   <div class="page-actions">
     {% if perms.devices.add_device %}<a class="btn btn-outline-secondary" href="{% url 'devices:pair' device.pk %}">{% icon "qr" %} {% if device.is_paired %}Pair again{% else %}Pair{% endif %}</a>{% endif %}
+    {% if perms.devices.change_device and device.can_beep %}<form method="post" action="{% url 'devices:beep' device.pk %}">{% csrf_token %}<button class="btn btn-outline-secondary" title="Rings loudly for 30 seconds, even on silent">{% icon "bell" %} Beep</button></form>{% endif %}
     {% if perms.devices.change_device %}<a class="btn btn-outline-secondary" href="{% url 'devices:update' device.pk %}">{% icon "edit" %} Edit</a>{% endif %}
   </div>
 </header>
@@ -126,7 +127,7 @@
     </nav>
   </div>
   {% if not controls.screen_time and not controls.web_activity %}
-  <p class="activity-empty">Screen time and websites are off for this computer.{% if perms.devices.change_device %} <a href="{% url 'devices:controls' device.pk %}">Turn them on</a>.{% endif %}</p>
+  <p class="activity-empty">Screen time and websites are off for this {% if device.is_phone %}phone{% else %}computer{% endif %}.{% if perms.devices.change_device %} <a href="{% url 'devices:controls' device.pk %}">Turn them on</a>.{% endif %}</p>
   {% else %}
   <div class="activity-grid">
     <div>
@@ -167,7 +168,7 @@
 </section>
 {% endif %}
 
-{% if device.platform in "windows macos linux" and device.person or device.platform in "windows macos linux" and ACCOUNT.kind == "solo" %}
+{% if device.platform in "windows macos linux android" and device.person or device.platform in "windows macos linux android" and ACCOUNT.kind == "solo" %}
 <section class="card controls-card" aria-labelledby="controls-title">
   <div class="dlist-head">
     <h2 class="card-title-lg" id="controls-title">{% icon "shield" 17 %} Controls</h2>
