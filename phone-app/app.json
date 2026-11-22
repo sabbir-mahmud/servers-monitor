@@ -30,7 +30,8 @@
         "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
         "android.permission.USE_FULL_SCREEN_INTENT",
         "android.permission.VIBRATE",
-        "android.permission.PACKAGE_USAGE_STATS"
+        "android.permission.PACKAGE_USAGE_STATS",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
       ],
       "blockedPermissions": [
         "android.permission.CAMERA",
@@ -56,9 +57,9 @@
     "scheme": "nexguard",
     "extra": {
       "eas": {
-        "projectId": "e9b115cd-ac6c-4148-92d7-596cb13fe247"
+        "projectId": "2a54611e-236e-4a24-b771-7dc748a6a02c"
       }
     },
-    "owner": "sabbirmahmud"
+    "owner": "nexguard"
   }
 }
