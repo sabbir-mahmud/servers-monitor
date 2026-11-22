@@ -122,8 +122,15 @@ fetch() {  # fetch NAME KEY DEST: download, verify, syntax-check Python, swap in
 fetch server_monitor_agent.py agent "$PREFIX/server_monitor_agent.py"
 fetch smctl.py smctl "$PREFIX/smctl.py"
 rm -rf "$PREFIX/__pycache__"
-[ -x "$PREFIX/venv/bin/python" ] || python3 -m venv "$PREFIX/venv"
-"$PREFIX/venv/bin/pip" install --quiet --disable-pip-version-check --upgrade "psutil>=6,<8"
+# Reuse the venv only while it still works: after the system Python is upgraded (3.12 ->
+# 3.14, say) an old venv's python points at the new version, whose site-packages has no
+# pip or psutil. Rebuilding it costs a few seconds; the agent keeps no state there.
+if ! "$PREFIX/venv/bin/python" -m pip --version >/dev/null 2>&1; then
+  [ -d "$PREFIX/venv" ] && ok "rebuilding the agent's Python environment (it was made by another Python)"
+  rm -rf "$PREFIX/venv"
+  python3 -m venv "$PREFIX/venv"
+fi
+"$PREFIX/venv/bin/python" -m pip install --quiet --disable-pip-version-check --upgrade "psutil>=6,<8"
 install -m 755 "$PREFIX/smctl.py" /usr/local/bin/smctl
 printf 'SM_REPO=%s\nSM_REF=%s\n' "$SM_REPO" "$SM_REF" > "$PREFIX/source"  # for `smctl upgrade`
 ok "agent $(grep -m1 '^VERSION' "$PREFIX/server_monitor_agent.py" | cut -d'"' -f2) in $PREFIX"
