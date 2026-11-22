@@ -1,8 +1,8 @@
 """The dashboard's side of the relay: one small process, `manage.py relay`.
 
-- Receiver thread: BLPOPs every enabled server's inbox, every paired phone's and the
-  phones' pairing inbox while a phone code is out, and applies heartbeats, acks, command
-  output, phone check-ins and phone pairing requests. One blocking call covers
+- Receiver thread: BLPOPs every enabled server's inbox, every paired device's (computers
+  and phones) and the devices' pairing inbox while a code is out, and applies heartbeats,
+  acks, command output, device check-ins and pairing requests. One blocking call covers
   the whole fleet.
 - Scheduler thread: re-sends commands Redis couldn't take at queue time (an outbox), runs
   the offline/expiry sweep every 15 s and prunes old metrics hourly. These are DB-only and
@@ -25,6 +25,7 @@ import redis
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.alerts import delivery, forecast
@@ -35,7 +36,7 @@ from apps.devices import activity as device_activity
 from apps.devices import blocklist as device_blocklist
 from apps.devices import geoip as device_geoip
 from apps.devices import services as device_services
-from apps.devices.models import PHONES, Device
+from apps.devices.models import COMPUTERS, PHONES, Device
 from apps.devices.services import prune_locations
 from apps.devices.services import prune_samples as prune_device_samples
 from apps.fleet import rollups
@@ -219,41 +220,49 @@ def _job_ping(server: Server, message: dict) -> None:
 
 
 def handle_device(device: Device, message: dict) -> None:
-    """Apply one message from a phone: {"t": "ci" | "sos", "body": "<JSON text>",
-    "sig": "<hex>"}. A check-in's body is {"at": <unix time>, "report": {…}}; an SOS's is
-    {"at": …, "location": {…}, "cancel": false}. The phone signs the body text itself.
-    Never raises on bad input."""
+    """Apply one message from a computer or phone: {"t": "ci" | "sos", "body": "<JSON
+    text>", "sig": "<hex>"}. A check-in's body is {"at": <unix time>, "report": {…}}; an
+    SOS's (phones) is {"at": …, "location": {…}, "cancel": false}. The device signs the
+    body text itself. After a computer's check-in its settings in the relay are brought
+    up to date. Never raises on bad input."""
     usage.count_agent_message(message.get("t"))
     body, sig, kind = message.get("body"), message.get("sig"), message.get("t")
     if kind not in ("ci", "sos") or not isinstance(body, str):
-        logger.warning("Unknown message from phone %s", device.name)
+        logger.warning("Unknown message from device %s", device.name)
         return
     if not signing.verify_from_device(device, body, sig):
-        logger.warning("Rejected unsigned or forged %s for phone %s", kind, device.name)
+        logger.warning("Rejected unsigned or forged %s for device %s", kind, device.name)
         return
     try:
         data = json.loads(body)
     except ValueError:
         return
     if kind == "sos":
-        if isinstance(data, dict):
+        if isinstance(data, dict) and device.platform in PHONES:
             device_services.sos(device, data)
         return
     report = data.get("report") if isinstance(data, dict) else None
     if not isinstance(report, dict) or _check_in_stale(device, data.get("at")):
         return
-    recent = device.last_seen_at and (timezone.now() - device.last_seen_at).total_seconds() < 30
-    if recent and "bye" not in report:
-        return  # at most one stored check-in per 30 s, however fast it sends
-    try:
-        device_services.checkin(device, report, None)
-    except (ValueError, TypeError, ValidationError) as exc:
-        logger.warning("Unusable check-in from phone %s: %s", device.name, exc)
+    recent = (
+        device.last_seen_at
+        and device.last_seen_at != device.paired_at  # the first check-in right after pairing
+        and (timezone.now() - device.last_seen_at).total_seconds() < 30
+    )
+    if "bye" in report or not recent:  # at most one stored check-in per 30 s
+        try:
+            device_services.checkin(device, report, None)
+        except (ValueError, TypeError, ValidationError) as exc:
+            logger.warning("Unusable check-in from device %s: %s", device.name, exc)
+            return
+    if "bye" not in report:
+        # Even for one not stored: it says which settings it has, and they may be stale.
+        device_services.publish_settings(device, report)
 
 
 PAIR_MAX_AGE = 10 * 60  # a pairing request older than this (relay backlog) is ignored
-# Wrong codes, across all phones: the app's login is shared and codes are 6 digits, so
-# guessing is capped. 20 per 10 minutes makes hitting one of a few live codes before they
+# Wrong codes, across all devices: the pairing logins are shared and phone codes are 6
+# digits, so guessing is capped. 20 per 10 minutes makes hitting one of a few live codes before they
 # expire hopeless; a legitimate typo costs nothing.
 PAIR_FAILURE_LIMIT = 20
 PAIR_FAILURE_WINDOW = 10 * 60
@@ -281,11 +290,13 @@ pair_failures = FailureLimiter()
 
 
 def handle_pairing(message: dict) -> None:
-    """A phone asking to pair, through the app's shared pairing login: {"t": "pair",
-    "body": "<JSON text>"}, the body being {"at", "nonce", "code": "482913", "secret": <hex
-    key the phone made>, "info": {platform, model, …}}. The answer goes under the phone's
-    nonce: "paired" with its check-in login and who it's connected as, or "error" with the
-    reason. Never raises on bad input."""
+    """A device asking to pair, through a shared pairing login: {"t": "pair", "body":
+    "<JSON text>"}, the body being {"at", "nonce", "code": "482913" or "K7PQ-3MXA",
+    "secret": <hex key the device made>, "info": {platform, model, …}}, or for a computer
+    {"preview": true, "at", "nonce", "code", "info"} to show who will see it first. The
+    answer goes under the device's nonce: "paired" with its own relay login and who it's
+    connected as, "preview" with the disclosure, or "error" with the reason. Never raises
+    on bad input."""
     usage.count_agent_message("pair")
     body = message.get("body")
     if message.get("t") != "pair" or not isinstance(body, str) or len(body) > 8192:
@@ -311,7 +322,7 @@ def handle_pairing(message: dict) -> None:
         try:
             relay.answer_pairing(nonce, payload)
         except relay.RelayError as exc:
-            logger.warning("Could not answer a pairing phone: %s", exc)
+            logger.warning("Could not answer a pairing device: %s", exc)
 
     if pair_failures.blocked():
         answer(
@@ -322,6 +333,21 @@ def handle_pairing(message: dict) -> None:
         )
         return
     secret, info = data.get("secret"), data.get("info")
+    info = info if isinstance(info, dict) else {}
+    if data.get("preview") is True:
+        try:
+            device = device_services.preview(str(data.get("code", "")), info)
+        except device_services.PairingError as exc:
+            if exc.status == 404:
+                pair_failures.fail()
+            answer({"state": "error", "message": str(exc)})
+            return
+        answer({
+            "state": "preview",
+            "device": device_services.device_json(device),
+            "disclosure": device_services.disclosure(device, info),
+        })  # fmt: skip
+        return
     try:
         if not isinstance(secret, str) or len(bytes.fromhex(secret)) != 32:
             raise ValueError
@@ -329,9 +355,7 @@ def handle_pairing(message: dict) -> None:
         answer({"state": "error", "message": "Update the NexGuard app, then try again."})
         return
     try:
-        device, login = device_services.pair_phone(
-            str(data.get("code", "")), info if isinstance(info, dict) else {}, secret
-        )
+        device, login = device_services.pair_device(str(data.get("code", "")), info, secret)
     except device_services.PairingError as exc:
         if exc.status == 404:
             pair_failures.fail()
@@ -342,13 +366,13 @@ def handle_pairing(message: dict) -> None:
         "relay": login,
         "device": device_services.device_json(device),
         "name": device_services.connected_name(device),
-        "disclosure": device_services.disclosure(device, {}),
+        "disclosure": device_services.disclosure(device, info),
         "checkin_seconds": device.checkin_seconds,
     })  # fmt: skip
 
 
 def _check_in_stale(device: Device, sent_at) -> bool:
-    """A check-in that sat in the relay longer than the phone counts as online (a backlog
+    """A check-in that sat in the relay longer than the device counts as online (a backlog
     while this process was down) would show old readings as current: skip it."""
     if isinstance(sent_at, bool) or not isinstance(sent_at, int | float):
         return True
@@ -368,20 +392,17 @@ class Bridge:
         while not self.stop.is_set():
             close_old_connections()
             ids = list(Server.objects.filter(is_enabled=True).values_list("pk", flat=True))
-            phones = list(
-                Device.objects.filter(platform__in=PHONES)
-                .exclude(relay_salt="")
-                .values_list("pk", flat=True)
-            )
+            devices = list(Device.objects.exclude(relay_salt="").values_list("pk", flat=True))
             pairing = (
-                Device.objects.filter(
-                    platform__in=PHONES, pairing_code_expires_at__gt=timezone.now()
+                Device.objects.exclude(pairing_code_hash="")
+                .filter(
+                    Q(platform__in=COMPUTERS)
+                    | Q(platform__in=PHONES, pairing_code_expires_at__gt=timezone.now())
                 )
-                .exclude(pairing_code_hash="")
                 .exists()
             )
             try:
-                got = relay.receive(ids, self.block, phones, pairing)
+                got = relay.receive(ids, self.block, devices, pairing)
                 backoff = 1
             except (redis.RedisError, relay.RelayError, OSError) as exc:
                 logger.warning("Relay unavailable: %s (retrying in %ss)", exc, backoff)
@@ -397,7 +418,11 @@ class Bridge:
                 handle_pairing(message)
                 continue
             if source == "device":
-                device = Device.objects.select_related("account", "person").filter(pk=pk).first()
+                device = (
+                    Device.objects.select_related("account", "person", "created_by")
+                    .filter(pk=pk)
+                    .first()
+                )
                 if device is not None:
                     handle_device(device, message)
                 continue

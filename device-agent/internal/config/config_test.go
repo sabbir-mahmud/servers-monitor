@@ -5,6 +5,8 @@ import (
 	"os"
 	"runtime"
 	"testing"
+
+	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/api"
 )
 
 func TestSaveIsPrivateAndLoadRoundTrips(t *testing.T) {
@@ -12,11 +14,12 @@ func TestSaveIsPrivateAndLoadRoundTrips(t *testing.T) {
 	if _, err := Load(); !errors.Is(err, ErrNotPaired) {
 		t.Fatalf("empty dir: %v", err)
 	}
-	if err := Save(&Config{Server: "https://m.example.com", Token: "ngd_x", Interval: 0}); err != nil {
+	login := api.Login{URL: "rediss://sm-d-1:pw@relay.example.com:6379", Inbox: "sm:d:1:in"}
+	if err := Save(&Config{Relay: login, Key: "ab", Interval: 0}); err != nil {
 		t.Fatal(err)
 	}
 	c, err := Load()
-	if err != nil || c.Token != "ngd_x" || c.Interval != 300 { // nonsense interval -> default
+	if err != nil || c.Key != "ab" || c.Relay != login || c.Interval != 300 { // nonsense interval -> default
 		t.Fatalf("%+v %v", c, err)
 	}
 	if st, _ := os.Stat(Path()); runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 {
@@ -27,5 +30,13 @@ func TestSaveIsPrivateAndLoadRoundTrips(t *testing.T) {
 	}
 	if _, err := Load(); !errors.Is(err, ErrNotPaired) {
 		t.Fatal("still paired after Remove")
+	}
+}
+
+func TestAnHTTPPairingMustBePairedAgain(t *testing.T) {
+	t.Setenv("NEXGUARD_CONFIG_DIR", t.TempDir())
+	_ = os.WriteFile(Path(), []byte(`{"server":"https://m.example.com","token":"ngd_x","interval":300}`), 0o600)
+	if _, err := Load(); !errors.Is(err, ErrOldPairing) || !errors.Is(err, ErrNotPaired) {
+		t.Fatalf("got %v", err)
 	}
 }

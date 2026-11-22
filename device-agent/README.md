@@ -7,8 +7,13 @@ battery, storage, network (Wi-Fi or wired, and the Wi-Fi name where the system a
 and system version. The person using the computer can't stop or remove it without
 administrator rights. It is one static file with no dependencies.
 
+It never talks to the dashboard: it pairs and checks in through the dashboard's Redis
+relay (any Redis 6+, the same one server agents use), so the dashboard can stay private.
+The relay address (`rediss://sm-pc:…/?prefix=sm`) is in the line the dashboard's link page
+shows; that login can only send pairing requests.
+
 ```sh
-sudo nexguard pair https://monitor.example.com K7PQ-3MXA   # shows who will see it, asks y/n
+sudo nexguard pair 'rediss://sm-pc:…@relay.example.com:6379/?prefix=sm' K7PQ-3MXA   # asks y/n
 sudo nexguard install      # copies itself into place, starts the service
 nexguard status            # paired? service running? last check-in?
 sudo nexguard checkin      # check in once now
@@ -26,12 +31,17 @@ On Windows, run the same commands from an administrator PowerShell (`nexguard.ex
 **Behaviour**
 - **Pairing:** `pair` asks the dashboard first with a preview, which doesn't use the code.
   It pairs only after a yes. `--yes` skips the question when the person was told another way.
-- **Check-ins:** at the interval the dashboard asks for. When the dashboard can't be
-  reached it backs off, up to 30 minutes between tries.
-- **Removed on the dashboard:** the next check-in gets "not paired". The agent then forgets
-  the pairing and waits, and an administrator can pair it again.
-- **Plain `http://`:** allowed only for this machine or the local network, unless
-  `NEXGUARD_ALLOW_HTTP=1` is set.
+  Pairing gives this computer its own relay login and a signing key it made, both kept in
+  the config (admin only).
+- **Check-ins:** a signed `RPUSH` to its inbox, then a `GET` of the settings (interval,
+  controls) and, when its version changed, the blocklist the dashboard left. Anything not
+  signed with this computer's key is ignored. When the relay can't be reached it backs
+  off, up to 30 minutes between tries.
+- **Removed on the dashboard:** its relay login is deleted, so the next check-in is
+  refused. The agent then forgets the pairing and waits, and an administrator can pair it
+  again. A config from before the relay (`server` and `token`) means: pair again.
+- **Plain `redis://`:** allowed only for this machine or the local network, unless
+  `NEXGUARD_ALLOW_PLAIN=1` is set.
 
 **Screen time, websites and blocking** (a child's or staff computer, switched on in the
 dashboard; see [docs/devices.md](../docs/devices.md)):
@@ -56,7 +66,8 @@ hosts file. Serve the builds from the dashboard by running `./build.sh` (into `d
 
 **Log**: `logs/nexguard.log` next to the config, one JSON object per line (start, stop,
 each check-in, settings the dashboard switched on or off, errors), readable without
-administrator rights and rotated at 1 MB into `nexguard.log.1`. It never holds the token,
+administrator rights and rotated at 1 MB into `nexguard.log.1`. It never holds the relay
+password or signing key,
 website names or app names. The service also still logs to the Windows event log, syslog or the journal.
 
 **Develop**
@@ -65,5 +76,6 @@ go test ./...            # unit tests, with a real health reading from this mach
 ./build.sh               # all six builds + SHA256SUMS into dist/
 make device-agent        # vet, test, build (from the repo root)
 ```
-`main/tests/test_device_agent.py` builds the agent and runs it against a live dashboard.
-It uses `NEXGUARD_CONFIG_DIR` and never installs a service.
+`main/tests/test_device_agent.py` builds the agent and runs it against a Redis-protocol
+relay wired to the dashboard's bridge. It uses `NEXGUARD_CONFIG_DIR` and never installs a
+service.

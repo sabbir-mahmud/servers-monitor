@@ -18,7 +18,7 @@ from apps.devices.models import Device
 
 from . import test_devices
 from .phones import Phone, answer, pair_phone, pair_request, sign
-from .test_devices import add_device, api_pair, code_on
+from .test_devices import add_device, code_on
 
 family, parent, sara = test_devices.family, test_devices.parent, test_devices.sara
 solo_dev = test_devices.solo_dev
@@ -140,17 +140,6 @@ def test_stale_or_unanswerable_requests_are_dropped(client, parent, sara, fake_r
     handle_pairing(old)
     handle_pairing({"t": "pair", "body": json.dumps({"code": code, "nonce": "../x"})})
     assert not fake_relay.strings and not Device.objects.get(pk=device.pk).is_paired
-
-
-def test_phones_cannot_pair_over_http(client, parent, sara):
-    client.force_login(parent)
-    device, code = add_device(client, sara)
-    client.logout()
-    for preview in (False, True):
-        resp = api_pair(client, code, preview=preview)
-        assert resp.status_code == 410 and "Update the app" in resp.json()["error"]
-    device.refresh_from_db()
-    assert not device.is_paired and device.pairing_code_hash
 
 
 def test_without_upstash_the_page_says_phones_cant_pair(client, parent, sara, settings):

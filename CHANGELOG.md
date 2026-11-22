@@ -11,6 +11,20 @@ The project is now **NexGuard**: one install serves many separate accounts. Agen
 working without an upgrade (`server-monitor-agent`, `smctl` and the relay keys keep their
 names); upgrading gets the relay backlog fixes below.
 
+### Changed
+
+- **Computers check in through the Redis relay, and the device HTTP API is gone.**
+  `/device/v1/pair`, `/device/v1/checkin` and `/device/v1/blocklist` are removed. The Go
+  agent pairs through the relay's pairing inbox (with a shared `sm-pc` login the install
+  scripts carry), gets its own Redis user `sm-d-<id>`, pushes signed check-ins and reads
+  signed settings and blocklists (`sm:d:<id>:cfg`, `:bl`), over the Redis protocol, so any
+  Redis 6+ works. The dashboard only serves the link page, scripts and agent downloads.
+  **Computers paired before must be paired again** (make a new code); the agent says so.
+  The health-only check-in scripts are gone: without agent builds the installer stops.
+  Computers are no longer placed by the town of their internet address, which the
+  dashboard no longer sees. `agent/nexguard_device.py` speaks the relay too
+  (`pair --relay …`).
+
 ### Added
 
 - **Automation templates.** New automation opens a gallery of 17 ready-made automations:

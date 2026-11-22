@@ -12,7 +12,6 @@ from apps.automations import views as automation_views
 from apps.core import pwa
 from apps.core import views as core_views
 from apps.devices import connect as device_connect
-from apps.devices.urls import api_urlpatterns as device_api_urls
 from apps.monitors import views as monitor_views
 from apps.tenants import views as tenant_views
 from apps.users import views as user_views
@@ -68,7 +67,6 @@ urlpatterns = [
     # Git push webhooks (public; each request is signed with the automation's secret).
     path("hooks/git/<uuid:pk>/", automation_views.webhook, name="automation_webhook"),
     # Git push webhooks (public; each request is signed with the project's secret).
-    path("device/v1/", include(device_api_urls)),
     # Connect a computer: the link a parent sends, and the scripts it tells you to run.
     path(
         "d/uninstall.sh",

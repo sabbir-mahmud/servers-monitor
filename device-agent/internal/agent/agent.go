@@ -68,12 +68,15 @@ func clearTamper(sent []string) {
 // an offline computer uninstalls all the same.
 func Goodbye(version string) {
 	cfg, err := config.Load()
-	if err != nil || cfg.Token == "" {
+	if err != nil {
 		return
 	}
-	client := api.New(cfg.Server, "nexguard-agent/"+version)
-	client.HTTP.Timeout = 10 * time.Second
-	if _, err := client.Checkin(cfg.Token, map[string]any{"bye": "uninstall"}); err != nil {
+	client, err := api.New(cfg.Relay, cfg.Key)
+	if err == nil {
+		defer client.Close()
+		err = client.Checkin(map[string]any{"bye": "uninstall", "app_version": "nexguard-agent " + version})
+	}
+	if err != nil {
 		slog.Warn("couldn't tell the dashboard about the uninstall", "error", err.Error())
 	}
 }
@@ -96,11 +99,21 @@ func writeStatus(s Status) {
 }
 
 // CheckinOnce sends one report (with any screen time and websites counted since the last
-// one). On success it saves a new interval if the dashboard asks and applies its controls.
-// When the dashboard says the device is gone, it forgets the pairing and undoes blocking.
+// one) through the relay, then reads the settings the dashboard left there: a new
+// interval, and its controls, which it applies. When the relay no longer takes this
+// computer's login (removed on the dashboard), it forgets the pairing and undoes blocking.
 func CheckinOnce(cfg *config.Config, version string) error {
-	client := api.New(cfg.Server, "nexguard-agent/"+version)
+	client, err := api.New(cfg.Relay, cfg.Key)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
 	report := collect.Report(version)
+	// What it has, so the dashboard rewrites settings and blocklist only when they change.
+	report["config"] = cfg.Settings
+	if !config.UserMode() {
+		report["blocking_applied"] = activity.Applied()
+	}
 	batch := activity.Take()
 	if batch != nil {
 		report["activity"] = batch
@@ -116,7 +129,7 @@ func CheckinOnce(cfg *config.Config, version string) error {
 	if len(noticed) > 0 {
 		report["tamper"] = noticed
 	}
-	res, err := client.Checkin(cfg.Token, report)
+	err = client.Checkin(report)
 	if errors.Is(err, api.ErrUnpaired) {
 		Forget()
 		slog.Warn("this computer was removed on the dashboard: pairing, activity and blocking cleared")
@@ -131,17 +144,20 @@ func CheckinOnce(cfg *config.Config, version string) error {
 		activity.Confirm(batch.ID)
 	}
 	clearTamper(noticed)
-	if res.CheckinSeconds >= 60 && res.CheckinSeconds != cfg.Interval {
-		cfg.Interval = res.CheckinSeconds
-		if err := config.Save(cfg); err != nil {
-			slog.Warn("couldn't save the new check-in interval", "error", err.Error())
+	settings, err := client.Settings()
+	switch {
+	case errors.Is(err, api.ErrUnpaired):
+		// Removed between the push and the read: the next check-in finds out for good.
+	case err != nil:
+		slog.Warn("couldn't read the dashboard's settings", "error", err.Error())
+	case settings != nil: // nil: none left yet, keep what it has
+		saveSettings(cfg, settings)
+		if err := applyControls(client, settings.Controls); err != nil {
+			slog.Error("couldn't apply the dashboard's settings", "error", err.Error())
 		}
 	}
-	if err := applyControls(client, cfg.Token, res.Controls); err != nil {
-		slog.Error("couldn't apply the dashboard's settings", "error", err.Error())
-	}
 	writeStatus(Status{At: time.Now(), OK: true, Interval: cfg.Interval})
-	attrs := []any{"dashboard", cfg.Server, "next_in", (time.Duration(cfg.Interval) * time.Second).String()}
+	attrs := []any{"relay", cfg.RelayHost(), "next_in", (time.Duration(cfg.Interval) * time.Second).String()}
 	if batch != nil {
 		attrs = append(attrs, "activity_batch", batch.ID)
 	}
@@ -162,11 +178,30 @@ func Forget() {
 	}
 }
 
+// saveSettings keeps the interval, name and which settings it has, when they change.
+func saveSettings(cfg *config.Config, s *api.Settings) {
+	changed := s.Digest != cfg.Settings
+	cfg.Settings = s.Digest
+	if s.CheckinSeconds >= 60 && s.CheckinSeconds != cfg.Interval {
+		cfg.Interval, changed = s.CheckinSeconds, true
+	}
+	if s.Device.Name != "" && (s.Device.Name != cfg.Name || s.Device.Account != cfg.Account) {
+		cfg.Name, cfg.Account, changed = s.Device.Name, s.Device.Account, true
+	}
+	if !changed {
+		return
+	}
+	if err := config.Save(cfg); err != nil {
+		slog.Warn("couldn't save the dashboard's settings", "error", err.Error())
+	}
+}
+
 func blocklistPath() string { return filepath.Join(config.Dir(), "blocklist.txt") }
 
 // applyControls: remember what to collect, and make the hosts file match the dashboard's
-// blocklist: fetched only when its version changed, restored when someone edited it.
-func applyControls(client *api.Client, token string, c *api.Controls) error {
+// blocklist: read from the relay only when its version changed, restored when someone
+// edited the hosts file.
+func applyControls(client *api.Client, c *api.Controls) error {
 	if c == nil {
 		c = &api.Controls{}
 	}
@@ -185,19 +220,18 @@ func applyControls(client *api.Client, token string, c *api.Controls) error {
 	lines := readLines(blocklistPath())
 	wasApplied := c.Blocking == activity.Applied() && lines != nil
 	if !wasApplied {
-		have := activity.Applied()
-		if lines == nil {
-			have = "" // nothing cached: ask for the full list
-		}
-		fresh, err := client.Blocklist(token, have)
+		fresh, version, ok, err := client.Blocklist()
 		if err != nil {
 			return err
 		}
-		if fresh != nil {
-			lines = fresh
-			if err := writeLines(blocklistPath(), lines); err != nil {
-				return err
-			}
+		if !ok || version != c.Blocking {
+			// The dashboard writes the list right after the settings: it's there next time.
+			slog.Info("the new blocklist isn't in the relay yet: keeping the current one")
+			return nil
+		}
+		lines = fresh
+		if err := writeLines(blocklistPath(), lines); err != nil {
+			return err
 		}
 	}
 	if block.Fingerprint() != block.FingerprintOf(lines) {

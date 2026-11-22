@@ -1,10 +1,11 @@
 // nexguard: the NexGuard agent for Windows, Mac and Linux computers.
 //
 // An administrator installs it once; it then runs as a system service (a Windows service,
-// a macOS LaunchDaemon or a systemd unit) and checks in with the dashboard. The person using
-// the computer can't stop or remove it without administrator rights.
+// a macOS LaunchDaemon or a systemd unit) and checks in with the dashboard through its
+// Redis relay. The person using the computer can't stop or remove it without administrator
+// rights.
 //
-//	nexguard pair <dashboard> <code>   show who will see this computer, pair on a yes
+//	nexguard pair <relay address> <code>   show who will see this computer, pair on a yes
 //	nexguard install                   copy itself into place and start the service
 //	nexguard status                    paired? last check-in?
 //	nexguard checkin                   check in once now
@@ -42,7 +43,8 @@ var Version = "dev"
 const usage = `NexGuard agent %s: reports this computer's health to your NexGuard dashboard.
 
 Usage (as an administrator):
-  nexguard pair [--yes] <dashboard address> <pairing code>
+  nexguard pair [--yes] <relay address> <pairing code>
+                        (the dashboard's connect page puts both in the line it shows)
   nexguard install      start the background service (after pairing)
   nexguard --user --dir <folder> install
                         run at sign-in as you instead (no administrator, no blocking)
@@ -131,18 +133,13 @@ func pair(args []string) error {
 	yes := fs.Bool("yes", false, "agree without asking (the person was told some other way)")
 	_ = fs.Parse(args)
 	if fs.NArg() != 2 {
-		return errors.New("usage: nexguard pair [--yes] <dashboard address> <pairing code>")
+		return errors.New("usage: nexguard pair [--yes] <relay address> <pairing code>")
 	}
-	server, err := api.CheckServer(fs.Arg(0))
-	if err != nil {
-		return err
-	}
-	code := fs.Arg(1)
-	client := api.New(server, "nexguard-agent/"+Version)
+	pairURL, code := fs.Arg(0), fs.Arg(1)
 	info := collect.Info(Version)
 
 	// Ask first: a preview doesn't use the code, so saying no changes nothing.
-	preview, err := client.Pair(code, info, true)
+	preview, err := api.Pair(pairURL, code, info, true)
 	if err != nil {
 		return err
 	}
@@ -150,17 +147,17 @@ func pair(args []string) error {
 	if !*yes && !ask("Allow this? Type y and press Enter: ") {
 		return errors.New("not paired: you said no. The code still works if you change your mind")
 	}
-	result, err := client.Pair(code, info, false)
+	result, err := api.Pair(pairURL, code, info, false)
 	if err != nil {
 		return err
 	}
-	cfg := &config.Config{Server: server, Token: result.Token, Interval: result.CheckinSeconds,
+	cfg := &config.Config{Relay: result.Relay, Key: result.Key, Interval: result.CheckinSeconds,
 		Name: result.Device.Name, Account: result.Device.Account}
 	if err := config.Save(cfg); err != nil {
 		return err
 	}
 	fmt.Printf("Paired as %q in %s.\n", result.Device.Name, result.Device.Account)
-	slog.Info("paired", "device", result.Device.Name, "account", result.Device.Account, "dashboard", server)
+	slog.Info("paired", "device", result.Device.Name, "account", result.Device.Account, "relay", cfg.RelayHost())
 	if err := agent.CheckinOnce(cfg, Version); err != nil {
 		fmt.Printf("The first check-in failed (%v); the service will retry.\n", err)
 	}
@@ -170,11 +167,12 @@ func pair(args []string) error {
 func status() error {
 	cfg, err := config.Load()
 	if errors.Is(err, config.ErrNotPaired) {
-		fmt.Println("Not paired. Run: nexguard pair <dashboard address> <code>")
+		fmt.Println("Not paired:", err)
+		fmt.Println("Open the connect link from the dashboard on this computer and paste its line.")
 	} else if err != nil {
 		return err
 	} else {
-		fmt.Printf("Paired as %q in %s, with %s (every %s).\n", cfg.Name, cfg.Account, cfg.Server,
+		fmt.Printf("Paired as %q in %s, through %s (every %s).\n", cfg.Name, cfg.Account, cfg.RelayHost(),
 			time.Duration(cfg.Interval)*time.Second)
 	}
 	if config.UserMode() {

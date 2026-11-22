@@ -32,26 +32,44 @@ sm:a:<server id>:in    agent → dashboard   hb (heartbeat), ack, res (result/ou
   (see [security.md](security.md#signed-commands)). The signed form is canonical (sorted keys,
   no spaces), so a queued command can still be found again with `LREM`.
 
-**Phones** use the relay too, so they report from anywhere while the dashboard stays
-private. A phone app can't open a Redis connection, so it uses Upstash's HTTPS REST API:
+**Devices** (computers and phones) use the relay too, so they report from anywhere while
+the dashboard stays private, and the dashboard has no device API. Each paired device has
+its own ACL user `sm-d-<device id>`:
 
 ```
-sm:d:<device id>:in    phone → dashboard   ci (check-in)
+sm:d:<device id>:in    device → dashboard   ci (check-in), sos (phones)
+sm:d:<device id>:cfg   dashboard → device   settings: interval, controls (computers; SET/GET)
+sm:d:<device id>:bl    dashboard → device   blocklist, gzipped (computers; SET/GET)
+sm:pair:in             device → dashboard   pair requests (shared pairing logins)
+sm:pair:out:<nonce>    dashboard → device   pairing answers, under a name the device picked
 ```
 
-- Pairing (`POST /device/v1/pair`, the only HTTP call a phone makes) creates the ACL user
-  `sm-d-<device id>`, allowed only `RPUSH` and `PING` on that one key. It returns a REST
-  token for it (`ACL RESTTOKEN`, an Upstash extension) and a signing key that Redis never
-  sees. Plain Redis has no REST API, so phones need Upstash.
-- A check-in is `{"t":"ci","body":"<JSON text>","sig":"<hex HMAC-SHA256 of body>"}`, where the
-  body is `{"at": <unix time>, "report": {...}}`. The phone signs the exact text it sends,
-  so the check doesn't depend on two languages serialising JSON the same way.
-- The relay process `BLPOP`s phone inboxes in the same call as server inboxes. It drops
-  check-ins that are unsigned, forged, older than the phone counts as online, or less than
-  30 s after the last one.
-- Pairing again resets the user and the key, which cuts off the old phone. Removing the
-  device deletes the user, and the phone's next push gets a 401, so the app forgets its
-  pairing.
+- **Computers** (the Go agent) speak the Redis protocol, like server agents, so any Redis
+  works. Their user may `RPUSH` to `…:in` and `GET` `…:cfg` and `…:bl`. **Phones** can't
+  open a Redis connection, so they use Upstash's HTTPS REST API (`ACL RESTTOKEN`, an
+  Upstash extension) and may only `RPUSH`; phones need Upstash.
+- **Pairing.** The device pushes `{"t":"pair","body":"{at, nonce, code, secret, info}"}`
+  with a shared pairing login (`sm-app` built into the phone app, `sm-pc` in the install
+  scripts the dashboard serves), allowed only `RPUSH` to `sm:pair:in` and `GET` on
+  `sm:pair:out:*`. `secret` is a signing key the device made. The relay process checks the
+  code, creates the device's user, and `SET`s the answer (its login, who it's connected
+  as, the disclosure) under the nonce for 10 minutes. A computer first sends
+  `"preview": true` to show who will see it without using the code. Wrong codes are
+  limited to 20 per 10 minutes across all devices.
+- **Check-ins** are `{"t":"ci","body":"<JSON text>","sig":"<hex HMAC-SHA256 of body>"}`,
+  where the body is `{"at": <unix time>, "report": {...}}`, signed with the device's key.
+  The device signs the exact text it sends, so the check doesn't depend on two languages
+  serialising JSON the same way. The relay process `BLPOP`s device inboxes in the same call
+  as server inboxes. It drops check-ins that are unsigned, forged, older than the device
+  counts as online, or less than 30 s after the last one.
+- **Settings.** After a computer's check-in the relay process `SET`s its settings
+  (`{"body","sig"}`, signed with the device's key) when they differ from the ones the
+  check-in says it has (`config`, a digest), and its blocklist when the version differs
+  from `blocking_applied`. Saving Controls writes them at once. The agent `GET`s both after
+  each check-in and ignores anything not signed with its key.
+- Pairing again resets the user and the key, which cuts off the old device. Removing the
+  device deletes the user, so its next push is refused (`WRONGPASS` or a 401), and it
+  forgets its pairing.
 
 Message types:
 

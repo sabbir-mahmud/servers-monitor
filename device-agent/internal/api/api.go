@@ -1,72 +1,134 @@
-// Package api talks to the dashboard's device API: POST /device/v1/pair and
-// POST /device/v1/checkin (see main/apps/devices/api.py).
+// Package api is how the agent talks to its dashboard: through the dashboard's Redis relay,
+// never to the dashboard itself (see main/apps/agent_api/relay.py, "devices" and
+// "pairing", and bridge.py `handle_pairing` and `handle_device`).
+//
+//	pairing   RPUSH <prefix>:pair:in {"t":"pair","body":"…"}, then GET <prefix>:pair:out:<nonce>
+//	check-in  RPUSH <prefix>:d:<id>:in {"t":"ci","body":"{\"at\":…,\"report\":{…}}","sig":"…"}
+//	settings  GET   <prefix>:d:<id>:cfg  {"body":"{\"checkin_seconds\":…,\"controls\":…}","sig":"…"}
+//	blocklist GET   <prefix>:d:<id>:bl   {"body":"{\"version\":…,\"gz\":…}","sig":"…"}
+//
+// Everything after pairing is signed with HMAC-SHA256 under a key this computer made and
+// sent while pairing; Redis never sees it.
 package api
 
 import (
 	"bytes"
+	"compress/gzip"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
-	"net/url"
-	"os"
 	"strings"
 	"time"
+
+	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/relay"
 )
 
-// ErrUnpaired: the dashboard no longer knows this token (the device was removed there, or
-// paired again elsewhere). Stop reporting; an administrator can pair it again.
+// ErrUnpaired: the relay no longer accepts this computer's login (the device was removed
+// on the dashboard, or paired again elsewhere). Stop reporting; it can be paired again.
 var ErrUnpaired = errors.New("the dashboard removed this device")
 
-// Error is a refusal from the dashboard, with its own words ("That code isn't valid").
-type Error struct {
-	Status  int
-	Message string
-}
+// Error is a refusal from the dashboard, in its own words ("That code isn't valid").
+type Error struct{ Message string }
 
 func (e *Error) Error() string { return e.Message }
+
+// PairWait: how long to wait for the dashboard to answer a pairing request.
+var PairWait = 60 * time.Second
 
 type Device struct {
 	Name    string `json:"name"`
 	Account string `json:"account"`
 }
 
+// Login is this computer's own relay login, from pairing.
+type Login struct {
+	URL       string `json:"url"`
+	Inbox     string `json:"inbox"`
+	Config    string `json:"config"`
+	Blocklist string `json:"blocklist"`
+}
+
 type PairResult struct {
-	Token          string `json:"token"`
 	Disclosure     string `json:"disclosure"`
 	Device         Device `json:"device"`
 	CheckinSeconds int    `json:"checkin_seconds"`
+	Relay          Login  `json:"relay"`
+	Key            string `json:"-"` // hex: the signing key this computer made
 }
 
-type Client struct {
-	Server    string
-	UserAgent string
-	HTTP      *http.Client
-}
-
-func New(server, userAgent string) *Client {
-	return &Client{Server: server, UserAgent: userAgent, HTTP: &http.Client{Timeout: 20 * time.Second}}
-}
-
-// Pair with preview=true shows who will see this device without using up the code.
-func (c *Client) Pair(code string, info map[string]any, preview bool) (*PairResult, error) {
-	body := map[string]any{"code": code}
-	for k, v := range info {
-		body[k] = v
-	}
-	if preview {
-		body["preview"] = true
-	}
-	var out PairResult
-	if err := c.post("/device/v1/pair", "", body, &out); err != nil {
+// Pair asks the dashboard through the relay. With preview it only shows who will see this
+// computer and the code stays valid; without, it pairs and returns this computer's login.
+func Pair(pairURL, code string, info map[string]any, preview bool) (*PairResult, error) {
+	addr, err := relay.Parse(pairURL)
+	if err != nil {
 		return nil, err
 	}
-	if !preview && !strings.HasPrefix(out.Token, "ngd_") {
-		return nil, errors.New("the dashboard sent an unexpected answer")
+	if addr.Prefix == "" {
+		return nil, errors.New("the relay address has no ?prefix=: copy the whole line from the dashboard")
 	}
-	return &out, nil
+	conn, err := relay.Dial(pairURL)
+	if err != nil {
+		if relay.Denied(err) {
+			return nil, errors.New("the relay refused this pairing address: get a new line from the dashboard")
+		}
+		return nil, err
+	}
+	defer conn.Close()
+
+	nonce := randomHex(16)
+	body := map[string]any{"at": time.Now().Unix(), "nonce": nonce, "code": code, "info": info}
+	key := ""
+	if preview {
+		body["preview"] = true
+	} else {
+		key = randomHex(32)
+		body["secret"] = key
+	}
+	text, _ := json.Marshal(body)
+	msg, _ := json.Marshal(map[string]any{"t": "pair", "body": string(text)})
+	if err := conn.Push(addr.Prefix+":pair:in", string(msg)); err != nil {
+		return nil, err
+	}
+
+	answerKey := addr.Prefix + ":pair:out:" + nonce
+	deadline := time.Now().Add(PairWait)
+	for {
+		raw, ok, err := conn.Get(answerKey)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			var a struct {
+				PairResult
+				State   string `json:"state"`
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal([]byte(raw), &a); err != nil {
+				return nil, fmt.Errorf("the dashboard sent an unexpected answer: %w", err)
+			}
+			switch {
+			case a.State == "error":
+				return nil, &Error{Message: a.Message}
+			case preview && a.State == "preview":
+				return &a.PairResult, nil
+			case !preview && a.State == "paired" && a.Relay.URL != "" && a.Relay.Inbox != "":
+				a.PairResult.Key = key
+				return &a.PairResult, nil
+			}
+			return nil, errors.New("the dashboard sent an unexpected answer")
+		}
+		if time.Now().After(deadline) {
+			return nil, errors.New("the dashboard didn't answer through the relay. Is its relay process " +
+				"running? The code still works: try again in a minute")
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 // Controls: what the dashboard wants beyond health. Nil means none for this computer
@@ -78,120 +140,159 @@ type Controls struct {
 	Blocking    string `json:"blocking"` // blocklist version; "" = nothing blocked
 }
 
-type CheckinResult struct {
+// Settings the dashboard left for this computer.
+type Settings struct {
 	CheckinSeconds int       `json:"checkin_seconds"`
 	Controls       *Controls `json:"controls"`
+	Device         Device    `json:"device"`
+	Digest         string    `json:"-"` // echoed back in check-ins as "config"
 }
 
-// Checkin sends one report; the answer says how often to report and what to collect.
-func (c *Client) Checkin(token string, report map[string]any) (*CheckinResult, error) {
-	var out CheckinResult
-	if err := c.post("/device/v1/checkin", token, report, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
+// Client is a paired computer's connection to the relay.
+type Client struct {
+	login Login
+	key   []byte
+	conn  *relay.Conn
 }
 
-// Blocklist fetches the hosts lines ("address name") for this computer. With the version
-// it already has, the dashboard answers 304 and this returns nil, nil.
-func (c *Client) Blocklist(token, have string) ([]string, error) {
-	req, err := http.NewRequest(http.MethodGet, c.Server+"/device/v1/blocklist", nil)
-	if err != nil {
-		return nil, err
+func New(login Login, keyHex string) (*Client, error) {
+	key, err := hex.DecodeString(keyHex)
+	if err != nil || len(key) != 32 {
+		return nil, errors.New("the saved signing key is damaged: pair again")
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("User-Agent", c.UserAgent)
-	if have != "" {
-		req.Header.Set("If-None-Match", `"`+have+`"`)
-	}
-	client := *c.HTTP
-	client.Timeout = 2 * time.Minute // a few MB on a slow connection
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("can't reach %s: %w", c.Server, err)
-	}
-	defer resp.Body.Close()
-	switch {
-	case resp.StatusCode == http.StatusNotModified:
-		return nil, nil
-	case resp.StatusCode == http.StatusUnauthorized:
-		return nil, ErrUnpaired
-	case resp.StatusCode != http.StatusOK:
-		return nil, &Error{Status: resp.StatusCode, Message: fmt.Sprintf("blocklist: HTTP %d", resp.StatusCode)}
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
-	if err != nil {
-		return nil, err
-	}
-	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	if len(lines) == 1 && lines[0] == "" {
-		return []string{}, nil
-	}
-	return lines, nil
+	return &Client{login: login, key: key}, nil
 }
 
-func (c *Client) post(path, token string, body any, out any) error {
-	data, err := json.Marshal(body)
+func (c *Client) Close() {
+	if c.conn != nil {
+		_ = c.conn.Close()
+		c.conn = nil
+	}
+}
+
+func (c *Client) dial() (*relay.Conn, error) {
+	if c.conn != nil {
+		return c.conn, nil
+	}
+	conn, err := relay.Dial(c.login.URL)
 	if err != nil {
-		return err
+		return nil, c.translate(err)
 	}
-	req, err := http.NewRequest(http.MethodPost, c.Server+path, bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", c.UserAgent)
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return fmt.Errorf("can't reach %s: %w", c.Server, err)
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode == http.StatusUnauthorized && token != "" {
+	c.conn = conn
+	return conn, nil
+}
+
+func (c *Client) translate(err error) error {
+	if relay.Denied(err) {
 		return ErrUnpaired
 	}
-	if resp.StatusCode >= 300 {
-		var e struct {
-			Error string `json:"error"`
-		}
-		if json.Unmarshal(raw, &e) != nil || e.Error == "" {
-			e.Error = fmt.Sprintf("the dashboard answered HTTP %d", resp.StatusCode)
-		}
-		return &Error{Status: resp.StatusCode, Message: e.Error}
+	return err
+}
+
+// Checkin sends one report, signed.
+func (c *Client) Checkin(report map[string]any) error {
+	conn, err := c.dial()
+	if err != nil {
+		return err
 	}
-	if err := json.Unmarshal(raw, out); err != nil {
-		return fmt.Errorf("the dashboard sent an unexpected answer: %w", err)
+	body, err := json.Marshal(map[string]any{"at": time.Now().Unix(), "report": report})
+	if err != nil {
+		return err
+	}
+	msg, _ := json.Marshal(map[string]any{"t": "ci", "body": string(body), "sig": c.sign(string(body))})
+	if err := conn.Push(c.login.Inbox, string(msg)); err != nil {
+		c.Close()
+		return c.translate(err)
 	}
 	return nil
 }
 
-// CheckServer normalizes the dashboard address and refuses plain http:// except on this
-// machine or the local network (where the dashboard may run without a certificate).
-// NEXGUARD_ALLOW_HTTP=1 lifts that.
-func CheckServer(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if !strings.Contains(raw, "://") {
-		raw = "https://" + raw
+// Settings reads what the dashboard left for this computer; nil, nil when it has left
+// nothing yet (keep what you have).
+func (c *Client) Settings() (*Settings, error) {
+	body, ok, err := c.read(c.login.Config)
+	if err != nil || !ok {
+		return nil, err
 	}
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
-		return "", fmt.Errorf("%q isn't a dashboard address like https://monitor.example.com", raw)
+	var s Settings
+	if err := json.Unmarshal([]byte(body), &s); err != nil {
+		return nil, fmt.Errorf("unreadable settings from the dashboard: %w", err)
 	}
-	if u.Scheme == "http" && !isLocal(u.Hostname()) && os.Getenv("NEXGUARD_ALLOW_HTTP") != "1" {
-		return "", errors.New("use the dashboard's https:// address: over plain http the token " +
-			"would cross the internet unencrypted")
-	}
-	return strings.TrimRight(u.Scheme+"://"+u.Host+u.Path, "/"), nil
+	sum := sha256.Sum256([]byte(body))
+	s.Digest = hex.EncodeToString(sum[:])[:16]
+	return &s, nil
 }
 
-func isLocal(host string) bool {
-	if host == "localhost" || strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".localhost") {
-		return true
+// Blocklist reads the hosts lines ("address name") the dashboard left for this computer
+// and their version. ok is false when there is none yet.
+func (c *Client) Blocklist() (lines []string, version string, ok bool, err error) {
+	body, ok, err := c.read(c.login.Blocklist)
+	if err != nil || !ok {
+		return nil, "", false, err
 	}
-	ip := net.ParseIP(host)
-	return ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast())
+	var b struct {
+		Version string `json:"version"`
+		GZ      string `json:"gz"`
+	}
+	if err := json.Unmarshal([]byte(body), &b); err != nil {
+		return nil, "", false, fmt.Errorf("unreadable blocklist: %w", err)
+	}
+	packed, err := base64.StdEncoding.DecodeString(b.GZ)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("unreadable blocklist: %w", err)
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(packed))
+	if err != nil {
+		return nil, "", false, fmt.Errorf("unreadable blocklist: %w", err)
+	}
+	raw, err := io.ReadAll(io.LimitReader(zr, 32<<20))
+	if err != nil {
+		return nil, "", false, fmt.Errorf("unreadable blocklist: %w", err)
+	}
+	text := strings.TrimSpace(string(raw))
+	if text == "" {
+		return []string{}, b.Version, true, nil
+	}
+	return strings.Split(text, "\n"), b.Version, true, nil
+}
+
+// read GETs a signed value and returns its body once the signature checks out.
+func (c *Client) read(key string) (string, bool, error) {
+	if key == "" {
+		return "", false, nil
+	}
+	conn, err := c.dial()
+	if err != nil {
+		return "", false, err
+	}
+	raw, ok, err := conn.Get(key)
+	if err != nil {
+		c.Close()
+		return "", false, c.translate(err)
+	}
+	if !ok {
+		return "", false, nil
+	}
+	var sealed struct {
+		Body string `json:"body"`
+		Sig  string `json:"sig"`
+	}
+	if json.Unmarshal([]byte(raw), &sealed) != nil || !hmac.Equal([]byte(sealed.Sig), []byte(c.sign(sealed.Body))) {
+		return "", false, errors.New("the relay holds settings this dashboard didn't sign: ignoring them")
+	}
+	return sealed.Body, true, nil
+}
+
+func (c *Client) sign(body string) string {
+	m := hmac.New(sha256.New, c.key)
+	m.Write([]byte(body))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+func randomHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		panic(err) // the system has no randomness: nothing safe to do
+	}
+	return hex.EncodeToString(b)
 }

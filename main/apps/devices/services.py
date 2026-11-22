@@ -1,5 +1,6 @@
-"""Adding, pairing and hearing from devices. Views and the device API call these."""
+"""Adding, pairing and hearing from devices. Views and the relay bridge call these."""
 
+import json
 import logging
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -98,16 +99,17 @@ def disclosure(device: Device, info: dict) -> str:
     return text
 
 
-# --------------------------------------------------------------------------- phones
+# --------------------------------------------------------------------------- pairing
 #
-# Phones pair through the Redis relay and never reach this dashboard: the person types the
-# 6-digit code into the app, which sends it through the relay with the app's shared
-# pairing login, and the bridge answers there (apps/agent_api/relay.py "phone pairing",
-# bridge.py `handle_pairing`).
+# Devices pair through the Redis relay and never reach this dashboard. A phone's person
+# types the 6-digit code into the app; a computer's install script (or `nexguard pair`)
+# sends its 8-character code. Either goes through the relay with a shared pairing login,
+# and the bridge answers there (apps/agent_api/relay.py "pairing", bridge.py
+# `handle_pairing`). The device sends a key it made; both sides sign with it from then on.
 
 
 def connected_name(device: Device) -> str:
-    """Who the phone shows it's connected as: the person it belongs to, else the user who
+    """Who the device shows it's connected as: the person it belongs to, else the user who
     added it, else the account."""
     if device.person_id:
         return device.person.name
@@ -116,71 +118,34 @@ def connected_name(device: Device) -> str:
     return device.account.name
 
 
-@transaction.atomic
-def pair_phone(code: str, info: dict, secret_hex: str) -> tuple[Device, dict]:
-    """A phone typed `code` and sent the key it made for signing check-ins. Gives it its
-    check-in login; the code is used up and a phone paired before under this entry is cut
-    off. Returns (device, relay login). Raises PairingError."""
-    from apps.agent_api import relay
-    from apps.core import crypto
-
-    digits = "".join(ch for ch in str(code) if ch.isdigit())
-    if len(digits) != pairing.PHONE_CODE_LENGTH:
-        raise PairingError("Enter the 6-digit code from the dashboard.")
-    device = (
-        Device.objects.select_for_update()
-        .select_related("account", "person", "created_by")
-        .filter(pairing_code_hash=pairing.digest(digits), platform__in=PHONES)
-        .first()
-    )
-    now = timezone.now()
-    if (
-        device is None
-        or not device.pairing_code_expires_at
-        or device.pairing_code_expires_at <= now
-    ):
-        raise PairingError(
-            "That code isn't valid or has expired. Make a new one on the dashboard.", 404
-        )
-    _check_platform(device, info)
-    try:
-        login = relay.provision_device(device)  # sets device.relay_salt
-    except relay.RelayError as exc:
-        raise PairingError(f"This dashboard can't take phones right now: {exc}.", 503) from exc
-    device.relay_key_enc = crypto.encrypt(secret_hex)
-    device.token_hash = pairing.new_token()[1]  # marks it paired; the phone never sees one
-    device.pairing_code_hash = ""
-    device.pairing_code_expires_at = None
-    device.paired_at = device.last_seen_at = now
-    device.last_ip = None
-    _apply_info(device, info)
-    device.save()
-    from apps.audit.services import record
-
-    record(None, "device.pair", target=device.name, account=device.account,
-           platform=device.platform, model=device.model, via="relay")  # fmt: skip
-    return device, {k: login[k] for k in ("url", "token", "inbox")}
-
-
 def _device_for_code(code: str, info: dict, *, lock: bool) -> Device:
-    """The device waiting for this code, checked against the platform asking for it."""
-    normalized = pairing.normalize_code(code)
-    if len(normalized) == pairing.PHONE_CODE_LENGTH and normalized.isdigit():
-        raise PairingError(
-            "Phones pair in the NexGuard app, not this address. Update the app.", 410
-        )
-    if len(normalized) != pairing.CODE_LENGTH:
-        raise PairingError("Enter the 8-character code from the parent's dashboard.")
-    devices = Device.objects.select_related("account", "person")
+    """The device waiting for this code (a phone's 6 digits or a computer's 8 characters),
+    checked against the platform asking for it. Raises PairingError (404: no such code)."""
+    devices = Device.objects.select_related("account", "person", "created_by")
     if lock:
         devices = devices.select_for_update()
-    device = devices.filter(pairing_code_hash=pairing.digest(normalized)).first()
-    if device is None:
-        raise PairingError("That code isn't valid. Ask for a new one on the dashboard.", 404)
+    normalized = pairing.normalize_code(str(code))
+    if len(normalized) == pairing.PHONE_CODE_LENGTH and normalized.isdigit():
+        device = devices.filter(pairing_code_hash=pairing.digest(normalized),
+                                platform__in=PHONES).first()  # fmt: skip
+        if (
+            device is None
+            or not device.pairing_code_expires_at
+            or device.pairing_code_expires_at <= timezone.now()
+        ):
+            raise PairingError(
+                "That code isn't valid or has expired. Make a new one on the dashboard.", 404
+            )
+    elif len(normalized) == pairing.CODE_LENGTH:
+        device = devices.filter(pairing_code_hash=pairing.digest(normalized),
+                                platform__in=COMPUTERS).first()  # fmt: skip
+        if device is None:
+            raise PairingError("That code isn't valid. Ask for a new one on the dashboard.", 404)
+    elif normalized.isdigit():
+        raise PairingError("Enter the 6-digit code from the dashboard.")
+    else:
+        raise PairingError("Enter the 8-character code from the dashboard.")
     _check_platform(device, info)
-    if device.platform in PHONES:
-        raise PairingError("Phones pair in the NexGuard app, not this address. Update the app.",
-                           410)  # fmt: skip
     return device
 
 
@@ -192,48 +157,114 @@ def _check_platform(device: Device, info: dict) -> None:
                            "device, or add this one separately.", 409)  # fmt: skip
 
 
+def _article(word: str) -> str:
+    return "an" if word[:1].lower() in "aeiou" else "a"
+
+
 def preview(code: str, info: dict) -> Device:
-    """Who would see this device, before anything is stored: the device asks its user
+    """Who would see this computer, before anything is stored: the agent asks its user
     first and pairs only on a yes. The code stays valid either way."""
     return _device_for_code(code, info, lock=False)
 
 
 @transaction.atomic
-def pair(code: str, info: dict, ip: str | None) -> tuple[Device, str]:
-    """Exchange a pairing code for a device token. The code is used up; a device already
-    paired under this entry (reset, or a replacement phone) loses its old token.
+def pair_device(code: str, info: dict, secret_hex: str) -> tuple[Device, dict]:
+    """A device sent `code` and the key it made for signing. Gives it its own relay login;
+    the code is used up and a device paired before under this entry is cut off. Returns
+    (device, relay login). If the login can't be made, nothing changes and the code still
+    works. Raises PairingError."""
+    from apps.agent_api import relay
+    from apps.core import crypto
 
-    A phone also gets its own relay login (apps/agent_api/relay.py), returned third: it
-    checks in through Upstash, never to this dashboard. If that can't be made, nothing
-    changes and the code still works."""
     device = _device_for_code(code, info, lock=True)
-    raw, token_hash = pairing.new_token()
+    try:
+        if device.platform in PHONES:
+            login = relay.provision_device(device)  # sets device.relay_salt
+        else:
+            login = relay.provision_computer(device)
+    except relay.RelayError as exc:
+        raise PairingError(f"This dashboard can't take devices right now: {exc}.", 503) from exc
     now = timezone.now()
-    device.token_hash = token_hash
+    device.relay_key_enc = crypto.encrypt(secret_hex)
+    device.token_hash = pairing.new_token()[1]  # marks it paired; the device never sees one
     device.pairing_code_hash = ""
+    device.pairing_code_expires_at = None
     device.paired_at = device.last_seen_at = now
-    device.last_ip = ip
+    device.last_ip = None
     _apply_info(device, info)
     device.save()
     from apps.audit.services import record
 
-    record(None, "device.pair", target=device.name, account=device.account, from_ip=ip,
-           platform=device.platform, model=device.model)  # fmt: skip
-    return device, raw
+    record(None, "device.pair", target=device.name, account=device.account,
+           platform=device.platform, model=device.model, via="relay")  # fmt: skip
+    if device.platform in COMPUTERS:
+        publish_settings(device)
+    return device, login
 
 
-def _article(word: str) -> str:
-    return "an" if word[:1].lower() in "aeiou" else "a"
+# --------------------------------------------------------------------------- settings
+#
+# A computer's settings (how often to check in, what to collect, which blocklist) wait for
+# it in the relay; it GETs them at each check-in and echoes back which it has, so they are
+# only rewritten when they change.
 
 
-def authenticate(raw_token: str) -> Device | None:
-    if not raw_token.startswith(pairing.TOKEN_PREFIX):
+def controls_json(device: Device) -> dict | None:
+    """What the agent should do beyond health. None for a device that may not have
+    controls: the agent then stops collecting and removes its hosts block."""
+    if not device.controls_allowed:
         return None
-    return (
-        Device.objects.select_related("account", "person")
-        .filter(token_hash=pairing.digest(raw_token))
-        .first()
-    )
+    from . import activity, blocklist
+
+    controls = activity.controls_for(device)
+    return {
+        "screen_time": bool(controls and controls.screen_time),
+        "web_activity": bool(controls and controls.web_activity),
+        "location": bool(controls and controls.location),
+        # "" = no blocking; never for a user-mode agent, which couldn't apply it
+        "blocking": blocklist.version(controls) if device.can_block else "",
+    }
+
+
+def settings_body(device: Device) -> str:
+    """The settings as the exact JSON text the computer is sent (and the signature is of)."""
+    return json.dumps(
+        {"checkin_seconds": device.checkin_seconds, "device": device_json(device),
+         "controls": controls_json(device)},
+        sort_keys=True, separators=(",", ":"),
+    )  # fmt: skip
+
+
+# Blocklists this process already wrote (device id -> version): a computer that hasn't
+# applied one yet isn't sent megabytes again at every check-in.
+_published_blocklists: dict = {}
+
+
+def publish_settings(device: Device, report: dict | None = None) -> None:
+    """Bring the computer's settings and blocklist in the relay up to date. `report`: its
+    last check-in, which says what it has (`config`, `blocking_applied`); without one
+    (just paired, or controls changed), write both. Never raises: the next check-in
+    tries again."""
+    from apps.agent_api import relay
+
+    if device.platform not in COMPUTERS or not device.relay_salt:
+        return
+    from . import activity, blocklist
+
+    body = settings_body(device)
+    try:
+        if report is None or report.get("config") != relay.config_digest(body):
+            relay.publish_config(device, body)
+        controls = activity.controls_for(device) if device.can_block else None
+        version = blocklist.version(controls)
+        if version and (report is None or (
+            report.get("blocking_applied") != version
+            and _published_blocklists.get(device.pk) != version
+        )):  # fmt: skip
+            relay.publish_blocklist(device, version, blocklist.for_device(controls))
+            _published_blocklists[device.pk] = version
+    except relay.RelayError as exc:
+        logger.warning("Couldn't update %s's settings in the relay: %s", device.name, exc)
 
 
 def checkin(device: Device, report: dict, ip: str | None) -> None:
@@ -317,7 +348,9 @@ def _computer_location(device: Device, location, ip, now):
         return None, False  # never stored unless switched on, whatever was sent
     if location is not None:
         return location, True
-    fix = geoip.locate(ip)
+    # Computers check in through the relay, so the dashboard never sees their address:
+    # `ip` is None and there is no town to look up (kept for a client that can send one).
+    fix = geoip.locate(ip) if ip else None
     if fix is None:
         return None, False
     location = _location({**fix, "at": now.isoformat(), "source": "ip"}, now)

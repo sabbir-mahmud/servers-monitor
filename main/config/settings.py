@@ -324,7 +324,7 @@ ADULT_BLOCKLIST_URL = config(
     default="https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts",
 )
 # The device agent builds (device-agent/build.sh) the connect command installs: without
-# them it falls back to the health-only check-in script.
+# them it can't connect a computer.
 # Free city-level IP database ({month} = 2026-11) for computers that can't report a precise
 # location. Fetched about monthly by the relay, looked up locally. "" turns it off.
 DEVICE_GEOIP_URL = config(

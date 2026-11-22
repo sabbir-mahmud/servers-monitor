@@ -81,8 +81,8 @@ The NexGuard agent. Given an administrator password, it installs as a protected 
 that only an administrator can stop, and that can block websites. Without one, it runs
 **as the signed-in user** (`com.nexguard.agent` LaunchAgent on a Mac, the `nexguard-agent`
 systemd user service on Linux, the *NexGuard agent* sign-in task on Windows), with no
-blocking. Where the dashboard has no agent builds, the line installs a check-in instead
-that runs every 5 minutes. Either reports as often as the dashboard asks. It sends CPU, memory and GPU use, battery, free and total storage, system
+blocking. It reports as often as the dashboard asks (every 5 minutes by default), through
+the relay. It sends CPU, memory and GPU use, battery, free and total storage, system
 version, model and computer name. It doesn't read files, see the screen or record
 keystrokes.
 
@@ -101,14 +101,18 @@ CPU, memory, GPU, battery and storage over 6 hours to 30 days. History is kept f
 A reading the system can't give is left out and shows as "Not reported". It isn't
 recorded as zero.
 
+Installed without an administrator, the agent runs from:
+
 | System | Runs from | Files |
 |---|---|---|
-| Windows | Task Scheduler: *NexGuard device check-in* (at sign-in, then every 5 min, no window) | `%LOCALAPPDATA%\NexGuard` |
-| Mac | LaunchAgent `com.nexguard.device` | `~/Library/Application Support/NexGuard`, `~/Library/LaunchAgents/com.nexguard.device.plist` |
-| Linux | systemd user timer `nexguard-device.timer`, or cron if there's no systemd | `~/.local/share/nexguard` |
+| Windows | Task Scheduler: *NexGuard agent* (at sign-in, no window) | `%LOCALAPPDATA%\NexGuard` |
+| Mac | LaunchAgent `com.nexguard.agent` | `~/Library/Application Support/NexGuard`, `~/Library/LaunchAgents/com.nexguard.agent.plist` |
+| Linux | systemd user service `nexguard-agent`, or cron if there's no systemd | `~/.local/share/nexguard` |
 
-The device token is stored in a `config` file readable only by that user. A failed
-check-in is noted in an `error` file next to it.
+Its relay login and signing key are in `config.json`, readable only by that user. A failed
+check-in shows in `nexguard status` and the log. (Computers set up with the older
+check-in script, *NexGuard device check-in*, stopped reporting when computers moved to the
+relay: paste the line again and the agent replaces it.)
 
 ## The agent
 
@@ -124,8 +128,14 @@ Without the administrator password, the command installs the same agent **runnin
 person**: a login item on a Mac, a systemd user service on Linux, a scheduled task at
 sign-in on Windows. It sees only their own screen and browsers, **can't block websites**,
 and the person can remove it. To add blocking later, use **Pair again** and paste the line
-again with the password. Without agent builds on the dashboard, the command installs the
-health-only check-in script instead.
+again with the password. Without agent builds on the dashboard, the command stops and says
+so: the agent is the only computer client.
+
+Computers never talk to the dashboard: the agent pairs and checks in through the same
+Redis relay servers use (see [architecture.md](architecture.md#the-relay-protocol)), so
+the dashboard only has to be reachable for the link page and the downloads. The relay must
+be reachable from the computer at `REDIS_URL`'s host (or `RELAY_PUBLIC_HOST`), and any
+Redis 6+ works; phones additionally need Upstash.
 
 ## Screen time, websites and blocking (agent only)
 
@@ -152,12 +162,9 @@ Activity is kept `DEVICE_ACTIVITY_DAYS` (30) days and deleted with the device.
   security → Location). No prompt.
 - **Linux:** from GeoClue; the administrator install allows itself in GeoClue's
   configuration.
-- **Mac, or when the above is off:** the town its internet connection is in, from the free
-  [DB-IP](https://db-ip.com) city database the dashboard downloads monthly
-  (`DEVICE_GEOIP_URL`). Looked up on the dashboard; no address is sent anywhere. A VPN
-  shows the VPN's town, and a dashboard reached over a home network or `localhost` sees
-  no public address, so nothing is shown. Behind a reverse proxy, set
-  `TRUST_PROXY_HEADERS`.
+- **Mac, or when the above is off:** no position. A Mac doesn't share one with background
+  apps, and since computers check in through the relay, the dashboard never sees their
+  internet address to place them by town.
 
 Limits worth knowing:
 - Private and incognito windows aren't in the browser's history, so they don't show.
@@ -177,8 +184,8 @@ Limits worth knowing:
 
 ## Removing a device
 
-- **On the dashboard:** delete the device. Its next check-in gets "not paired" and it
-  uninstalls itself.
+- **On the dashboard:** delete the device. Its relay login is deleted, so its next check-in
+  is refused; the agent forgets the pairing and removes its blocking.
 - **On the computer:** paste one line (also on the link page under *How do I remove it?*):
   `irm https://monitor.example.com/d/uninstall.ps1 | iex` on Windows,
   `curl -fsSL https://monitor.example.com/d/uninstall.sh | sh` on a Mac or Linux.
@@ -190,9 +197,11 @@ Limits worth knowing:
 |---|---|
 | *That code isn't valid* | Each code works once, and making a new one cancels the old. Make a new code on the pair page and send the new link. |
 | *This code is for a Mac* (or another system) | The device was added as a different system. Add it again with the right one. |
-| *Can't reach …* | The computer can't open the dashboard address. Set `DASHBOARD_URL` to an address it can reach (not `127.0.0.1` unless it's the same machine). |
-| *Too many tries* | 10 attempts per 10 minutes per network. Wait, then try again. |
-| Paired, but stays offline | Look at the `error` file in the folder above. On Linux without systemd or cron, nothing can schedule the check-in. |
+| *Can't reach …* | The computer can't open the dashboard address (for the download) or the relay. Set `DASHBOARD_URL` to an address it can reach (not `127.0.0.1` unless it's the same machine), and make sure the relay's port is open from there. |
+| *The dashboard didn't answer through the relay* | The relay process (`manage.py relay`) isn't running. The code still works: start it and try again. |
+| *Too many wrong codes* | 20 wrong codes in 10 minutes, across all devices. Wait, then try again. |
+| *Paired with an older NexGuard* | It was paired before computers moved to the relay. Make a new code on the pair page and paste the line again. |
+| Paired, but stays offline | Run `nexguard status`: it shows the last check-in and its error. On Linux without systemd or cron, nothing can keep the agent running. |
 
 **See what the agent is doing on the computer itself.** `nexguard status` shows whether it's
 paired, its last check-in and where its log is (`logs/nexguard.log` in the agent's folder,
@@ -202,20 +211,27 @@ one JSON line per event).
 
 - The link page and the two scripts need no sign-in and **never look the code up**: they
   only check it's 8 characters from the code alphabet, so they can't be used to test
-  codes. The code is only checked by `POST /device/v1/pair`, which is rate-limited.
-- The scripts come from this dashboard with its address and the code filled in. The
-  address must be a plain `https://host[:port]/path`; anything that could break out of the
-  quotes is refused. Set `DASHBOARD_URL` so the address is the one devices should use.
-- The installer asks with `"preview": true` first, which shows the account name and what
-  it will see **without using the code**. It pairs only after a yes, so saying no changes
-  nothing.
+  codes. The code is only checked by the relay process when the agent sends it, and wrong
+  codes are limited there (20 per 10 minutes across all devices).
+- The scripts come from this dashboard with its address, the code and the relay's
+  **pairing login** (`sm-pc`) filled in. That login can only send pairing requests and read
+  answers under a random name the agent picks: it can't read other requests, list keys or
+  touch any device's data. The same login goes in every script, so anyone who downloads
+  one learns nothing more than that. The addresses must be plain URLs; anything that could
+  break out of the quotes is refused. Set `DASHBOARD_URL` so the address is the one
+  devices should use.
+- The agent asks with a preview first, which shows the account name and what it will see
+  **without using the code**. It pairs only after a yes, so saying no changes nothing.
+- Pairing gives the computer its own relay login (`sm-d-<id>`), allowed only to push to its
+  inbox and read its settings and blocklist. The agent makes a signing key and sends it
+  while pairing; check-ins are signed with it, and the agent ignores settings and
+  blocklists that aren't, so whoever holds the relay's admin password can't steer it.
 - Links and scripts are sent with `Cache-Control: no-store`, `Referrer-Policy:
   no-referrer` and `X-Robots-Tag: noindex`, since the code is in the URL.
-- Over plain `http://` (a dashboard on your home network) the page warns to do this only
-  on a trusted network: the token would cross it unencrypted.
-- The shell installer reads the dashboard's answers as `key=value` lines
-  (`Accept: text/plain`), so it needs nothing beyond `sh`, `curl`, `sed` and `awk`.
-  `NEXGUARD_YES=1` answers the question for unattended installs; `NEXGUARD_NO_SCHEDULE=1`
+- The agent refuses a plain `redis://` relay except on this machine or the local network
+  (`NEXGUARD_ALLOW_PLAIN=1` lifts that): the login would cross the internet unencrypted.
+- `NEXGUARD_YES=1` answers the question for unattended installs; `NEXGUARD_NO_SCHEDULE=1`
   pairs and checks in once without scheduling anything.
-- `agent/nexguard_device.py` is the same client in Python, for scripting and as a
-  reference for the phone apps.
+- `agent/nexguard_device.py` is a health-only client in Python (standard library), for
+  scripting: `pair --relay 'rediss://sm-pc:…' --code K7PQ-3MXA`, with the relay address
+  from the line the link page shows.

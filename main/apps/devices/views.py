@@ -264,6 +264,7 @@ class DeviceControlsView(StaffViewMixin, AccountScopedMixin, UpdateView):
             messages.error(self.request, self.object.controls_block_reason)
             return redirect("devices:detail", pk=self.object.pk)
         controls = form.save()
+        services.publish_settings(self.object)  # picked up at its next check-in
         record(self.request, "device.controls", target=self.object.name,
                fields=form.changed_data, screen_time=controls.screen_time,
                web_activity=controls.web_activity, blocking=controls.blocking)  # fmt: skip
@@ -283,6 +284,7 @@ class DeviceUpdateView(StaffViewMixin, AccountScopedMixin, UpdateView):
 
     def form_valid(self, form):
         response = super().form_valid(form)
+        services.publish_settings(self.object)  # its name and check-in interval
         record(self.request, "device.update", target=self.object.name, fields=form.changed_data)
         messages.success(self.request, f"{self.object.name} saved.")
         return response

@@ -7,6 +7,7 @@ import pytest
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.agent_api import relay
 from apps.audit.models import AuditLog
 from apps.devices import activity, blocklist
 from apps.devices.models import (
@@ -18,8 +19,9 @@ from apps.devices.models import (
 )
 from apps.tenants.models import Person
 
+from .computers import ask, pair_computer
 from .conftest import add_member, make_account
-from .test_devices import add_device, api_checkin, api_pair, code_on
+from .test_devices import add_device, code_on
 
 pytestmark = pytest.mark.django_db
 
@@ -50,17 +52,17 @@ def sara(family):
     return Person.objects.create(account=family, kind="child", name="Sara")
 
 
-def pair_computer(client, person, name="Sara's Mac", info=AGENT):
+def paired_mac(client, person, name="Sara's Mac", info=AGENT):
     device, code = add_device(client, person, platform="macos", name=name)
-    token = api_pair(client, code, platform="macos", **info).json()["token"]
+    pc = pair_computer(device, code, **info)
     device.refresh_from_db()
-    return device, token
+    return device, pc
 
 
 @pytest.fixture
 def mac(client, parent, sara):
     client.force_login(parent)
-    return pair_computer(client, sara)
+    return paired_mac(client, sara)
 
 
 def turn_on(device, **fields):
@@ -83,21 +85,20 @@ def today():
 
 def test_only_children_and_staff_on_the_agent_get_controls(client, parent, family, sara):
     client.force_login(parent)
-    child_mac, token = pair_computer(client, sara)
+    child_mac, pc = paired_mac(client, sara)
     assert child_mac.controls_allowed
-    assert api_checkin(client, token, AGENT).json()["controls"] == {
+    assert pc.send(AGENT)["controls"] == {
         "screen_time": False, "web_activity": False, "location": False, "blocking": ""}  # fmt: skip
 
     partner = Person.objects.create(account=family, kind="partner", name="Rahim")
-    their_mac, token = pair_computer(client, partner, name="Rahim's Mac")
+    their_mac, pc = paired_mac(client, partner, name="Rahim's Mac")
     assert "child's or a staff member's" in their_mac.controls_block_reason
-    assert api_checkin(client, token, AGENT).json()["controls"] is None
+    assert pc.send(AGENT)["controls"] is None
 
-    script_mac, token = pair_computer(client, sara, name="Sara's old Mac",
-                                      info={"app_version": "nexguard-device-sh 1.2.0"})  # fmt: skip
+    script_mac, pc = paired_mac(client, sara, name="Sara's old Mac",
+                                info={"app_version": "nexguard-device-sh 1.2.0"})  # fmt: skip
     assert "agent" in script_mac.controls_block_reason
-    assert api_checkin(client, token, {"app_version": "nexguard-device-sh 1.2.0"}).json()[
-        "controls"] is None  # fmt: skip
+    assert pc.send({"app_version": "nexguard-device-sh 1.2.0"})["controls"] is None
 
 
 def test_staff_computers_in_a_company_can_have_controls(client, django_user_model):
@@ -106,7 +107,7 @@ def test_staff_computers_in_a_company_can_have_controls(client, django_user_mode
     add_member(boss, "owner", company)
     staff = Person.objects.create(account=company, kind="staff", name="Karim")
     client.force_login(boss)
-    device, _ = pair_computer(client, staff, name="Karim's Mac")
+    device, _ = paired_mac(client, staff, name="Karim's Mac")
     assert device.controls_allowed
 
 
@@ -118,12 +119,12 @@ def test_a_solo_developers_own_computer_can_have_controls(client, django_user_mo
     resp = client.post(reverse("devices:create"), {"platform": "macos", "name": "My Mac"})
     device = Device.objects.get(name="My Mac")
     code = code_on(client.get(resp["Location"]).content.decode())
-    preview = api_pair(client, code, platform="macos", preview=True, **AGENT).json()
+    preview = ask(code, {"platform": "macos", **AGENT}, preview=True)
     assert "screen time" in preview["disclosure"]
-    token = api_pair(client, code, platform="macos", **AGENT).json()["token"]
+    pc = pair_computer(device, code, **AGENT)
     device.refresh_from_db()
     assert device.person is None and device.controls_allowed
-    assert api_checkin(client, token, AGENT).json()["controls"] is not None
+    assert pc.send(AGENT)["controls"] is not None
     page = client.get(reverse("devices:detail", args=[device.pk])).content.decode()
     assert 'id="controls-title"' in page and reverse("devices:controls", args=[device.pk]) in page
 
@@ -133,13 +134,13 @@ def test_consent_names_activity_only_for_the_agent_on_a_controllable_computer(
 ):
     client.force_login(parent)
     _, code = add_device(client, sara, platform="macos", name="Sara's Mac")
-    agent = api_pair(client, code, platform="macos", preview=True, **AGENT).json()["disclosure"]
+    agent = ask(code, {"platform": "macos", **AGENT}, preview=True)["disclosure"]
     assert "screen time" in agent and "not pages or searches" in agent
-    script = api_pair(client, code, platform="macos", preview=True).json()["disclosure"]
+    script = ask(code, {"platform": "macos"}, preview=True)["disclosure"]
     assert "screen time" not in script
     partner = Person.objects.create(account=family, kind="partner", name="Rahim")
     _, code = add_device(client, partner, platform="macos", name="Rahim's Mac")
-    theirs = api_pair(client, code, platform="macos", preview=True, **AGENT).json()["disclosure"]
+    theirs = ask(code, {"platform": "macos", **AGENT}, preview=True)["disclosure"]
     assert "screen time" not in theirs
 
 
@@ -147,7 +148,7 @@ def test_consent_names_activity_only_for_the_agent_on_a_controllable_computer(
 
 
 def test_activity_adds_up_and_a_resent_batch_counts_once(client, mac):
-    device, token = mac
+    device, pc = mac
     turn_on(device)
     first = batch(
         screen=[{"day": today(), "user": "sara", "app": "Safari", "seconds": 600},
@@ -156,11 +157,11 @@ def test_activity_adds_up_and_a_resent_batch_counts_once(client, mac):
               "visits": 3, "seconds": 300}],
     )  # fmt: skip
     for _ in range(2):  # the answer was lost: the agent sends the same batch again
-        assert api_checkin(client, token, {**AGENT, "activity": first}).status_code == 200
+        pc.send({**AGENT, "activity": first})
     assert ScreenTime.objects.get().seconds == 660
     site = WebActivity.objects.get()
     assert (site.domain, site.visits, site.seconds) == ("youtube.com", 3, 300)
-    api_checkin(client, token, {**AGENT, "activity": batch(
+    pc.send({**AGENT, "activity": batch(
         screen=[{"day": today(), "user": "sara", "app": "Safari", "seconds": 120}],
         web=[{"day": today(), "user": "sara", "browser": "Chrome", "domain": "youtube.com",
               "visits": 1, "seconds": 30}])})  # fmt: skip
@@ -170,26 +171,26 @@ def test_activity_adds_up_and_a_resent_batch_counts_once(client, mac):
 
 
 def test_activity_is_dropped_when_switched_off_or_not_allowed(client, parent, family, mac):
-    device, token = mac
+    device, pc = mac
     row = [{"day": today(), "user": "sara", "app": "Safari", "seconds": 60}]
-    api_checkin(client, token, {**AGENT, "activity": batch(screen=row)})  # no controls yet
+    pc.send({**AGENT, "activity": batch(screen=row)})  # no controls yet
     turn_on(device, screen_time=False)
-    api_checkin(client, token, {**AGENT, "activity": batch(screen=row)})
+    pc.send({**AGENT, "activity": batch(screen=row)})
     assert not ScreenTime.objects.exists()
 
     partner = Person.objects.create(account=family, kind="partner", name="Rahim")
-    their_mac, token = pair_computer(client, partner, name="Rahim's Mac")
+    their_mac, pc = paired_mac(client, partner, name="Rahim's Mac")
     turn_on(their_mac)  # e.g. set before the device was reassigned
-    api_checkin(client, token, {**AGENT, "activity": batch(screen=row)})
+    pc.send({**AGENT, "activity": batch(screen=row)})
     assert not ScreenTime.objects.exists()
     assert not ActivityBatch.objects.filter(device=their_mac).exists()
 
 
 def test_bad_activity_rows_are_dropped_not_the_check_in(client, mac):
-    device, token = mac
+    device, pc = mac
     turn_on(device)
     old = (timezone.localdate() - timedelta(days=400)).isoformat()
-    resp = api_checkin(client, token, {**AGENT, "activity": batch(
+    pc.send({**AGENT, "activity": batch(
         screen=[{"day": old, "user": "sara", "app": "X", "seconds": 60},
                 {"day": today(), "user": "", "app": "X", "seconds": 60},
                 {"day": today(), "user": "sara", "app": "X", "seconds": 10**9},
@@ -197,10 +198,9 @@ def test_bad_activity_rows_are_dropped_not_the_check_in(client, mac):
         web=[{"day": today(), "user": "sara", "domain": "https://evil.example/path?q=secret",
               "visits": 1},
              {"day": today(), "user": "sara", "domain": "not a domain", "visits": 1}])})  # fmt: skip
-    assert resp.status_code == 200
     assert list(ScreenTime.objects.values_list("seconds", flat=True)) == [86400]  # clamped
     assert list(WebActivity.objects.values_list("domain", flat=True)) == ["evil.example"]
-    assert api_checkin(client, token, {**AGENT, "activity": "nope"}).status_code == 200
+    pc.send({**AGENT, "activity": "nope"})
 
 
 def test_activity_is_pruned_after_retention(mac, settings):
@@ -217,33 +217,55 @@ def test_activity_is_pruned_after_retention(mac, settings):
 
 
 def test_blocklist_merges_adult_safe_search_and_the_parents_lists(client, mac):
-    device, token = mac
+    device, pc = mac
     blocklist.adult_path().write_text("pornsite.example\nallowed.example\n")
     blocklist.safe_search_path().write_text('{"forcesafesearch.google.com": "216.239.38.120"}')
     turn_on(device, block_adult=True, safe_search=True,
             blocked_domains="tiktok.com", allowed_domains="allowed.example")  # fmt: skip
-    version = api_checkin(client, token, AGENT).json()["controls"]["blocking"]
+    version = pc.send(AGENT)["controls"]["blocking"]
     assert version
-    url = reverse("device_api_blocklist")
-    resp = client.get(url, HTTP_AUTHORIZATION=f"Bearer {token}")
-    lines = resp.content.decode().splitlines()
-    assert resp["ETag"] == f'"{version}"'
+    have, lines = pc.blocklist()  # left in the relay next to the settings, signed
+    assert have == version
     assert "0.0.0.0 pornsite.example" in lines and "0.0.0.0 tiktok.com" in lines
     assert "0.0.0.0 www.tiktok.com" in lines  # a hosts file has no wildcards
     assert "216.239.38.120 www.google.com" in lines
     assert "0.0.0.0 use-application-dns.net" in lines  # keeps Firefox off DNS over HTTPS
     assert not any("allowed.example" in line for line in lines)
-    again = client.get(url, HTTP_AUTHORIZATION=f"Bearer {token}", HTTP_IF_NONE_MATCH=f'"{version}"')
-    assert again.status_code == 304
-    assert client.get(url).status_code == 401
+    # Applied: it says so, and the megabytes aren't written again.
+    fake = relay.client()
+    fake.strings.pop(pc.login["blocklist"])
+    pc.send({**AGENT, "blocking_applied": version, "config": pc.settings()["digest"]})
+    assert pc.blocklist() is None
 
 
-def test_blocking_off_returns_an_empty_list(client, mac):
-    device, token = mac
+def test_a_blocklist_not_yet_applied_is_written_once(client, mac):
+    device, pc = mac
+    turn_on(device, blocked_domains="tiktok.com")
+    version = pc.send(AGENT)["controls"]["blocking"]
+    relay.client().strings.pop(pc.login["blocklist"])
+    pc.send({**AGENT, "blocking_applied": ""})  # still applying it: not sent again
+    assert pc.blocklist() is None
+    turn_on(device, blocked_domains="tiktok.com\nreddit.com")  # a new version is
+    assert pc.send({**AGENT, "blocking_applied": version})["controls"]["blocking"] != version
+    assert "0.0.0.0 reddit.com" in pc.blocklist()[1]
+
+
+def test_saving_controls_updates_the_relay_at_once(client, mac):
+    device, pc = mac
+    pc.send(AGENT)
+    resp = client.post(reverse("devices:controls", args=[device.pk]),
+                       {"screen_time": "on", "blocked_domains": "tiktok.com"})  # fmt: skip
+    assert resp.status_code == 302
+    controls = pc.settings()["controls"]  # without waiting for a check-in
+    assert controls["screen_time"] and controls["blocking"]
+    assert pc.blocklist()[0] == controls["blocking"]
+
+
+def test_blocking_off_sends_no_list(client, mac):
+    device, pc = mac
     turn_on(device)
-    assert api_checkin(client, token, AGENT).json()["controls"]["blocking"] == ""
-    resp = client.get(reverse("device_api_blocklist"), HTTP_AUTHORIZATION=f"Bearer {token}")
-    assert resp.status_code == 200 and resp.content == b""
+    assert pc.send(AGENT)["controls"]["blocking"] == ""
+    assert pc.blocklist() is None
 
 
 def test_a_failed_list_download_keeps_the_last_good_copy(settings, monkeypatch):
@@ -268,7 +290,7 @@ def test_parse_hosts_reads_hosts_format():
 
 
 def test_parent_turns_controls_on_and_sees_activity(client, mac):
-    device, token = mac
+    device, pc = mac
     url = reverse("devices:controls", args=[device.pk])
     resp = client.post(url, {"screen_time": "on", "web_activity": "on", "block_adult": "on",
                              "blocked_domains": "https://www.TikTok.com/foo\nroblox.com"})  # fmt: skip
@@ -277,7 +299,7 @@ def test_parent_turns_controls_on_and_sees_activity(client, mac):
     assert controls.blocked_domains == "www.tiktok.com\nroblox.com" and controls.block_adult
     assert AuditLog.objects.filter(action="device.controls").exists()
 
-    api_checkin(client, token, {**AGENT, "activity": batch(
+    pc.send({**AGENT, "activity": batch(
         screen=[{"day": today(), "user": "sara", "app": "Minecraft", "seconds": 5400}],
         web=[{"day": today(), "user": "sara", "browser": "Chrome", "domain": "wikipedia.org",
               "visits": 7, "seconds": 900}])})  # fmt: skip
@@ -297,7 +319,7 @@ def test_bad_domains_are_refused_on_the_form(client, mac):
 def test_controls_cant_be_set_for_a_partners_computer(client, parent, family):
     client.force_login(parent)
     partner = Person.objects.create(account=family, kind="partner", name="Rahim")
-    device, _ = pair_computer(client, partner, name="Rahim's Mac")
+    device, _ = paired_mac(client, partner, name="Rahim's Mac")
     page = client.get(reverse("devices:detail", args=[device.pk])).content.decode()
     assert 'id="activity"' not in page and "staff member" in page
     client.post(reverse("devices:controls", args=[device.pk]), {"screen_time": "on"})
@@ -322,17 +344,16 @@ def test_an_agent_without_admin_rights_gets_no_blocking(client, parent, sara):
     client.force_login(parent)
     device, code = add_device(client, sara, platform="windows", name="Sara's PC")
     user_agent = {**AGENT, "agent_mode": "user"}
-    preview = api_pair(client, code, platform="windows", preview=True, **user_agent).json()
+    preview = ask(code, {"platform": "windows", **user_agent}, preview=True)
     assert "screen time" in preview["disclosure"] and "blocking" not in preview["disclosure"]
-    token = api_pair(client, code, platform="windows", **user_agent).json()["token"]
+    pc = pair_computer(device, code, **user_agent)
     device.refresh_from_db()
     assert device.agent_mode == "user" and device.controls_allowed and not device.can_block
     DeviceControls.objects.create(device=device, screen_time=True, block_adult=True)
 
-    controls = api_checkin(client, token, user_agent).json()["controls"]
+    controls = pc.send(user_agent)["controls"]
     assert controls["screen_time"] and controls["blocking"] == ""
-    resp = client.get(reverse("device_api_blocklist"), HTTP_AUTHORIZATION=f"Bearer {token}")
-    assert resp.status_code == 200 and resp.content == b""
+    assert pc.blocklist() is None
 
     page = client.get(reverse("devices:controls", args=[device.pk])).content.decode()
     assert 'name="block_adult"' not in page and "without an administrator" in page
@@ -341,20 +362,20 @@ def test_an_agent_without_admin_rights_gets_no_blocking(client, parent, sara):
 
     # Installed again by an administrator: blocking comes back.
     system = {**AGENT, "agent_mode": "system"}
-    assert api_checkin(client, token, system).json()["controls"]["blocking"]
+    assert pc.send(system)["controls"]["blocking"]
 
 
 def test_browsers_the_mac_wont_let_the_agent_read_are_explained(client, parent, sara):
     client.force_login(parent)
     device, code = add_device(client, sara, platform="macos", name="Sara's Mac")
-    token = api_pair(client, code, platform="macos", **AGENT).json()["token"]
+    pc = pair_computer(device, code, **AGENT)
     DeviceControls.objects.create(device=device, web_activity=True)
-    api_checkin(client, token, {**AGENT, "web_no_access": ["Safari", "Chrome", 7, ""]})
+    pc.send({**AGENT, "web_no_access": ["Safari", "Chrome", 7, ""]})
     device.refresh_from_db()
     assert device.web_no_access == ["7", "Chrome", "Safari"]
     page = client.get(reverse("devices:detail", args=[device.pk])).content.decode()
     assert "Full Disk Access" in page and "/Library/Application Support/NexGuard/nexguard" in page
-    api_checkin(client, token, {**AGENT, "web_no_access": []})  # access given
+    pc.send({**AGENT, "web_no_access": []})  # access given
     device.refresh_from_db()
     assert device.web_no_access == []
     assert (
@@ -369,41 +390,38 @@ def test_browsers_the_mac_wont_let_the_agent_read_are_explained(client, parent, 
 def _mac_with_location(client, parent, sara, on=True):
     client.force_login(parent)
     device, code = add_device(client, sara, platform="macos", name="Sara's Mac")
-    token = api_pair(client, code, platform="macos", **AGENT).json()["token"]
+    pc = pair_computer(device, code, **AGENT)
     DeviceControls.objects.create(device=device, location=on)
-    return device, token
+    return device, pc
 
 
 def test_a_computers_location_is_kept_only_when_switched_on(client, parent, sara):
-    device, token = _mac_with_location(client, parent, sara, on=False)
+    device, pc = _mac_with_location(client, parent, sara, on=False)
     fix = {"lat": 23.81, "lon": 90.41, "accuracy": 30, "source": "network"}
-    resp = api_checkin(client, token, {**AGENT, "location": fix})
-    assert resp.json()["controls"]["location"] is False
+    resp = pc.send({**AGENT, "location": fix})
+    assert resp["controls"]["location"] is False
     device.refresh_from_db()
     assert device.latitude is None and not device.locations.exists()
 
     DeviceControls.objects.filter(device=device).update(location=True)
-    assert api_checkin(client, token, {**AGENT, "location": fix}).json()["controls"]["location"]
+    assert pc.send({**AGENT, "location": fix})["controls"]["location"]
     device.refresh_from_db()
     assert float(device.latitude) == 23.81 and device.location_accuracy_m == 30
     assert device.locations.get().source == "network"
 
 
-def test_without_its_own_fix_a_computer_is_placed_by_its_address(client, parent, sara, monkeypatch):
+def test_without_its_own_fix_a_computer_has_no_location(client, parent, sara, monkeypatch):
+    """It checks in through the relay, so the dashboard never sees its internet address
+    and can't place it by town: only the agent's own fix counts."""
     from apps.devices import geoip
 
-    device, token = _mac_with_location(client, parent, sara)
+    device, pc = _mac_with_location(client, parent, sara)
     seen = []
     monkeypatch.setattr(geoip, "locate", lambda ip: seen.append(ip) or
                         {"lat": 23.7, "lon": 90.4, "accuracy": 25000, "city": "Dhaka"})  # fmt: skip
-    api_checkin(client, token, AGENT)
-    api_checkin(client, token, AGENT)  # same town minutes later: no second history point
+    pc.send(AGENT)
     device.refresh_from_db()
-    assert seen == ["127.0.0.1", "127.0.0.1"]
-    assert float(device.latitude) == 23.7 and device.location_accuracy_m == 25000
-    assert list(device.locations.values_list("source", flat=True)) == ["ip"]
-    page = client.get(reverse("devices:detail", args=[device.pk])).content.decode()
-    assert "town only, from its internet address" in page and "DB-IP" in page
+    assert seen in ([], [None]) and device.latitude is None and not device.locations.exists()
 
 
 def test_ip_location_never_for_a_computer_that_cant_have_controls(
@@ -414,9 +432,9 @@ def test_ip_location_never_for_a_computer_that_cant_have_controls(
     monkeypatch.setattr(geoip, "locate", lambda ip: {"lat": 1, "lon": 2, "accuracy": 25000})
     client.force_login(parent)
     device, code = add_device(client, sara, platform="macos", name="Shared Mac")
-    token = api_pair(client, code, platform="macos").json()["token"]  # the script, no agent
+    pc = pair_computer(device, code)  # the script, no agent
     DeviceControls.objects.create(device=device, location=True)
-    api_checkin(client, token, {"app_version": "nexguard-device-sh 1.2.0"})
+    pc.send({"app_version": "nexguard-device-sh 1.2.0"})
     device.refresh_from_db()
     assert device.latitude is None
 
@@ -440,12 +458,12 @@ def test_geoip_lookups_are_local_and_safe(settings, tmp_path):
 
 
 def test_controls_page_shows_what_each_switch_is_doing(client, parent, sara):
-    device, token = _mac_with_location(client, parent, sara)
+    device, pc = _mac_with_location(client, parent, sara)
     DeviceControls.objects.filter(device=device).update(screen_time=True)
-    api_checkin(client, token, AGENT)  # check-in after the save: in effect, no position
+    pc.send(AGENT)  # check-in after the save: in effect, no position
     url = reverse("devices:controls", args=[device.pk])
     page = client.get(url).content.decode()
     assert "In effect since the check-in" in page and "Nothing yet today" in page
-    assert "no public address to place it by" in page  # test client is 127.0.0.1
+    assert "can't place it by its internet address, and a Mac doesn't share its own" in page
     client.post(url, {"screen_time": "on"})  # saved after the check-in: not picked up yet
     assert "Waiting for Sara&#x27;s Mac to pick up" in client.get(url).content.decode()

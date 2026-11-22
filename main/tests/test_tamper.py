@@ -8,7 +8,8 @@ from apps.alerts.models import Alert, AlertKind
 from apps.devices.models import Device
 
 from . import test_devices
-from .test_devices import add_device, api_checkin, api_pair
+from .computers import pair_computer
+from .test_devices import add_device
 from .test_phone_relay import check_in, paired_phone
 
 pytestmark = pytest.mark.django_db
@@ -19,9 +20,8 @@ family, parent, sara = test_devices.family, test_devices.parent, test_devices.sa
 def computer(client, parent, sara):
     client.force_login(parent)
     device, code = add_device(client, sara, platform="windows", name="Family PC")
-    token = api_pair(client, code, platform="windows", agent_mode="system",
-                     app_version="nexguard-agent/1.0").json()["token"]  # fmt: skip
-    return Device.objects.get(pk=device.pk), token
+    pc = pair_computer(device, code, agent_mode="system", app_version="nexguard-agent/1.0")
+    return Device.objects.get(pk=device.pk), pc
 
 
 def long_ago():
@@ -42,29 +42,29 @@ def tamper(device, **kw):
 
 
 def test_uninstall_alerts_without_wiping_readings_and_returning_resolves(client, computer):
-    device, token = computer
-    api_checkin(client, token, {"battery": {"percent": 80, "charging": True}})
-    assert api_checkin(client, token, {"bye": "uninstall"}).status_code == 200
+    device, pc = computer
+    pc.send({"battery": {"percent": 80, "charging": True}})
+    pc.send({"bye": "uninstall"})
     alert = tamper(device, resolved_at=None).get()
     assert alert.message == "NexGuard was uninstalled from Family PC (Sara)"
     device.refresh_from_db()
     assert device.battery_percent == 80
-    api_checkin(client, token, {})
+    pc.send({})
     assert not tamper(device, resolved_at=None).exists()
 
 
 def test_edited_blocklist_is_an_event(client, computer):
-    device, token = computer
-    api_checkin(client, token, {"tamper": ["hosts_edited", "nonsense"]})
+    device, pc = computer
+    pc.send({"tamper": ["hosts_edited", "nonsense"]})
     events = list(tamper(device, is_event=True).values_list("message", flat=True))
     assert events == ["Someone changed the blocked-sites list on Family PC (Sara); "
                       "NexGuard put it back"]  # fmt: skip
 
 
 def test_dropping_to_user_mode_is_reported(client, computer):
-    device, token = computer
+    device, pc = computer
     Device.objects.filter(pk=device.pk).update(agent_mode="system")
-    api_checkin(client, token, {"agent_mode": "user"})
+    pc.send({"agent_mode": "user"})
     assert "without administrator rights" in tamper(device, is_event=True).get().message
 
 

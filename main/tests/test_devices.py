@@ -1,19 +1,20 @@
 """Children's (and staff) devices: adding, pairing with a code, checking in."""
 
-import json
 from datetime import timedelta
 
 import pytest
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.agent_api.bridge import handle_device
 from apps.audit.models import AuditLog
 from apps.devices import services
 from apps.devices.models import Device, DeviceLocation
 from apps.tenants.models import Person
 
+from .computers import ask, pair_computer
 from .conftest import add_member, make_account
-from .phones import pair_phone
+from .phones import pair_phone, sign
 
 pytestmark = pytest.mark.django_db
 
@@ -51,17 +52,6 @@ def code_on(page: str) -> str:
     if 'id="pair-code">' in page:
         return page.split('id="pair-code">')[1].split("<")[0]
     return page.split('id="connect-link">')[1].split("<")[0].rsplit("/d/", 1)[1]
-
-
-def api_pair(client, code, platform="android", **extra):
-    body = {"code": code, "platform": platform, "model": "Pixel 9", "os_version": "Android 16"}
-    return client.post(reverse("device_api_pair"), json.dumps({**body, **extra}),
-                       content_type="application/json")  # fmt: skip
-
-
-def api_checkin(client, token, body):
-    return client.post(reverse("device_api_checkin"), json.dumps(body),
-                       content_type="application/json", HTTP_AUTHORIZATION=f"Bearer {token}")  # fmt: skip
 
 
 # --------------------------------------------------------------------------- adding
@@ -102,62 +92,66 @@ def test_device_names_are_unique_per_account(client, parent, sara):
 
 # --------------------------------------------------------------------------- pairing
 #
-# Over HTTP: the computer agent and the installer script. Phones pair through the relay
-# instead (test_phone_relay.py).
+# Computers, through the relay as the agent does (tests/computers.py). Phones pair through
+# the relay too (test_phone_relay.py).
 
 
-def test_pairing_gives_a_token_and_uses_up_the_code(client, parent, sara):
+def test_pairing_gives_a_relay_login_and_uses_up_the_code(client, parent, sara):
     client.force_login(parent)
     device, code = add_device(client, sara, platform="windows", name="Sara's PC")
     client.logout()  # the device has no session
-    resp = api_pair(client, code.lower().replace("-", " "), platform="windows")  # however typed
-    assert resp.status_code == 201
-    body = resp.json()
-    assert body["token"].startswith("ngd_") and body["device"]["person"] == "Sara"
-    assert body["checkin_seconds"] == 300 and "The Rahmans will see" in body["disclosure"]
+    preview = ask(code, {"platform": "windows"}, preview=True)
+    assert preview["state"] == "preview" and "The Rahmans will see" in preview["disclosure"]
+    assert not Device.objects.get(pk=device.pk).is_paired  # a preview stores nothing
+    pc = pair_computer(device, code.lower().replace("-", " "))  # however typed
+    assert pc.state["device"]["person"] == "Sara" and pc.state["checkin_seconds"] == 300
+    assert pc.login["url"].startswith("rediss://sm-d-") and pc.login["inbox"].endswith(":in")
+    assert "The Rahmans will see" in pc.state["disclosure"]
     device.refresh_from_db()
-    assert device.is_paired and device.model == "Pixel 9" and device.pairing_code_hash == ""
-    assert api_pair(client, code, platform="windows").status_code == 404  # single use
+    assert device.is_paired and device.model == "Dell XPS 13" and device.pairing_code_hash == ""
+    assert pc.can_connect() and pc.settings()["checkin_seconds"] == 300  # waiting for it
+    again = ask(code, {"platform": "windows"})
+    assert again["state"] == "error" and "isn't valid" in again["message"]  # single use
     assert AuditLog.objects.filter(action="device.pair", account=device.account).exists()
 
 
 def test_the_code_is_for_one_kind_of_device(client, parent, sara):
     client.force_login(parent)
-    _, code = add_device(client, sara, platform="macos", name="iMac")
-    resp = api_pair(client, code, platform="windows")
-    assert resp.status_code == 409 and "Mac" in resp.json()["error"]
-    assert api_pair(client, code, platform="macos").status_code == 201  # not used up
+    device, code = add_device(client, sara, platform="macos", name="iMac")
+    wrong = ask(code, {"platform": "windows"})
+    assert wrong["state"] == "error" and "Mac" in wrong["message"]
+    pair_computer(device, code)  # not used up
 
 
-def test_codes_do_not_expire(client, parent, sara):
+def test_computer_codes_do_not_expire(client, parent, sara):
     client.force_login(parent)
     device, code = add_device(client, sara, platform="linux", name="Sara's laptop")
     Device.objects.filter(pk=device.pk).update(created_at=timezone.now() - timedelta(days=400))
-    assert api_pair(client, code, platform="linux").status_code == 201
+    pair_computer(device, code)
 
 
-def test_bad_codes_and_guessing(client, settings):
-    assert api_pair(client, "short").status_code == 400
-    assert api_pair(client, "AAAA-BBBB").status_code == 404
-    for _ in range(10):
-        api_pair(client, "AAAA-BBBB")
-    assert api_pair(client, "AAAA-BBBB").status_code == 429
+def test_bad_codes_and_guessing(db):
+    assert "8-character code" in ask("short", {})["message"]
+    for _ in range(20):
+        assert "isn't valid" in ask("AAAA-BBBB", {})["message"]
+    assert "Too many wrong codes" in ask("AAAA-BBBB", {})["message"]
 
 
-def test_a_reset_device_is_paired_again_and_the_old_token_dies(client, parent, sara):
+def test_a_reset_device_is_paired_again_and_the_old_login_dies(client, parent, sara):
     client.force_login(parent)
     device, code = add_device(client, sara, platform="windows", name="Sara's PC")
-    old = api_pair(client, code, platform="windows").json()["token"]
-    assert api_checkin(client, old, {}).status_code == 200
-    # Phone was reset: parent makes a new code. The old pairing keeps working meanwhile.
+    old = pair_computer(device, code)
+    assert old.checkin({"battery": {"percent": 50}}).battery_percent == 50
+    # Computer was reset: parent makes a new code. The old pairing keeps working meanwhile.
     resp = client.post(reverse("devices:pair", args=[device.pk]), {"action": "new_code"})
     page = client.get(resp["Location"]).content.decode()
     assert "Pair Sara&#x27;s PC again" in page
     new_code = code_on(page)
-    assert api_checkin(client, old, {}).status_code == 200
-    new = api_pair(client, new_code, platform="windows").json()["token"]
-    assert api_checkin(client, old, {}).status_code == 401
-    assert api_checkin(client, new, {}).status_code == 200
+    assert old.can_connect()
+    new = pair_computer(device, new_code)
+    assert not old.can_connect() and new.can_connect()
+    assert old.checkin({"battery": {"percent": 10}}).battery_percent == 50  # old key: refused
+    assert new.checkin({"battery": {"percent": 60}}).battery_percent == 60
     assert Device.objects.count() == 1  # same entry, history kept
 
 
@@ -166,7 +160,12 @@ def test_a_new_code_cancels_the_previous_one(client, parent, sara):
     device, first = add_device(client, sara, platform="windows", name="Sara's PC")
     resp = client.post(reverse("devices:pair", args=[device.pk]), {"action": "new_code"})
     client.get(resp["Location"])
-    assert api_pair(client, first, platform="windows").status_code == 404
+    assert "isn't valid" in ask(first, {"platform": "windows"})["message"]
+
+
+def test_there_is_no_device_api(client):
+    for path in ("/device/v1/pair", "/device/v1/checkin", "/device/v1/blocklist"):
+        assert client.post(path, "{}", content_type="application/json").status_code == 404
 
 
 # --------------------------------------------------------------------------- check-ins
@@ -183,10 +182,11 @@ def paired(client, parent, sara):
 
 @pytest.fixture
 def computer(client, parent, sara):
-    """A computer agent: pairs and checks in over HTTP with a token."""
+    """A computer agent, paired and checking in through the relay (tests/computers.py)."""
     client.force_login(parent)
     device, code = add_device(client, sara, platform="windows", name="Sara's PC")
-    return device, api_pair(client, code, platform="windows").json()["token"]
+    pc = pair_computer(device, code)
+    return pc.device, pc
 
 
 def test_checkin_records_battery_storage_network_and_location(client, paired):
@@ -222,9 +222,11 @@ def test_nonsense_is_ignored_not_fatal(client, paired, computer):
     assert device.battery_percent is None and device.charging is None
     assert device.storage_total is None and device.network == "" and device.latitude is None
     assert device.model == "" and not DeviceLocation.objects.exists()
-    bad = client.post(reverse("device_api_checkin"), "[1,2]", content_type="application/json",
-                      HTTP_AUTHORIZATION=f"Bearer {computer[1]}")  # fmt: skip
-    assert bad.status_code == 400
+    pc_device, pc = computer
+    body = "[1,2]"
+    handle_device(pc_device, {"t": "ci", "body": body, "sig": sign(pc.key, body)})
+    handle_device(pc_device, {"t": "ci", "body": "{}", "sig": "forged"})
+    assert Device.objects.get(pk=pc_device.pk).last_seen_at == pc_device.last_seen_at
 
 
 def test_old_or_future_fixes_are_clamped_to_now(client, paired):
@@ -241,17 +243,11 @@ def test_removed_device_is_told_to_pair_again(client, paired, computer, parent):
     phone.checkin({"location": {"lat": 1, "lon": 2}})
     client.post(reverse("devices:delete", args=[device.pk]))
     assert not DeviceLocation.objects.exists()
-    pc, token = computer
-    client.post(reverse("devices:delete", args=[pc.pk]))
+    pc_device, pc = computer
+    client.post(reverse("devices:delete", args=[pc_device.pk]))
     assert not Device.objects.exists()
-    resp = api_checkin(client, token, {})
-    assert resp.status_code == 401 and "Pair it again" in resp.json()["error"]
-
-
-def test_no_token_or_a_server_token_is_refused(client, paired):
-    assert client.post(reverse("device_api_checkin"), "{}",
-                       content_type="application/json").status_code == 401  # fmt: skip
-    assert api_checkin(client, "smk_not-a-device-token", {}).status_code == 401
+    # Its relay login is gone: the agent's next push is refused, and it forgets the pairing.
+    assert not pc.can_connect() and pc.settings() is None
 
 
 def test_goes_offline_after_missed_checkins(paired):
@@ -318,8 +314,7 @@ def test_solo_developer_connects_their_own_laptop(client, solo_dev):
     device = Device.objects.get(name="My Mac")
     assert device.person is None and device.account.kind == "solo"
     code = code_on(client.get(resp["Location"]).content.decode())
-    token = api_pair(client, code, platform="macos").json()["token"]
-    api_checkin(client, token, {"battery": {"percent": 80}})
+    pair_computer(device, code).checkin({"battery": {"percent": 80}})
 
     page = client.get(reverse("fleet:dashboard"), {"kind": "device"}).content.decode()
     assert ">My Mac</a>" in page and "80%" in page
@@ -435,8 +430,7 @@ def test_maps_can_be_turned_off(client, paired, settings):
 def test_computers_without_location_skip_the_history_card(client, parent, sara):
     client.force_login(parent)
     device, code = add_device(client, sara, platform="windows", name="Family PC")
-    token = api_pair(client, code, platform="windows").json()["token"]
-    api_checkin(client, token, {})
+    pair_computer(device, code).checkin({})
     page = client.get(reverse("devices:detail", args=[device.pk])).content.decode()
     # No location section at all for a computer: nothing to show and nothing to do.
     assert "Location history" not in page and "No location yet" not in page
@@ -468,8 +462,7 @@ def test_people_list_searches_and_puts_problems_first(client, parent, family, pa
 def test_child_with_only_a_computer_gets_a_short_location_hint(client, parent, sara):
     client.force_login(parent)
     device, code = add_device(client, sara, platform="macos", name="Sara's Mac")
-    token = api_pair(client, code, platform="macos").json()["token"]
-    api_checkin(client, token, {"battery": {"percent": 70}})
+    pair_computer(device, code).checkin({"battery": {"percent": 70}})
     page = client.get(reverse("tenants:person_detail", args=[sara.pk])).content.decode()
     assert "map-tile" not in page and "Where Sara was last" not in page
     assert "Computers don&#x27;t share it" in page or "Computers don't share it" in page

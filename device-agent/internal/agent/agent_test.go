@@ -1,49 +1,66 @@
 package agent
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/activity"
+	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/api"
 	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/config"
 	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/logs"
+	"github.com/sabbir-mahmud/servers-monitor/device-agent/internal/relay/relaytest"
 )
 
-// A dashboard that wants blocking at version v1, and counts blocklist downloads.
-func dashboard(t *testing.T, controls string, fetches *atomic.Int32) *httptest.Server {
+var testKey = []byte(strings.Repeat("k", 32))
+
+// relayWith: a fake relay holding this computer's login, with the dashboard's settings
+// (controls as JSON) and a blocklist at version v1 already left there, as the bridge does.
+func relayWith(t *testing.T, controls string) *relaytest.Server {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/device/v1/checkin":
-			var body map[string]any
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			_, _ = w.Write([]byte(`{"checkin_seconds":300,"controls":` + controls + `}`))
-		case "/device/v1/blocklist":
-			fetches.Add(1)
-			if r.Header.Get("If-None-Match") == `"v1"` {
-				w.WriteHeader(304)
-				return
-			}
-			_, _ = w.Write([]byte("0.0.0.0 bad.example\n"))
-		}
-	}))
+	srv := relaytest.New(t)
+	srv.AddUser("sm-d-1", "devpw", "sm:d:1:")
+	setControls(srv, controls)
+	srv.Set("sm:d:1:bl", relaytest.Seal(testKey, relaytest.BlocklistBody("v1", "0.0.0.0 bad.example")))
+	return srv
 }
 
-func paired(t *testing.T, server string) *config.Config {
+func setControls(srv *relaytest.Server, controls string) {
+	body := `{"checkin_seconds":300,"controls":` + controls + `,"device":{"name":"Mac","account":"A"}}`
+	srv.Set("sm:d:1:cfg", relaytest.Seal(testKey, body))
+}
+
+// reports: the check-ins the dashboard received, verified.
+func reports(t *testing.T, srv *relaytest.Server) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	for _, raw := range srv.Lists["sm:d:1:in"] {
+		body, ok := relaytest.Verify(testKey, raw)
+		if !ok {
+			t.Fatalf("unsigned check-in %q", raw)
+		}
+		var m struct {
+			Report map[string]any `json:"report"`
+		}
+		_ = json.Unmarshal([]byte(body), &m)
+		out = append(out, m.Report)
+	}
+	return out
+}
+
+func paired(t *testing.T, srv *relaytest.Server) *config.Config {
 	t.Helper()
 	t.Setenv("NEXGUARD_CONFIG_DIR", t.TempDir())
 	hosts := filepath.Join(t.TempDir(), "hosts")
 	_ = os.WriteFile(hosts, []byte("127.0.0.1 localhost\n"), 0o644)
 	t.Setenv("NEXGUARD_HOSTS", hosts)
 	_ = activity.Reset()
-	cfg := &config.Config{Server: server, Token: "ngd_x", Interval: 300}
+	login := api.Login{URL: srv.URL("sm-d-1"), Inbox: "sm:d:1:in", Config: "sm:d:1:cfg", Blocklist: "sm:d:1:bl"}
+	cfg := &config.Config{Relay: login, Key: hex.EncodeToString(testKey), Interval: 300}
 	if err := config.Save(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -56,10 +73,8 @@ func hostsFile(t *testing.T) string {
 }
 
 func TestBlockingFollowsTheDashboard(t *testing.T) {
-	var fetches atomic.Int32
-	srv := dashboard(t, `{"screen_time":true,"web_activity":false,"blocking":"v1"}`, &fetches)
-	defer srv.Close()
-	cfg := paired(t, srv.URL)
+	srv := relayWith(t, `{"screen_time":true,"web_activity":false,"blocking":"v1"}`)
+	cfg := paired(t, srv)
 	if err := CheckinOnce(cfg, "test"); err != nil {
 		t.Fatal(err)
 	}
@@ -67,39 +82,57 @@ func TestBlockingFollowsTheDashboard(t *testing.T) {
 		t.Fatalf("hosts:\n%s", hostsFile(t))
 	}
 	_ = CheckinOnce(cfg, "test")
-	if fetches.Load() != 1 {
-		t.Errorf("an unchanged version must not be downloaded again (%d fetches)", fetches.Load())
+	if n := srv.Gets("sm:d:1:bl"); n != 1 {
+		t.Errorf("an unchanged version must not be read again (%d reads)", n)
+	}
+	// It tells the dashboard what it has, so nothing is rewritten needlessly.
+	last := reports(t, srv)[1]
+	if last["blocking_applied"] != "v1" || last["config"] != cfg.Settings || len(cfg.Settings) != 16 {
+		t.Fatalf("report: %v (settings %q)", last, cfg.Settings)
 	}
 	// Someone deletes the section: the next check-in puts it back from the saved copy.
 	_ = os.WriteFile(os.Getenv("NEXGUARD_HOSTS"), []byte("127.0.0.1 localhost\n"), 0o644)
 	_ = CheckinOnce(cfg, "test")
-	if !strings.Contains(hostsFile(t), "bad.example") || fetches.Load() != 1 {
-		t.Fatalf("not restored (%d fetches):\n%s", fetches.Load(), hostsFile(t))
+	if !strings.Contains(hostsFile(t), "bad.example") || srv.Gets("sm:d:1:bl") != 1 {
+		t.Fatalf("not restored (%d reads):\n%s", srv.Gets("sm:d:1:bl"), hostsFile(t))
+	}
+}
+
+func TestANewBlocklistWaitsUntilItIsInTheRelay(t *testing.T) {
+	srv := relayWith(t, `{"blocking":"v2"}`) // settings say v2, the relay still holds v1
+	cfg := paired(t, srv)
+	if err := CheckinOnce(cfg, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(hostsFile(t), "bad.example") || activity.Applied() != "" {
+		t.Fatalf("applied a list of the wrong version:\n%s", hostsFile(t))
+	}
+	srv.Set("sm:d:1:bl", relaytest.Seal(testKey, relaytest.BlocklistBody("v2", "0.0.0.0 worse.example")))
+	_ = CheckinOnce(cfg, "test")
+	if !strings.Contains(hostsFile(t), "worse.example") || activity.Applied() != "v2" {
+		t.Fatalf("hosts:\n%s", hostsFile(t))
 	}
 }
 
 func TestNoControlsRemovesBlocking(t *testing.T) {
-	var fetches atomic.Int32
-	on := dashboard(t, `{"screen_time":false,"web_activity":false,"blocking":"v1"}`, &fetches)
-	defer on.Close()
-	cfg := paired(t, on.URL)
+	srv := relayWith(t, `{"screen_time":false,"web_activity":false,"blocking":"v1"}`)
+	cfg := paired(t, srv)
 	_ = CheckinOnce(cfg, "test")
-	off := dashboard(t, `null`, &fetches) // e.g. the device was reassigned to an adult
-	defer off.Close()
-	cfg.Server = off.URL
+	setControls(srv, `null`) // e.g. the device was reassigned to an adult
 	_ = CheckinOnce(cfg, "test")
 	if got := hostsFile(t); got != "127.0.0.1 localhost\n" {
 		t.Fatalf("hosts left:\n%q", got)
 	}
 }
 
-func TestForgetUndoesEverything(t *testing.T) {
-	var fetches atomic.Int32
-	srv := dashboard(t, `{"screen_time":true,"web_activity":true,"blocking":"v1"}`, &fetches)
-	defer srv.Close()
-	cfg := paired(t, srv.URL)
+func TestARemovedComputerForgetsEverything(t *testing.T) {
+	srv := relayWith(t, `{"screen_time":true,"web_activity":true,"blocking":"v1"}`)
+	cfg := paired(t, srv)
 	_ = CheckinOnce(cfg, "test")
-	Forget()
+	srv.RemoveUser("sm-d-1") // removed on the dashboard: its login is deleted
+	if err := CheckinOnce(cfg, "test"); err != api.ErrUnpaired {
+		t.Fatalf("got %v", err)
+	}
 	if strings.Contains(hostsFile(t), "bad.example") {
 		t.Error("blocking must go with the pairing")
 	}
@@ -112,10 +145,8 @@ func TestForgetUndoesEverything(t *testing.T) {
 }
 
 func TestCheckinIsLoggedForThePerson(t *testing.T) {
-	var fetches atomic.Int32
-	srv := dashboard(t, `{"screen_time":true,"web_activity":false,"blocking":""}`, &fetches)
-	defer srv.Close()
-	cfg := paired(t, srv.URL)
+	srv := relayWith(t, `{"screen_time":true,"web_activity":false,"blocking":""}`)
+	cfg := paired(t, srv)
 	logs.Setup(nil)
 	defer slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	if err := CheckinOnce(cfg, "test"); err != nil {
@@ -131,34 +162,23 @@ func TestCheckinIsLoggedForThePerson(t *testing.T) {
 			t.Errorf("log is missing %s:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, cfg.Token) {
-		t.Fatal("the pairing token must never be logged")
+	if strings.Contains(got, "devpw") || strings.Contains(got, cfg.Key) {
+		t.Fatal("the relay password and signing key must never be logged")
 	}
 }
 
 // An edited hosts file is reported once with the next check-in, then forgotten.
 func TestEditedBlocklistIsReportedOnce(t *testing.T) {
-	var reports []map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/device/v1/checkin":
-			var body map[string]any
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			reports = append(reports, body)
-			_, _ = w.Write([]byte(`{"checkin_seconds":300,"controls":{"blocking":"v1"}}`))
-		case "/device/v1/blocklist":
-			_, _ = w.Write([]byte("0.0.0.0 bad.example\n"))
-		}
-	}))
-	defer srv.Close()
-	cfg := paired(t, srv.URL)
+	srv := relayWith(t, `{"blocking":"v1"}`)
+	cfg := paired(t, srv)
 	tamper = nil
 	_ = CheckinOnce(cfg, "test") // first apply: not tampering
 	_ = os.WriteFile(os.Getenv("NEXGUARD_HOSTS"), []byte("127.0.0.1 localhost\n"), 0o644)
 	_ = CheckinOnce(cfg, "test") // notices and puts it back
 	_ = CheckinOnce(cfg, "test") // reports it
 	_ = CheckinOnce(cfg, "test") // and only once
-	got := []any{reports[0]["tamper"], reports[1]["tamper"], reports[2]["tamper"], reports[3]["tamper"]}
+	r := reports(t, srv)
+	got := []any{r[0]["tamper"], r[1]["tamper"], r[2]["tamper"], r[3]["tamper"]}
 	if got[0] != nil || got[1] != nil || got[3] != nil {
 		t.Fatalf("tamper sent at the wrong time: %v", got)
 	}
@@ -168,17 +188,10 @@ func TestEditedBlocklistIsReportedOnce(t *testing.T) {
 }
 
 func TestGoodbyeTellsTheDashboard(t *testing.T) {
-	var bye any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		bye = body["bye"]
-		_, _ = w.Write([]byte(`{"checkin_seconds":300}`))
-	}))
-	defer srv.Close()
-	paired(t, srv.URL)
+	srv := relayWith(t, `null`)
+	paired(t, srv)
 	Goodbye("test")
-	if bye != "uninstall" {
-		t.Fatalf("bye = %v", bye)
+	if r := reports(t, srv); len(r) != 1 || r[0]["bye"] != "uninstall" {
+		t.Fatalf("reports = %v", r)
 	}
 }

@@ -3,15 +3,18 @@
 The dashboard shows a link like https://monitor.example.com/d/K7PQ-3MXA. Opened on the
 computer, it shows the one command for that computer's system (Windows PowerShell, or
 Terminal on a Mac or Linux) with a Copy button. The command downloads a short script from
-this dashboard with the code already filled in. The script shows who will see what, pairs
-only if the person says yes, and installs a check-in that runs as that user every few
-minutes (no administrator rights, nothing to keep open).
+this dashboard with the code and the relay's pairing address already filled in. The
+script installs the NexGuard agent, which shows who will see what, pairs only if the
+person says yes, and from then on checks in through the Redis relay, never to this
+dashboard.
 
 These pages need no sign-in and never look the code up: a well-formed code is all they
-check, so they can't be used to test whether a code is valid. Pairing itself (POST
-/device/v1/pair) is where codes are checked, and it is rate-limited.
+check, so they can't be used to test whether a code is valid. Pairing itself (through the
+relay, apps/agent_api/bridge.py `handle_pairing`) is where codes are checked, and wrong
+codes are limited there.
 """
 
+import logging
 import re
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -23,9 +26,13 @@ from django.template.loader import render_to_string
 
 from . import pairing
 
+logger = logging.getLogger(__name__)
+
 CODE_RE = re.compile(f"^[{pairing.ALPHABET}]{{{pairing.CODE_LENGTH}}}$")
 # What may be pasted between single quotes in a shell or PowerShell script.
 SAFE_URL_RE = re.compile(r"^https?://[A-Za-z0-9.\-:\[\]/_~%]+$")
+# Likewise for the relay address (its password is URL-quoted, so no quotes or spaces).
+SAFE_RELAY_RE = re.compile(r"^rediss?://[A-Za-z0-9.\-:\[\]/_~%@?=]+$")
 
 # How each system's user opens the place to paste the command, in their words.
 SYSTEMS = {
@@ -108,12 +115,28 @@ def page(request, code):
     return _private(render(request, "devices/connect.html", ctx))
 
 
+def relay_pair_url() -> str:
+    """The relay address the agent pairs with, or "" (the script then says why it can't
+    connect). It holds the computers' shared pairing login, which can only send pairing
+    requests and read answers: the same as anyone unpacking the agent would find."""
+    from apps.agent_api import relay
+
+    try:
+        url = relay.computer_pair_url()
+    except relay.RelayError as exc:
+        logger.warning("Install script without a relay address: %s", exc)
+        return ""
+    return url if SAFE_RELAY_RE.match(url) else ""
+
+
 def install_script(request, code, kind):
     code = clean_code(code)
     template = {"sh": "devices/install/install.sh", "ps1": "devices/install/install.ps1"}[kind]
     body = render_to_string(
-        template, {"server": server_url(request), "code": code, "site_name": settings.SITE_NAME}
-    )
+        template,
+        {"server": server_url(request), "code": code, "site_name": settings.SITE_NAME,
+         "relay": relay_pair_url()},
+    )  # fmt: skip
     # Windows PowerShell 5.1 reads scripts as the system code page; CRLF and pure ASCII
     # (the templates are) keep it happy. Shells want LF.
     if kind == "ps1":

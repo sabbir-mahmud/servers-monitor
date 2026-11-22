@@ -140,7 +140,7 @@ See [architecture.md](architecture.md#alerts-and-notifications).
   30 days.
 - **Location** (a switch under Controls):
   - Wi-Fi accuracy from the Windows location service or GeoClue on Linux;
-  - otherwise the town, from the free DB-IP database looked up on the dashboard.
+  - none on a Mac, which doesn't share a position with background apps.
 - **Controls**, only for a child's or staff member's computer, or your own in a solo
   account:
   - **Screen time:** minutes per day by app.
@@ -212,10 +212,11 @@ See [devices.md](devices.md#add-a-phone-android-or-iphone) and
 | Machine | Talks to | How |
 |---|---|---|
 | Servers | Redis relay | Two lists per server (`sm:a:<id>:cmd` / `:in`), its own Redis user, signed messages |
-| Phones | Redis relay (Upstash REST) | Its own Redis user that can only push to `sm:d:<id>:in`, signed check-ins. Pairing is the only HTTP call |
-| Computers | Dashboard HTTP API | `/device/v1/pair`, `/device/v1/checkin` (gets settings back), `/device/v1/blocklist` |
+| Phones | Redis relay (Upstash REST) | Its own Redis user that can only push to `sm:d:<id>:in`, signed check-ins; pairs through the relay too |
+| Computers | Redis relay | Its own Redis user: pushes signed check-ins to `sm:d:<id>:in`, reads signed settings (`:cfg`) and blocklist (`:bl`); pairs through the relay |
 
-Servers and phones need no route to the dashboard: both sides dial out to Redis. See
+No machine needs a route to the dashboard: both sides dial out to Redis, and the dashboard
+has no device API. Computers only fetch the install script and agent from it. See
 [architecture.md](architecture.md#the-relay-protocol).
 
 ## API and integrations

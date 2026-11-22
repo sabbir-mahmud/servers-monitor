@@ -58,7 +58,7 @@ def server_key(server) -> bytes | None:
 
 
 def device_key(device, secret: str | None = None) -> bytes | None:
-    """A phone's key, in its own namespace so it can never equal a server's."""
+    """An older phone pairing's key, in its own namespace so it can never equal a server's."""
     if not device.relay_salt:
         return None
     return key_for(f"device:{device.pk}", device.relay_salt, secret)
@@ -69,8 +69,14 @@ def _hmac_ok(key: bytes, body: str, sig: str) -> bool:
     return hmac.compare_digest(sig, expected)
 
 
-def phone_key(device) -> bytes | None:
-    """The key a phone paired through the relay made itself (None for older pairings)."""
+def sign_text(key: bytes, body: str) -> str:
+    """Dashboard → device: the hex HMAC-SHA256 of the exact text sent."""
+    return hmac.new(key, body.encode(), hashlib.sha256).hexdigest()
+
+
+def device_relay_key(device) -> bytes | None:
+    """The key a device paired through the relay made itself (None for older phone
+    pairings, which sign with the salt-derived key)."""
     if not device.relay_key_enc:
         return None
     from apps.core import crypto
@@ -82,13 +88,13 @@ def phone_key(device) -> bytes | None:
 
 
 def verify_from_device(device, body: str, sig) -> bool:
-    """Phone → dashboard. The phone signs the exact JSON text it sends (`body`), so nothing
-    depends on two languages serialising JSON the same way. Phones paired through the relay
-    sign with their own key; older pairings with the salt-derived one."""
+    """Device → dashboard. The device signs the exact JSON text it sends (`body`), so
+    nothing depends on two languages serialising JSON the same way. Devices paired through
+    the relay sign with their own key; older phone pairings with the salt-derived one."""
     if not isinstance(sig, str):
         return False
     if device.relay_key_enc:
-        key = phone_key(device)
+        key = device_relay_key(device)
         return key is not None and _hmac_ok(key, body, sig)
     if not device.relay_salt:
         return False

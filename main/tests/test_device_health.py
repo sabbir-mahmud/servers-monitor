@@ -10,8 +10,9 @@ from apps.devices import services
 from apps.devices.models import Device, DeviceSample
 
 from . import test_devices
+from .computers import ask, pair_computer
 from .phones import pair_phone
-from .test_devices import add_device, api_checkin, api_pair
+from .test_devices import add_device
 
 pytestmark = pytest.mark.django_db
 
@@ -30,13 +31,13 @@ HEALTH = {
 def laptop(client, parent, sara):
     client.force_login(parent)
     device, code = add_device(client, sara, platform="macos", name="Sara's Mac")
-    token = api_pair(client, code, platform="macos").json()["token"]
-    return device, token
+    pc = pair_computer(device, code)
+    return device, pc
 
 
 def test_a_computer_reports_its_health_and_it_is_kept_as_history(client, laptop):
-    device, token = laptop
-    assert api_checkin(client, token, HEALTH).status_code == 200
+    device, pc = laptop
+    pc.send(HEALTH)
     device.refresh_from_db()
     assert device.cpu_percent == 37.2 and device.gpu_percent == 18
     assert device.memory_used_percent == 75
@@ -46,10 +47,10 @@ def test_a_computer_reports_its_health_and_it_is_kept_as_history(client, laptop)
 
 
 def test_nonsense_health_is_dropped_and_a_missing_reading_clears_the_old_one(client, laptop):
-    device, token = laptop
-    api_checkin(client, token, HEALTH)
-    api_checkin(client, token, {"cpu": {"percent": 140}, "gpu": {"percent": True},
-                                "memory": {"total": 8, "used": 9}})  # fmt: skip
+    device, pc = laptop
+    pc.send(HEALTH)
+    pc.send({"cpu": {"percent": 140}, "gpu": {"percent": True},
+             "memory": {"total": 8, "used": 9}})  # fmt: skip
     device.refresh_from_db()
     # Yesterday's "CPU 37%" must not be shown as if it were now.
     assert device.cpu_percent is None and device.gpu_percent is None
@@ -77,8 +78,8 @@ def test_chart_series_averages_buckets_and_skips_gaps(laptop):
 
 
 def test_device_page_shows_health_now_and_switches_range(client, laptop):
-    device, token = laptop
-    api_checkin(client, token, HEALTH)
+    device, pc = laptop
+    pc.send(HEALTH)
     url = reverse("devices:detail", args=[device.pk])
     page = client.get(url).content.decode()
     assert 'id="charts"' in page and "<dt>Memory</dt><dd>16.0\xa0GB</dd>" in page
@@ -97,11 +98,11 @@ def test_device_page_shows_health_now_and_switches_range(client, laptop):
 def test_consent_names_the_health_data_for_computers(client, parent, sara):
     client.force_login(parent)
     _, code = add_device(client, sara, platform="windows", name="Family PC")
-    disclosure = api_pair(client, code, platform="windows", preview=True).json()["disclosure"]
+    disclosure = ask(code, {"platform": "windows"}, preview=True)["disclosure"]
     assert "CPU, memory, GPU, battery and storage use" in disclosure
     assert "network (Wi-Fi name)" in disclosure
     _, code = add_device(client, sara, platform="macos", name="Sara's Mac")
-    disclosure = api_pair(client, code, platform="macos", preview=True).json()["disclosure"]
+    disclosure = ask(code, {"platform": "macos"}, preview=True)["disclosure"]
     assert "network (Wi-Fi name)" in disclosure and "location" not in disclosure
 
 

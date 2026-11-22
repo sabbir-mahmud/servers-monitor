@@ -99,7 +99,7 @@ connects to self-hosted servers whose address the person types in.
 | `src/checkin.ts` | One check-in (shared by the timer and the background task). A 401 forgets the pairing |
 | `src/relay.ts` | Signs a check-in and `RPUSH`es it to Upstash over REST |
 | `src/report.ts` | Battery, storage, network, location, each best effort |
-| `src/api.ts` | `/device/v1/pair` (preview and real), the only dashboard call |
+| `src/api.ts` | Shared types and the error the screens show (the app never calls the dashboard) |
 | `src/pairLink.ts` | Parses `nexguard://pair?server=…&code=…` and checks codes and addresses |
 | `src/session.ts` | The pairing in `expo-secure-store` |
 

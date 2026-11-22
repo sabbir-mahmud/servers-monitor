@@ -103,7 +103,7 @@
             <span class="acct-row-title">Location</span>
             <span class="acct-row-sub">{% if device.platform == "macos" %}The town its internet connection is in, every few minutes. A Mac doesn't share a precise position with background apps.{% else %}Every few minutes, from Wi-Fi when the computer's location service is on; otherwise the town its internet connection is in.{% endif %}</span>
             {% if c.location %}{% if device.location_at %}<span class="ctl-status">{% icon "map-pin" 13 %} Updated {{ device.location_at|ago }} · {% if live.location_source == "ip" %}town only{% else %}from Wi-Fi{% endif %}</span>
-            {% elif not live.public_ip %}<span class="ctl-status is-warn">{% icon "alert" 13 %} No position yet: it reaches the dashboard over a local network, so there's no public address to place it by.</span>
+            {% elif not live.public_ip %}<span class="ctl-status is-warn">{% icon "alert" 13 %} No position yet: it checks in through the relay, so the dashboard can't place it by its internet address{% if device.platform == "macos" %}, and a Mac doesn't share its own{% else %}; turn on the computer's location service{% endif %}.</span>
             {% else %}<span class="ctl-status">{% icon "clock" 13 %} Waiting for the first position</span>{% endif %}{% endif %}
           </span>
           <span class="form-check form-switch ctl-switch">{{ form.location }}</span>

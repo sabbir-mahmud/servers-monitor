@@ -9,8 +9,14 @@ and exchange JSON messages through two lists per server:
 Every agent authenticates as its own ACL user (`sm-<server id>`) allowed only RPUSH, BLPOP,
 LTRIM and PING on its own two keys. The dashboard uses the admin connection in REDIS_URL,
 which never leaves this machine. Revoking a server is deleting (or disabling) its ACL user.
+
+Devices (computers and phones) use the relay too, so the dashboard has no device API:
+see "devices" below.
 """
 
+import base64
+import gzip
+import hashlib
 import json
 import logging
 import secrets
@@ -207,9 +213,9 @@ def unqueue_command(command) -> bool:
 def receive(
     server_ids, timeout: int, device_ids=(), pairing: bool = False
 ) -> tuple[str, str, dict] | None:
-    """Block until any agent or phone sends something. Returns ("server", "device" or
-    "pairing", its id ("" for pairing), message) or None. `pairing`: also listen for phones
-    asking to pair (while any phone has a code out)."""
+    """Block until any agent or device sends something. Returns ("server", "device" or
+    "pairing", its id ("" for pairing), message) or None. `pairing`: also listen for devices
+    asking to pair (while any device has a code out)."""
     mapping = {key: ("server", pk) for key, pk in inbox_keys(server_ids).items()}
     mapping |= {device_inbox_key(pk): ("device", str(pk)) for pk in device_ids}
     if pairing:
@@ -234,15 +240,22 @@ def receive(
     return (*mapping[key], message)
 
 
-# --------------------------------------------------------------------------- phones
+# --------------------------------------------------------------------------- devices
 #
-# Phones check in through the relay too, so they report from anywhere while the dashboard
-# stays private. A phone app can't open a Redis connection, so it uses Upstash's HTTPS REST
-# API: its own ACL user (`sm-d-<device id>`), allowed only RPUSH and PING on its own inbox,
-# with a REST token from `ACL RESTTOKEN` (an Upstash extension). Plain Redis has no REST
-# API, so phones need Upstash.
+# Computers and phones check in through the relay, so they report from anywhere while the
+# dashboard stays private. Each paired device has its own ACL user (`sm-d-<device id>`):
+#
+#     <prefix>:d:<device id>:in    device -> dashboard   ci (check-in), sos
+#     <prefix>:d:<device id>:cfg   dashboard -> device   settings (computers; SET, the device GETs)
+#     <prefix>:d:<device id>:bl    dashboard -> device   blocklist (computers; SET, gzip)
+#
+# Computers connect with the Redis protocol, like server agents, so any Redis 6+ works. A
+# phone app can't open a Redis connection, so it uses Upstash's HTTPS REST API with a REST
+# token from `ACL RESTTOKEN` (an Upstash extension); phones need Upstash. Everything either
+# side writes is signed with the key the device made when it paired, which Redis never sees.
 
-DEVICE_COMMANDS = ("+rpush", "+ping")
+PHONE_COMMANDS = ("+rpush", "+ping")
+COMPUTER_COMMANDS = ("+rpush", "+get", "+ping")
 
 
 def device_username(device) -> str:
@@ -251,6 +264,14 @@ def device_username(device) -> str:
 
 def device_inbox_key(device_id) -> str:
     return f"{settings.RELAY_KEY_PREFIX}:d:{device_id}:in"
+
+
+def device_config_key(device_id) -> str:
+    return f"{settings.RELAY_KEY_PREFIX}:d:{device_id}:cfg"
+
+
+def device_blocklist_key(device_id) -> str:
+    return f"{settings.RELAY_KEY_PREFIX}:d:{device_id}:bl"
 
 
 def rest_url() -> str:
@@ -263,9 +284,10 @@ def rest_url() -> str:
 
 
 def provision_device(device) -> dict:
-    """Create (or reset) the phone's ACL user with a fresh password, REST token and signing
-    key. Returns what the phone needs; the dashboard stores only `device.relay_salt` (the
-    caller saves it). Resetting cuts off a phone that had the old token."""
+    """Create (or reset) the phone's ACL user with a fresh password and REST token. Returns
+    what the phone needs: {"url", "token", "inbox"}. Sets `device.relay_salt` (the caller
+    saves it), which marks the device as one the bridge listens to. Resetting cuts off a
+    phone that had the old token."""
     url = rest_url()
     if not url:
         raise RelayError(
@@ -278,40 +300,98 @@ def provision_device(device) -> dict:
         password = client().execute_command("ACL", "GENTOKEN", user)
         client().execute_command(
             "ACL", "SETUSER", user, "reset", "on", f">{password}", "resetchannels",
-            f"~{inbox}", "-@all", *DEVICE_COMMANDS,
+            f"~{inbox}", "-@all", *PHONE_COMMANDS,
         )  # fmt: skip
         token = client().execute_command("ACL", "RESTTOKEN", user, password)
     except redis.RedisError as exc:
         raise RelayError(f"could not create the phone's Redis user: {exc}") from exc
-    return {"url": url, "token": token, "inbox": inbox, "key": signing.device_key(device).hex()}
+    return {"url": url, "token": token, "inbox": inbox}
+
+
+def provision_computer(device) -> dict:
+    """Create (or reset) the computer's ACL user: RPUSH to its inbox, GET its settings and
+    blocklist. Returns {"url", "inbox", "config", "blocklist"}; the URL holds the password,
+    which the dashboard doesn't keep. Sets `device.relay_salt` (the caller saves it)."""
+    device.relay_salt = signing.new_salt()
+    user = device_username(device)
+    keys_ = (device_inbox_key(device.pk), device_config_key(device.pk),
+             device_blocklist_key(device.pk))  # fmt: skip
+    try:
+        password = _new_password(user)
+        client().execute_command(
+            "ACL", "SETUSER", user, "reset", "on", f">{password}", "resetchannels",
+            *(f"~{k}" for k in keys_), "-@all", *COMPUTER_COMMANDS,
+        )  # fmt: skip
+    except redis.RedisError as exc:
+        raise RelayError(f"could not create the computer's Redis user: {exc}") from exc
+    return {"url": agent_url(user, password), "inbox": keys_[0], "config": keys_[1],
+            "blocklist": keys_[2]}  # fmt: skip
 
 
 def deprovision_device(device) -> None:
     try:
         client().execute_command("ACL", "DELUSER", device_username(device))
-        client().delete(device_inbox_key(device.pk))
+        client().delete(
+            device_inbox_key(device.pk), device_config_key(device.pk),
+            device_blocklist_key(device.pk),
+        )  # fmt: skip
     except (redis.RedisError, RelayError) as exc:
         logger.warning("Could not remove the relay user for %s: %s", device.name, exc)
 
 
-# --------------------------------------------------------------------------- phone pairing
+def _sealed_for(device, body: str) -> str:
+    key = signing.device_relay_key(device)
+    if key is None:
+        raise RelayError(f"{device.name} has no signing key: pair it again")
+    return json.dumps({"body": body, "sig": signing.sign_text(key, body)},
+                      separators=(",", ":"))  # fmt: skip
+
+
+def config_digest(body: str) -> str:
+    """What a computer echoes back as `config` in its check-ins: the settings it has."""
+    return hashlib.sha256(body.encode()).hexdigest()[:16]
+
+
+def publish_config(device, body: str) -> None:
+    """Leave the computer's settings (JSON text) where it GETs them at each check-in."""
+    try:
+        client().set(device_config_key(device.pk), _sealed_for(device, body))
+    except redis.RedisError as exc:
+        raise RelayError(f"could not update {device.name}'s settings: {exc}") from exc
+
+
+def publish_blocklist(device, version: str, lines: list[str]) -> None:
+    """The hosts lines for the computer, gzipped (a few MB of names shrink well)."""
+    packed = gzip.compress("\n".join(lines).encode(), mtime=0)
+    body = json.dumps({"version": version, "gz": base64.b64encode(packed).decode()},
+                      separators=(",", ":"))  # fmt: skip
+    try:
+        client().set(device_blocklist_key(device.pk), _sealed_for(device, body))
+    except redis.RedisError as exc:
+        raise RelayError(f"could not update {device.name}'s blocklist: {exc}") from exc
+
+
+# --------------------------------------------------------------------------- pairing
 #
-# Phones pair through the relay too: the app never talks to the dashboard. The app is
-# built with one shared, tightly limited login (`sm-app`, in its .env; make it with
-# `manage.py phone_app_login`). It may only RPUSH pairing requests to one inbox and GET
-# answers, each under a random key the phone picked:
+# Devices pair through the relay too: neither the phone app nor the computer agent talks
+# to the dashboard. Each pairs with a shared, tightly limited login that may only RPUSH
+# pairing requests to one inbox and GET answers, each under a random key it picked:
 #
-#     <prefix>:pair:in             phone -> dashboard   {"t": "pair", "body": "…"}
-#     <prefix>:pair:out:<nonce>    dashboard -> phone   {"state": "paired" | "error", …}
+#     <prefix>:pair:in             device -> dashboard   {"t": "pair", "body": "…"}
+#     <prefix>:pair:out:<nonce>    dashboard -> device   {"state": "paired" | "preview" | "error", …}
 #
-# The request carries the 6-digit code the person typed; the answer carries the phone's
-# own check-in login (`sm-d-<id>`, above). Answers expire after a few minutes. The login
-# can't read the inbox, list keys or write answers, so holding it (anyone can unpack an
-# app) only lets someone guess codes, which the bridge limits and codes expire.
+# Phones use `sm-app` (in the app's .env; make it with `manage.py phone_app_login`).
+# Computers use `sm-pc`, which the dashboard makes on demand and puts in the install
+# script it serves. The request carries the code; the answer carries the device's own
+# login (above). Answers expire after a few minutes. Neither login can read the inbox,
+# list keys or write answers, so holding one only lets someone guess codes, which the
+# bridge limits.
 
 APP_USERNAME = "sm-app"
-APP_COMMANDS = ("+rpush", "+get", "+ping")
-ANSWER_SECONDS = 10 * 60  # long enough for the phone to read it, then gone
+COMPUTER_PAIR_USERNAME = "sm-pc"
+PAIR_COMMANDS = ("+rpush", "+get", "+ping")
+ANSWER_SECONDS = 10 * 60  # long enough for the device to read it, then gone
+_COMPUTER_PAIR_STATE = "relay.computer_pair_login"
 
 
 def pair_inbox_key() -> str:
@@ -320,6 +400,13 @@ def pair_inbox_key() -> str:
 
 def pair_answer_key(nonce: str) -> str:
     return f"{settings.RELAY_KEY_PREFIX}:pair:out:{nonce}"
+
+
+def _set_pair_user(user: str, password: str) -> None:
+    client().execute_command(
+        "ACL", "SETUSER", user, "reset", "on", f">{password}", "resetchannels",
+        f"~{pair_inbox_key()}", f"~{pair_answer_key('*')}", "-@all", *PAIR_COMMANDS,
+    )  # fmt: skip
 
 
 def provision_app_login() -> dict:
@@ -334,20 +421,52 @@ def provision_app_login() -> dict:
         )
     try:
         password = client().execute_command("ACL", "GENTOKEN", APP_USERNAME)
-        client().execute_command(
-            "ACL", "SETUSER", APP_USERNAME, "reset", "on", f">{password}", "resetchannels",
-            f"~{pair_inbox_key()}", f"~{pair_answer_key('*')}", "-@all", *APP_COMMANDS,
-        )  # fmt: skip
+        _set_pair_user(APP_USERNAME, password)
         token = client().execute_command("ACL", "RESTTOKEN", APP_USERNAME, password)
     except redis.RedisError as exc:
         raise RelayError(f"could not create the phone app's login: {exc}") from exc
     return {"url": url, "token": token, "prefix": settings.RELAY_KEY_PREFIX}
 
 
+def computer_pair_url(reset: bool = False) -> str:
+    """The relay address computers pair with (`rediss://sm-pc:…@host:port/?prefix=sm`), for
+    the install scripts. Made the first time it's needed and kept (encrypted) so every
+    script hands out the same one; `reset` replaces it, which stops scripts already
+    downloaded from pairing. Raises RelayError."""
+    from django.core.cache import cache
+
+    from apps.core import crypto
+    from apps.core.models import SystemState
+
+    # Kept in this process's memory too: install scripts are public, so serving one
+    # should cost no database work at all.
+    cache_key = f"{_COMPUTER_PAIR_STATE}:{settings.REDIS_URL}:{settings.RELAY_KEY_PREFIX}"
+    if not reset and (url := cache.get(cache_key)):
+        return url
+    password = ""
+    stored = SystemState.get(_COMPUTER_PAIR_STATE) or {}
+    if stored.get("password") and not reset:
+        try:
+            password = crypto.decrypt(stored["password"])
+        except Exception:  # SECRET_KEY rotated without a fallback: make a new one
+            password = ""
+    if not password:
+        try:
+            password = _new_password(COMPUTER_PAIR_USERNAME)
+            _set_pair_user(COMPUTER_PAIR_USERNAME, password)
+        except redis.RedisError as exc:
+            raise RelayError(f"could not create the computers' pairing login: {exc}") from exc
+        SystemState.put(_COMPUTER_PAIR_STATE, {"password": crypto.encrypt(password)})
+    url = agent_url(COMPUTER_PAIR_USERNAME, password)
+    url = f"{url}/?prefix={urllib.parse.quote(settings.RELAY_KEY_PREFIX, safe='')}"
+    cache.set(cache_key, url, 3600)
+    return url
+
+
 def answer_pairing(nonce: str, answer: dict) -> None:
-    """Leave the answer where the phone polls for it. Raises RelayError."""
+    """Leave the answer where the device polls for it. Raises RelayError."""
     data = json.dumps(answer, separators=(",", ":"))
     try:
         client().set(pair_answer_key(nonce), data, ex=ANSWER_SECONDS)
     except redis.RedisError as exc:
-        raise RelayError(f"could not answer the phone: {exc}") from exc
+        raise RelayError(f"could not answer the device: {exc}") from exc
